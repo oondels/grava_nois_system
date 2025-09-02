@@ -1,3 +1,15 @@
 .venv/
 venv/
-__pycache__
+__pycache__/
+.env*
+venv/
+.vscode
+*.json
+*.lock
+*.mp4
+*.jpg
+*.ts
+__pycache__/
+dist/
+*.tsbuildinfo
+*.error.txt% 
