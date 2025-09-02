@@ -62,63 +62,90 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     )
 
     # Camera Dedicada
+    # ffmpeg_cmd = [
+    #     "ffmpeg",
+    #     "-nostdin",
+    #     "-rtsp_transport",
+    #     "tcp",
+    #     "-rw_timeout",
+    #     "5000000",  # 5s em microssegundos
+    #     "-stimeout",
+    #     "5000000",  # 5s em microssegundos (RTSP)
+    #     "-use_wallclock_as_timestamps",
+    #     "1",
+    #     "-i",
+    #     rtsp_url,  # URL RTSP da câmera IP
+    #     "-map",
+    #     "0:v:0",
+    #     "-c:v",
+    #     "copy",
+    #     "-an",
+    #     "-f",
+    #     "segment",
+    #     "-segment_format",
+    #     "mpegts",
+    #     "-segment_time",
+    #     str(cfg.seg_time),  # 1s
+    #     "-segment_start_number",
+    #     str(start_num),
+    #     "-reset_timestamps",
+    #     "0",
+    #     out_pattern,
+    # ]
+
+    # Old -> Camera do notebook
     ffmpeg_cmd = [
         "ffmpeg",
         "-nostdin",
-        "-rtsp_transport",
-        "tcp",
-        "-rw_timeout",
-        "5000000",  # 5s em microssegundos
-        "-stimeout",
-        "5000000",  # 5s em microssegundos (RTSP)
+        # ENTRADA V4L2
+        "-f",
+        "v4l2",
+        "-thread_queue_size",
+        "512",
+        "-input_format",
+        "mjpeg",  # se a webcam suportar MJPEG, ajuda a CPU
+        "-framerate",
+        "30",  # pede 30 fps na captura
+        "-video_size",
+        "1280x720",  # 720p
+        "-use_wallclock_as_timestamps",
+        "1",
         "-i",
-        rtsp_url,  # URL RTSP da câmera IP
-        # copie vídeo e (opcional) áudio. Para remover áudio, substitua por "-an"
-        "-map",
-        "0:v:0",
-        "0:a?",
-        "-c",
-        "copy",
+        cfg.device,
+        # SEM ÁUDIO (reduz CPU; add mapeamento se quiser microfone)
         "-an",
+        # ENCODE H.264 (CPU) focado em baixa latência e fluidez
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",  # ou "ultrafast" se precisar aliviar mais
+        "-tune",
+        "zerolatency",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        "30",  # garante 30 fps na saída
+        "-g",
+        "30",  # GOP de 30 (1 IDR por segundo)
+        "-keyint_min",
+        "30",
+        "-sc_threshold",
+        "0",  # evita IDR extra por detecção de cena
+        "-force_key_frames",
+        f"expr:gte(t,n_forced*{cfg.seg_time})",
+        # SAÍDA: SEGMENTOS DE 1s EM TS (mais estável para concat do que MP4)
         "-f",
         "segment",
         "-segment_format",
         "mpegts",
         "-segment_time",
-        str(cfg.seg_time),  # 1s
+        str(cfg.seg_time),
         "-segment_start_number",
         str(start_num),
         "-reset_timestamps",
-        "1",
-        out_pattern,
+        "0",  # mantém PTS contínuo entre arquivos
+        str(cfg.buffer_dir / "buffer%06d.ts"),
     ]
-
-    # Old -> Camera do notebook
-    # ffmpeg_cmd = [
-    #     "ffmpeg",
-    #     "-nostdin",
-    #     "-f",
-    #     "v4l2",
-    #     "-i",
-    #     cfg.device,
-    #     "-c:v",
-    #     "libx264",
-    #     "-preset",
-    #     "ultrafast",
-    #     "-tune",
-    #     "zerolatency",
-    #     "-force_key_frames",
-    #     f"expr:gte(t,n_forced*{cfg.seg_time})",
-    #     "-f",
-    #     "segment",
-    #     "-segment_time",
-    #     str(cfg.seg_time),
-    #     "-segment_start_number",
-    #     str(start_num),
-    #     "-reset_timestamps",
-    #     "1",
-    #     out_pattern,
-    # ]
 
     return subprocess.Popen(
         ffmpeg_cmd,
@@ -185,6 +212,8 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo
     # total pela duração do segmento e arredondamos para garantir cobertura completa.
     need = max(1, int(round((cfg.pre_seconds + cfg.post_seconds) / cfg.seg_time)))
+
+    # Ultimos videos em buffer
     selected_videos = segbuf.snapshot_last(need)
     if not selected_videos:
         print("Nenhum segmento disponível — encerrando.")
@@ -282,7 +311,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 out_mp4.replace(fail_build_dir / out_mp4.name)
         except Exception:
             pass
-        
+
         err_txt = fail_build_dir / f"{timestamp}.error.txt"
         err_txt.write_text(f"build_highlight failed: {e}\n", encoding="utf-8")
         return None
