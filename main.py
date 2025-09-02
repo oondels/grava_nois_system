@@ -39,8 +39,8 @@ class ProcessingWorker:
         *,
         light_mode: bool = True,  # Ativa o Light Mode (MVP)
         retry_failed: bool = True,
-        retry_min_age_sec: float = 120.0,     # idade mínima do arquivo/sidecar p/ tentar de novo
-        retry_backoff_base_sec: float = 30.0
+        retry_min_age_sec: float = 120.0,  # idade mínima do arquivo/sidecar p/ tentar de novo
+        retry_backoff_base_sec: float = 30.0,
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
@@ -63,10 +63,10 @@ class ProcessingWorker:
         if not self.light_mode:
             self.out_wm_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
-        
+
     def _scan_retry_failed(self):
         # diretórios candidatos a retry ( só com upload_failed)
-        retry_dirs = [ self.failed_dir / "upload_failed" ]
+        retry_dirs = [self.failed_dir_highlight / "upload_failed"]
         # futuramente incluir outros diretorios:
         # retry_dirs += [ self.failed_dir / "enqueue_failed", self.failed_dir / "build_failed" ]
 
@@ -86,7 +86,9 @@ class ProcessingWorker:
 
                 # lock atômico para evitar corrida entre workers
                 try:
-                    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                    fd = os.open(
+                        str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+                    )
                     os.close(fd)
                 except FileExistsError:
                     continue
@@ -103,14 +105,21 @@ class ProcessingWorker:
                             "meta": ffprobe_metadata(vid),
                             "status": "upload_pending",
                             "attempts": 0,
-                            "local_fallback": {"status": "upload_pending", "reason": "unknown"},
+                            "local_fallback": {
+                                "status": "upload_pending",
+                                "reason": "unknown",
+                            },
                         }
-                        meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+                        meta_path.write_text(
+                            json.dumps(payload, ensure_ascii=False, indent=2)
+                        )
 
                     # carrega e decide retry
                     meta = json.loads(meta_path.read_text())
                     attempts = int(meta.get("attempts", 0))
-                    status = meta.get("status") or (meta.get("local_fallback") or {}).get("status", "")
+                    status = meta.get("status") or (
+                        meta.get("local_fallback") or {}
+                    ).get("status", "")
 
                     # 1) respeita limite de tentativas
                     if attempts >= self.max_attempts:
@@ -121,7 +130,9 @@ class ProcessingWorker:
                     if not api_base:
                         # loga esporadicamente para não poluir stdout
                         if now - self._last_noapi_log > 15:
-                            print("[worker:retry] GN_API_BASE ausente — ignorando retries por enquanto.")
+                            print(
+                                "[worker:retry] GN_API_BASE ausente — ignorando retries por enquanto."
+                            )
                             self._last_noapi_log = now
                         continue
 
@@ -134,7 +145,12 @@ class ProcessingWorker:
                         continue
 
                     # 4) só reprocessa estados elegíveis
-                    if status not in {"upload_pending", "queued_retry", "watermarked", "ready_for_upload"}:
+                    if status not in {
+                        "upload_pending",
+                        "queued_retry",
+                        "watermarked",
+                        "ready_for_upload",
+                    }:
                         # estado final ou não relacionado a upload pendente
                         continue
 
@@ -144,7 +160,9 @@ class ProcessingWorker:
                     meta["updated_at"] = datetime.now(timezone.utc).isoformat()
                     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
-                    print(f"[worker:retry] reprocessando {vid.name} (tentativa {meta['attempts']}/{self.max_attempts})")
+                    print(
+                        f"[worker:retry] reprocessando {vid.name} (tentativa {meta['attempts']}/{self.max_attempts})"
+                    )
                     self._process_one(vid, meta_path)
 
                 except Exception as e:
@@ -348,6 +366,7 @@ class ProcessingWorker:
         api_token = os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
         client_id = os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID")
         venue_id = os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID")
+
         if api_base:
             try:  # Tenta fazer o registro com o servidor
                 size_upload = upload_target.stat().st_size
@@ -641,6 +660,48 @@ class ProcessingWorker:
             time.sleep(1.0 * meta["attempts"])  # backoff linear simples
 
 
+def clear_buffer(cfg) -> None:
+    """
+    Remove quaisquer segmentos remanescentes de execuções anteriores no diretório
+    de buffer (ex.: buffer%06d.ts/.mp4) e limpa também a pasta de staging usada na
+    concatenação de segmentos. Isso garante que um highlight novo não concatene
+    pedaços antigos.
+
+    A função é idempotente e tolerante a erros.
+    """
+    try:
+        cfg.buffer_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print(f"[startup] não foi possível garantir a pasta de buffer: {e}")
+
+    removed = 0
+    # Apaga apenas arquivos que seguem o padrão de segmentos
+    for pattern in ("buffer*.ts", "buffer*.mp4"):
+        for p in cfg.buffer_dir.glob(pattern):
+            try:
+                p.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                print(f"[startup] erro ao apagar {p}: {e}")
+
+    # Limpa a pasta de staging usada pelo build_highlight (se sobrou algo)
+    try:
+        stage_dir = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
+        if stage_dir.exists():
+            for p in stage_dir.glob("*"):
+                try:
+                    if p.is_file():
+                        p.unlink()
+                except Exception as e:
+                    print(f"[startup] erro ao limpar staging {p}: {e}")
+    except Exception as e:
+        print(f"[startup] erro ao acessar staging: {e}")
+
+    print(f"[startup] buffer limpo: {removed} segmentos removidos")
+
+
 def main() -> int:
     base = Path(__file__).resolve().parent
 
@@ -676,7 +737,11 @@ def main() -> int:
         post_seconds=10,
         scan_interval=0.5,
         max_buffer_seconds=60,
+        failed_dir_highlight=base / "failed_clips",
     )
+
+    # Limpa o buffer
+    clear_buffer(cfg)
 
     # Verifica a existencia de todos os arquivos necessários
     cfg.ensure_dirs()
