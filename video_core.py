@@ -1,4 +1,3 @@
-from __future__ import annotations
 import os, re, json, time, hashlib, subprocess, threading, platform, shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +20,7 @@ class CaptureConfig:
     buffer_dir: Path
     clips_dir: Path  # onde o highlight nasce
     queue_dir: Path  # fila para tratamento posterior (raw)
+    failed_dir_highlight: Path
     device: str = "/dev/video0"
     seg_time: int = 1
     pre_seconds: int = 25
@@ -36,11 +36,12 @@ class CaptureConfig:
         self.buffer_dir.mkdir(parents=True, exist_ok=True)
         self.clips_dir.mkdir(parents=True, exist_ok=True)
         self.queue_dir.mkdir(parents=True, exist_ok=True)
+        self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
 
 # ---- FFmpeg recorder --------------------------------------------------------
 def _calc_start_number(buffer_dir: Path) -> int:
-    pattern = re.compile(r"buffer(\d{3,})\.mp4$")
+    pattern = re.compile(r"buffer(\d{3,})\.ts$")
     nums: List[int] = []
     for f in os.listdir(buffer_dir):
         m = pattern.match(f)
@@ -54,7 +55,44 @@ def _calc_start_number(buffer_dir: Path) -> int:
 
 def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     start_num = _calc_start_number(cfg.buffer_dir)
-    out_pattern = str(cfg.buffer_dir / "buffer%06d.mp4")
+    out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
+    rtsp_url = (
+        os.getenv("GN_RTSP_URL")
+        or "rtsp://admin:wa0i4Ochu@192.168.68.104:554/cam/realmonitor?channel=1&subtype=0"
+    )
+
+    # Camera Dedicada
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-nostdin",
+        "-rtsp_transport",
+        "tcp",
+        "-rw_timeout",
+        "5000000",  # 5s em microssegundos
+        "-stimeout",
+        "5000000",  # 5s em microssegundos (RTSP)
+        "-i",
+        rtsp_url,  # URL RTSP da câmera IP
+        # copie vídeo e (opcional) áudio. Para remover áudio, substitua por "-an"
+        "-map",
+        "0:v:0",
+        "0:a?",
+        "-c",
+        "copy",
+        "-an",
+        "-f",
+        "segment",
+        "-segment_format",
+        "mpegts",
+        "-segment_time",
+        str(cfg.seg_time),  # 1s
+        "-segment_start_number",
+        str(start_num),
+        "-reset_timestamps",
+        "1",
+        out_pattern,
+    ]
+
     # Old -> Camera do notebook
     # ffmpeg_cmd = [
     #     "ffmpeg",
@@ -81,33 +119,6 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     #     "1",
     #     out_pattern,
     # ]
-
-    # Camera Dedicada
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-rtsp_transport",
-        "tcp",
-        "-i",
-        "rtsp://admin:wa0i4Ochu@192.168.68.104:554/cam/realmonitor?channel=1&subtype=0",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-tune",
-        "zerolatency",
-        "-force_key_frames",
-        "expr:gte(t,n_forced*1)",
-        "-an",
-        "-f",
-        "segment",
-        "-segment_time",
-        str(cfg.seg_time),
-        "-segment_start_number",
-        str(start_num),
-        "-reset_timestamps",
-        "1",
-        out_pattern,
-    ]
 
     return subprocess.Popen(
         ffmpeg_cmd,
@@ -142,8 +153,9 @@ class SegmentBuffer:
     def _index_loop(self) -> None:
         while not self._stop.is_set():
             files = sorted(
-                self.cfg.buffer_dir.glob("buffer*.mp4"), key=lambda p: p.stat().st_mtime
+                self.cfg.buffer_dir.glob("buffer*.ts"), key=lambda p: p.stat().st_mtime
             )
+
             # limpa excedentes no disco
             extra = files[: -self.cfg.max_segments]
             for p in extra:
@@ -160,8 +172,13 @@ class SegmentBuffer:
 
 # ---- Constroi clip após usuarios clicar no botao ------------------------------------------------------
 def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
-    click_ts = time.time()
     print("Botão apertado! Aguardando pós-buffer…")
+
+    # Psata para arquivos com erro de build
+    fail_build_dir = cfg.failed_dir_highlight / "build_failed"
+    fail_build_dir.mkdir(parents=True, exist_ok=True)
+
+    click_ts = time.time()
     time.sleep(max(0, cfg.post_seconds) + 0.70)
 
     # Calcula quantos segmentos de vídeo são necessários para cobrir o tempo total do highlight
@@ -207,11 +224,14 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         for p in moved_paths:
             f.write(f"file '{str(p)}'\n")
 
-    out = (
-        cfg.clips_dir
-        / f"highlight_{datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime('%Y%m%d-%H%M%SZ')}.mp4"
+    timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
+        "%Y%m%d-%H%M%SZ"
     )
+    tmp_ts = cfg.clips_dir / f"highlight_{timestamp}.ts"
+    out_mp4 = cfg.clips_dir / f"highlight_{timestamp}.mp4"
+
     try:
+        # concat TS -> TS
         subprocess.run(
             [
                 "ffmpeg",
@@ -224,12 +244,49 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 str(list_txt),
                 "-c",
                 "copy",
-                str(out),
+                str(tmp_ts),
             ],
             check=True,
         )
-        print(f"Saved {out}")
-        return out
+
+        # remux TS -> MP4 (copy)
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-i",
+                str(tmp_ts),
+                "-c",
+                "copy",
+                "-bsf:a",
+                "aac_adtstoasc",
+                "-movflags",
+                "+faststart",
+                str(out_mp4),
+            ],
+            check=True,
+        )
+
+        print(f"Saved {out_mp4}")
+        return out_mp4
+
+    except Exception as e:
+        # Move quaisquer saídas parciais para a pasta de falha
+        try:
+            if tmp_ts.exists():
+                tmp_ts.replace(fail_build_dir / tmp_ts.name)
+        except Exception:
+            pass
+        try:
+            if out_mp4.exists():
+                out_mp4.replace(fail_build_dir / out_mp4.name)
+        except Exception:
+            pass
+        
+        err_txt = fail_build_dir / f"{timestamp}.error.txt"
+        err_txt.write_text(f"build_highlight failed: {e}\n", encoding="utf-8")
+        return None
+
     finally:
         # Limpa arquivos temporários: lista de concat e segmentos movidos
         try:
@@ -250,7 +307,6 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             pass
 
 
-# ---- Queueing & metadata ----------------------------------------------------
 def _sha256_file(p: Path, chunk: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
     with p.open("rb") as f:
@@ -274,9 +330,7 @@ def ffprobe_metadata(path: Path) -> Dict[str, Any]:
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=codec_name,width,height,r_frame_rate",
-        "-show_entries",
-        "format=duration",
+        "stream=codec_name,width,height,r_frame_rate:format=duration",
         "-of",
         "json",
         str(path),
@@ -517,6 +571,7 @@ def upload_file_to_signed_url(
         if parsed.scheme == "https"
         else http.client.HTTPConnection
     )
+
     netloc = parsed.netloc
     path_qs = parsed.path or "/"
     if parsed.query:
@@ -526,7 +581,7 @@ def upload_file_to_signed_url(
 
     # Debug básico
     print(f"[upload] URL: {parsed.scheme}://{parsed.netloc}{parsed.path}...")
-    print(f"[upload] Tamanho: {file_size} bytes | Tipo: {content_type}")
+    # print(f"[upload] Tamanho: {file_size} bytes | Tipo: {content_type}")
 
     headers = {
         "Content-Type": content_type,

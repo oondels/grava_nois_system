@@ -58,7 +58,7 @@ ENTER/GPIO → build_highlight() concatena os últimos (pré+pos) → recorded_c
                                │
         add_image_watermark()  │  generate_thumbnail()
              ▼                 │         ▼
-       20_highlights_wm/  ◄────┴─────────┘
+       highlights_wm/  ◄────┴─────────┘
              │
              ├── POST /api/videos/metadados → URL assinada
              └── (próx.) uploader usa URL → storage
@@ -69,8 +69,8 @@ ENTER/GPIO → build_highlight() concatena os últimos (pré+pos) → recorded_c
 - `buffer_dir`: `/tmp/recorded_videos` — segmentos de 1s do FFmpeg.
 - `clips_dir`: `./recorded_clips` — _highlights_ gerados na hora do clique.
 - `queue_dir`: `./queue_raw` — fila de processamento (entrada do worker).
-- `20_highlights_wm/` — saída final do worker (com watermark + thumbnail).
-- `90_failed/` — entrada que falhou após retentativas.
+- `highlights_wm/` — saída final do worker (com watermark + thumbnail).
+- `failed_clips/` — entrada que falhou após retentativas.
 
 ### 1.1) Fonte de vídeo (RTSP x V4L2)
 
@@ -125,12 +125,12 @@ Observação: `stdout`/`stderr` do FFmpeg estão direcionados para `DEVNULL` par
 3. Ao pressionar ENTER, `build_highlight()` aguarda `post_seconds`, seleciona `pre_seconds + post_seconds` de segmentos, cria `to_concat_*.txt` e concatena com `ffmpeg -f concat -c copy` para `clips_dir/highlight_*.mp4`.
 4. `enqueue_clip()` move o highlight para `queue_dir` e grava sidecar JSON com metadados de `ffprobe` e hash `sha256`.
 5. `ProcessingWorker` varre `queue_dir` periodicamente, faz lock com `.lock`, e para cada item:
-   - Aplica watermark com ffmpeg para um `*.wm_tmp.mp4` e faz `replace()` atômico para `20_highlights_wm/highlight_*.mp4`.
-   - Gera `20_highlights_wm/highlight_*.jpg` (thumbnail).
+   - Aplica watermark com ffmpeg para um `*.wm_tmp.mp4` e faz `replace()` atômico para `highlights_wm/highlight_*.mp4`.
+   - Gera `highlights_wm/highlight_*.jpg` (thumbnail).
    - Atualiza o JSON na fila com `status="watermarked"`, caminhos de saída e `meta_wm` (ffprobe do arquivo final).
    - Envia POST `GN_API_BASE/api/videos/metadados` com metadados do arquivo final; salva a resposta no sidecar em `remote_registration`.
    - Remove o `.mp4` original da fila (o `.json` permanece como registro de processamento).
-6. Em caso de erro, incrementa `attempts`; com `attempts >= max_attempts`, move `.mp4` e `.json` para `90_failed/` e grava `*.error.txt`; caso contrário, mantém na fila com `status="queued_retry"` e backoff linear.
+6. Em caso de erro, incrementa `attempts`; com `attempts >= max_attempts`, move `.mp4` e `.json` para `failed_clips/` e grava `*.error.txt`; caso contrário, mantém na fila com `status="queued_retry"` e backoff linear.
 
 ---
 
@@ -159,8 +159,8 @@ Após o worker, o JSON recebe:
 {
   "status": "watermarked",
   "updated_at": "2025-08-17T19:51:10Z",
-  "wm_path": "/.../20_highlights_wm/highlight_...mp4",
-  "thumbnail_path": "/.../20_highlights_wm/highlight_....jpg",
+  "wm_path": "/.../highlights_wm/highlight_...mp4",
+  "thumbnail_path": "/.../highlights_wm/highlight_....jpg",
   "meta_wm": { "codec": "h264", "width": 1280, "height": 720, "fps": 30, "duration_sec": 50.0 }
 }
 ```
@@ -256,8 +256,8 @@ Worker de varredura de diretório para aplicar watermark e gerar thumbnail. Em m
 **`__init__(queue_dir, out_wm_dir, failed_dir, watermark_path, scan_interval=1.5, max_attempts=3, wm_margin=24, wm_opacity=0.6, wm_rel_width=0.2, *, light_mode=False)`**
 
 - **queue_dir**: pasta de entrada (`queue_raw/`).
-- **out_wm_dir**: pasta de saída com watermark (`20_highlights_wm/`). Ignorada quando `light_mode=True`.
-- **failed_dir**: pasta para falhas definitivas (`90_failed/`).
+- **out_wm_dir**: pasta de saída com watermark (`highlights_wm/`). Ignorada quando `light_mode=True`.
+- **failed_dir**: pasta para falhas definitivas (`failed_clips/`).
 - **watermark_path**: caminho do PNG da logo.
 - **scan_interval**: período da varredura.
 - **max_attempts**: número máximo de tentativas por item.

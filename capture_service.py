@@ -28,8 +28,8 @@ class ProcessingWorker:
     def __init__(
         self,
         queue_dir: Path,  # queue_raw/
-        out_wm_dir: Path,  # 20_highlights_wm/
-        failed_dir: Path,  # 90_failed/
+        out_wm_dir: Path,  # highlights_wm/
+        failed_dir_highlight: Path,  # failed_clips/
         watermark_path: Path,  # assets/logo.png
         scan_interval: float = 1,  # varredura a cada 1.5s
         max_attempts: int = 3,
@@ -37,11 +37,14 @@ class ProcessingWorker:
         wm_opacity: float = 0.4,
         wm_rel_width: float = 0.1,
         *,
-        light_mode: bool = True, # Ativa o Light Mode (MVP)
+        light_mode: bool = True,  # Ativa o Light Mode (MVP)
+        retry_failed: bool = True,
+        retry_min_age_sec: float = 120.0,     # idade mínima do arquivo/sidecar p/ tentar de novo
+        retry_backoff_base_sec: float = 30.0
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
-        self.failed_dir = failed_dir
+        self.failed_dir_highlight = failed_dir_highlight
         self.watermark_path = watermark_path
         self.scan_interval = scan_interval
         self.max_attempts = max_attempts
@@ -49,13 +52,110 @@ class ProcessingWorker:
         self.wm_opacity = wm_opacity
         self.wm_rel_width = wm_rel_width
         self.light_mode = light_mode
+        self.retry_failed = retry_failed
+        self.retry_min_age_sec = retry_min_age_sec
+        self.retry_backoff_base_sec = retry_backoff_base_sec
+        self._last_noapi_log = 0.0
 
         self._stop = threading.Event()
         self._t = None
 
         if not self.light_mode:
             self.out_wm_dir.mkdir(parents=True, exist_ok=True)
-        self.failed_dir.mkdir(parents=True, exist_ok=True)
+        self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
+        
+    def _scan_retry_failed(self):
+        # diretórios candidatos a retry ( só com upload_failed)
+        retry_dirs = [ self.failed_dir / "upload_failed" ]
+        # futuramente incluir outros diretorios:
+        # retry_dirs += [ self.failed_dir / "enqueue_failed", self.failed_dir / "build_failed" ]
+
+        api_base = os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL")
+
+        now = time.time()
+        for rdir in retry_dirs:
+            if not rdir.exists():
+                continue
+
+            # aceita .mp4 e .ts
+            vids = list(rdir.glob("*.mp4")) + list(rdir.glob("*.ts"))
+            for vid in sorted(vids):
+                stem = vid.stem
+                meta_path = rdir / f"{stem}.json"
+                lock_path = rdir / f"{stem}.lock"
+
+                # lock atômico para evitar corrida entre workers
+                try:
+                    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                    os.close(fd)
+                except FileExistsError:
+                    continue
+
+                try:
+                    # sidecar mínimo, se faltar
+                    if not meta_path.exists():
+                        payload = {
+                            "type": "highlight_raw",
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                            "file_name": vid.name,
+                            "size_bytes": vid.stat().st_size,
+                            "sha256": None,
+                            "meta": ffprobe_metadata(vid),
+                            "status": "upload_pending",
+                            "attempts": 0,
+                            "local_fallback": {"status": "upload_pending", "reason": "unknown"},
+                        }
+                        meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+
+                    # carrega e decide retry
+                    meta = json.loads(meta_path.read_text())
+                    attempts = int(meta.get("attempts", 0))
+                    status = meta.get("status") or (meta.get("local_fallback") or {}).get("status", "")
+
+                    # 1) respeita limite de tentativas
+                    if attempts >= self.max_attempts:
+                        # já excedeu; deixa no diretório de falhas
+                        continue
+
+                    # 2) evita thrash sem API configurada
+                    if not api_base:
+                        # loga esporadicamente para não poluir stdout
+                        if now - self._last_noapi_log > 15:
+                            print("[worker:retry] GN_API_BASE ausente — ignorando retries por enquanto.")
+                            self._last_noapi_log = now
+                        continue
+
+                    # 3) aguarda idade mínima / backoff
+                    #    usa mtime do sidecar como referência
+                    age_sec = now - meta_path.stat().st_mtime
+                    backoff_need = self.retry_backoff_base_sec * (1 + attempts)
+                    if age_sec < max(self.retry_min_age_sec, backoff_need):
+                        # ainda "verde" para tentar de novo
+                        continue
+
+                    # 4) só reprocessa estados elegíveis
+                    if status not in {"upload_pending", "queued_retry", "watermarked", "ready_for_upload"}:
+                        # estado final ou não relacionado a upload pendente
+                        continue
+
+                    # 5) marca tentativa e dispara o mesmo pipeline
+                    meta["attempts"] = attempts + 1
+                    meta["status"] = "queued_retry"
+                    meta["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+                    print(f"[worker:retry] reprocessando {vid.name} (tentativa {meta['attempts']}/{self.max_attempts})")
+                    self._process_one(vid, meta_path)
+
+                except Exception as e:
+                    print(f"[worker:retry] falhou {vid.name}: {e}")
+                    # reaproveita tratamento padrão de falhas
+                    self._handle_failure(vid, meta_path, e)
+                finally:
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
     def start(self):
         self._t = threading.Thread(target=self._loop, daemon=True)
@@ -70,13 +170,63 @@ class ProcessingWorker:
         while not self._stop.is_set():
             try:
                 self._scan_once()
+
+                if self.retry_failed:
+                    self._scan_retry_failed()
             except Exception:
                 # loga e continua o loop
                 print("[worker] erro inesperado no loop:\n", traceback.format_exc())
             self._stop.wait(self.scan_interval)
 
     def _scan_once(self):
-        # procura .mp4 na fila (sidecar .json com o mesmo stem é recomendado)
+        # ----------------------------------------------------------------------------
+        # Varre a pasta de fila (self.queue_dir) em busca de vídeos a processar e
+        # despacha cada item com segurança entre múltiplos workers.
+        #
+        # O QUE FAZ (alto nível)
+        # - Lista todos os arquivos "*.mp4" na fila.
+        # - Garante a existência do sidecar JSON (metadados) para cada vídeo; se não
+        #   existir, cria um mínimo (tipo, tamanho, sha256=None, metadados via ffprobe).
+        # - Faz um *lock* atômico por arquivo (".lock") para impedir que outro worker
+        #   processe o mesmo item em paralelo.
+        # - Chama _process_one(mp4, meta_path) para executar o pipeline
+        #   (watermark/thumbnail no modo completo, registro no backend, upload com URL
+        #   assinada, finalize). Em exceções, delega a _handle_failure(...).
+        # - Remove o ".lock" no bloco `finally`, garantindo liberação do item.
+        #
+        # CONCORRÊNCIA / LOCK
+        # - O lock é implementado criando o arquivo "<stem>.lock" com flags
+        #   O_CREAT|O_EXCL. Se já existir, outro worker está processando; este worker
+        #   ignora o item.
+        # - O lock é sempre removido no `finally`, evitando deadlocks mesmo em erros.
+        #
+        # SIDE-CAR JSON
+        # - Arquivo: "<stem>.json" na mesma pasta da fila.
+        # - Criado automaticamente se ausente, contendo:
+        #     type="highlight_raw", created_at, file_name, size_bytes, sha256=None,
+        #     meta=(ffprobe do vídeo), status="queued", attempts=0.
+        #
+        # ERROS E RETENTATIVAS
+        # - Exceções em _process_one(...) são capturadas, logadas e encaminhadas para
+        #   _handle_failure(...), que incrementa `attempts` e decide entre refileirar
+        #   com backoff ou mover para "failed/" quando exceder `max_attempts`.
+        #
+        # EFEITOS COLATERAIS (efeitos esperados do pipeline chamado)
+        # - No sucesso, o vídeo pode ser removido da fila (após upload concluído) ou
+        #   movido para pastas de pendência/erro conforme o status do upload/registro.
+        # - O sidecar é atualizado continuamente com os campos:
+        #   remote_registration, remote_upload, remote_finalize, status, attempts, etc.
+        #
+        # ASSUNÇÕES/OBSERVAÇÕES
+        # - Esta função apenas DESCOBRE e REIVINDICA jobs; o trabalho pesado está em
+        #   _process_one(...).
+        # - Filtra somente "*.mp4". Se a fila também puder conter ".ts", adapte o glob
+        #   conforme necessário (ex.: "*.mp4" + "*.ts").
+        # - Requer que ffprobe/ffmpeg estejam no PATH (indiretamente, via _process_one
+        #   e ffprobe_metadata).
+        # - Não retorna valor; processa N itens por chamada.
+        # ---------------------------------------------------------------------------
+        # procura .mp4 na fila (queue_dir/)
         for mp4 in sorted(self.queue_dir.glob("*.mp4")):
             stem = mp4.stem
             meta_path = self.queue_dir / f"{stem}.json"
@@ -84,7 +234,6 @@ class ProcessingWorker:
 
             # exige sidecar
             if not meta_path.exists():
-                # sem sidecar? cria um mínimo para seguir o fluxo
                 payload = {
                     "type": "highlight_raw",
                     "created_at": datetime.now(timezone.utc).isoformat(),
@@ -200,16 +349,10 @@ class ProcessingWorker:
         client_id = os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID")
         venue_id = os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID")
         if api_base:
-            try: # Tenta fazer o registro com o servidor
+            try:  # Tenta fazer o registro com o servidor
                 size_upload = upload_target.stat().st_size
                 sha256_upload = _sha256_file(upload_target)
                 meta_up = ffprobe_metadata(upload_target)
-
-                def _as_int(x, default=0):
-                    try:
-                        return int(round(float(x)))
-                    except Exception:
-                        return default
 
                 payload = {
                     "venue_id": venue_id,
@@ -218,11 +361,12 @@ class ProcessingWorker:
                     "meta": meta_up,
                     "sha256": sha256_upload,
                 }
+
                 print("[worker] Enviando registro de metadados ao backend…")
                 resp = register_clip_metadados(
                     api_base, payload, token=api_token, timeout=15.0
                 )
-                
+
                 # Aguarda Resposta do Backend
                 print(f"[worker] Resposta do backend: {json.dumps(resp)[:300]}")
                 meta.setdefault("remote_registration", {})
@@ -240,7 +384,7 @@ class ProcessingWorker:
                 # 3.2) upload para a URL assinada, se fornecida
                 upload_url = (resp or {}).get("upload_url")
                 if upload_url:
-                    print("[worker] Iniciando upload para URL assinada…")
+                    print("[worker] Iniciando upload para URL assinada (Supabase)")
                     t0 = time.time()
                     try:
                         status_code, reason, resp_headers = upload_file_to_signed_url(
@@ -387,15 +531,18 @@ class ProcessingWorker:
             except FileNotFoundError:
                 pass
         else:
-            # Cria pasta para pendências de upload dentro de 90_failed/
-            pend_dir = self.failed_dir / "upload_failed"
+            # Cria pasta para pendências de upload dentro de failed_clips/
+            pend_dir = self.failed_dir_highlight / "upload_failed"
             pend_dir.mkdir(parents=True, exist_ok=True)
 
             # Determina motivo para log/sidecar
             reason = "unknown"
             if not (os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL")):
                 reason = "no_api_configured"
-            elif isinstance(meta.get("remote_registration"), dict) and meta["remote_registration"].get("status") != "registered":
+            elif (
+                isinstance(meta.get("remote_registration"), dict)
+                and meta["remote_registration"].get("status") != "registered"
+            ):
                 reason = "registration_failed"
             elif not isinstance(meta.get("remote_upload"), dict):
                 reason = "no_upload_url"
@@ -437,13 +584,17 @@ class ProcessingWorker:
                 if file_to_preserve.resolve() != dst_vid.resolve():
                     file_to_preserve.replace(dst_vid)
             except Exception:
-                print(f"[worker] aviso: falha ao mover vídeo para pendências: {file_to_preserve}")
+                print(
+                    f"[worker] aviso: falha ao mover vídeo para pendências: {file_to_preserve}"
+                )
             try:
                 dst_json = pend_dir / meta_path.name
                 if meta_path.resolve() != dst_json.resolve():
                     meta_path.replace(dst_json)
             except Exception:
-                print(f"[worker] aviso: falha ao mover sidecar para pendências: {meta_path}")
+                print(
+                    f"[worker] aviso: falha ao mover sidecar para pendências: {meta_path}"
+                )
             # Garante limpeza da fila para não reprocessar
             try:
                 if mp4.exists():
@@ -465,10 +616,10 @@ class ProcessingWorker:
         if meta["attempts"] >= self.max_attempts:
             meta["status"] = "failed"
             # move para failed/
-            fail_mp4 = self.failed_dir / mp4.name
-            fail_json = self.failed_dir / meta_path.name
+            fail_mp4 = self.failed_dir_highlight / mp4.name
+            fail_json = self.failed_dir_highlight / meta_path.name
             # grava erro detalhado
-            err_path = self.failed_dir / (mp4.stem + ".error.txt")
+            err_path = self.failed_dir_highlight / (mp4.stem + ".error.txt")
             err_path.write_text(traceback.format_exc())
 
             try:
@@ -516,7 +667,7 @@ def main() -> int:
     seg_time_env = _env_int("GN_SEG_TIME", 1)
 
     cfg = CaptureConfig(
-        buffer_dir=Path("/tmp/recorded_videos"),
+        buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
         clips_dir=base / "recorded_clips",
         queue_dir=base / "queue_raw",
         device="/dev/video0",
@@ -526,16 +677,16 @@ def main() -> int:
         scan_interval=0.5,
         max_buffer_seconds=60,
     )
-    
+
     # Verifica a existencia de todos os arquivos necessários
     cfg.ensure_dirs()
 
     # pastas do worker
-    out_wm_dir = base / "20_highlights_wm"
-    failed_dir = base / "90_failed"
+    out_wm_dir = base / "highlights_wm"
+    failed_dir_highlight = base / "failed_clips"
     if not light_mode:
         out_wm_dir.mkdir(parents=True, exist_ok=True)
-    failed_dir.mkdir(parents=True, exist_ok=True)
+    failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
     watermark_path = base / "files" / "grava-nois.png"
 
@@ -547,7 +698,7 @@ def main() -> int:
     worker = ProcessingWorker(
         queue_dir=cfg.queue_dir,
         out_wm_dir=out_wm_dir,
-        failed_dir=failed_dir,
+        failed_dir_highlight=failed_dir_highlight,
         watermark_path=watermark_path,
         scan_interval=1,
         max_attempts=3,
@@ -564,6 +715,7 @@ def main() -> int:
 
     trigger_q: queue.Queue[str] = queue.Queue()
     stop_evt = threading.Event()
+
     # Cooldown de botão GPIO: ignora novos disparos por 120s após um válido
     gpio_cooldown_sec = float(os.getenv("GN_GPIO_COOLDOWN_SEC", "120"))
     last_gpio_ok_ts = 0.0
@@ -662,9 +814,9 @@ def main() -> int:
     print(prompt)
 
     try:
-        while not stop_evt.is_set(): # Verifica se o evento foi acionado (Botao)
+        while not stop_evt.is_set():  # Verifica se o evento foi acionado (Botao)
             try:
-                trig = trigger_q.get(timeout=0.3) # Procura triggers 
+                trig = trigger_q.get(timeout=0.3)  # Procura triggers
             except queue.Empty:
                 continue
 
@@ -678,9 +830,36 @@ def main() -> int:
                     continue
                 last_gpio_ok_ts = now
 
-            out = build_highlight(cfg, segbuf) # Constroi o clipe a partir dos seguimentos
+            out = build_highlight(
+                cfg, segbuf
+            )  # Constroi o clipe a partir dos seguimentos
+
             if out:
-                enqueue_clip(cfg, out)
+                try:
+                    enqueue_clip(cfg, out)
+                except Exception as e:
+                    pend = failed_dir_highlight / "enqueue_failed"
+                    pend.mkdir(parents=True, exist_ok=True)
+                    try:
+                        # move o arquivo gerado para falha
+                        (
+                            (pend / out.name)
+                            if not out.exists()
+                            else out.replace(pend / out.name)
+                        )
+                    except Exception:
+                        pass
+                    # sidecar mínimo com erro
+                    meta = {
+                        "type": "highlight_raw",
+                        "status": "enqueue_failed",
+                        "file_name": out.name,
+                        "error": str(e),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    (pend / f"{out.stem}.json").write_text(
+                        json.dumps(meta, ensure_ascii=False, indent=2)
+                    )
 
     except KeyboardInterrupt:
         print("\nEncerrando…")
