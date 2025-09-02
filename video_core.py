@@ -79,7 +79,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     #     "0:v:0",
     #     "-c:v",
     #     "copy",
-    #     "-an",
+    #     "-an", # Remove áudio
     #     "-f",
     #     "segment",
     #     "-segment_format",
