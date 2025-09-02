@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, re, json, time, hashlib, subprocess, threading, platform
+import os, re, json, time, hashlib, subprocess, threading, platform, shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -162,41 +162,40 @@ class SegmentBuffer:
 def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
     click_ts = time.time()
     print("Botão apertado! Aguardando pós-buffer…")
-    time.sleep(max(0, cfg.post_seconds) + 0.30)
+    time.sleep(max(0, cfg.post_seconds) + 0.70)
 
+    # Calcula quantos segmentos de vídeo são necessários para cobrir o tempo total do highlight
+    # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo
+    # total pela duração do segmento e arredondamos para garantir cobertura completa.
     need = max(1, int(round((cfg.pre_seconds + cfg.post_seconds) / cfg.seg_time)))
-    selected = segbuf.snapshot_last(need)
-    if not selected:
+    selected_videos = segbuf.snapshot_last(need)
+    if not selected_videos:
         print("Nenhum segmento disponível — encerrando.")
         return None
 
-    # Move os segmentos correspondentes para a pasta dedicada e limpa o buffer
+    # Copia os segmentos correspondentes para uma pasta de staging (não limpa o buffer)
     target_dir = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
     target_dir.mkdir(parents=True, exist_ok=True)
 
     moved_paths: List[Path] = []
-    for seg in selected:
+    for seg in selected_videos:
         src = Path(seg)
         if not src.exists():
             continue
         dst = target_dir / src.name
-        try:
-            src.replace(dst)  # move (substitui se já existir)
-            moved_paths.append(dst)
-        except Exception:
-            # Falha ao mover este segmento — segue para o próximo
-            pass
-
-    # Exclui todos os arquivos do diretório de buffer original (/tmp/recorded_videos)
-    try:
-        for p in cfg.buffer_dir.glob("*"):
+        # tenta copiar com pequenas retentativas caso o arquivo ainda esteja sendo finalizado
+        attempts = 3
+        for i in range(attempts):
             try:
-                if p.is_file():
-                    p.unlink()
+                shutil.copy2(src, dst)
+                moved_paths.append(dst)
+                break
             except Exception:
-                pass
-    except Exception:
-        pass
+                if i == attempts - 1:
+                    # Falha ao copiar este segmento — segue para o próximo
+                    pass
+                else:
+                    time.sleep(0.1)
 
     if not moved_paths:
         print("Nenhum segmento movido — encerrando.")
