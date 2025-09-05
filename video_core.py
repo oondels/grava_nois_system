@@ -56,43 +56,48 @@ def _calc_start_number(buffer_dir: Path) -> int:
 def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     start_num = _calc_start_number(cfg.buffer_dir)
     out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
-    rtsp_url = (
-        os.getenv("GN_RTSP_URL")
-        or "rtsp://admin:wa0i4Ochu@192.168.68.104:554/cam/realmonitor?channel=1&subtype=0"
+    # Permite configurar a URL RTSP via env GN_RTSP_URL
+    # Ex.: rtsp://user:pass@192.168.1.21:2399/cam/realmonitor?channel=1&subtype=0
+    rtsp_url = os.getenv(
+        "GN_RTSP_URL",
+        "rtsp://admin:wa0i4Ochu@192.168.68.104:554/cam/realmonitor?channel=1&subtype=0",
     )
 
     # Camera Dedicada
     ffmpeg_cmd = [
         "ffmpeg",
         "-nostdin",
+        "-loglevel",
+        "warning",
         "-rtsp_transport",
         "tcp",
-        "-rw_timeout",
-        "5000000",  # 5s em microssegundos
-        "-stimeout",
-        "5000000",  # 5s em microssegundos (RTSP)
+        "-rtsp_flags",
+        "prefer_tcp",
+        "-fflags",
+        "nobuffer",
+        "-flags",
+        "low_delay",
         "-use_wallclock_as_timestamps",
         "1",
         "-i",
-        rtsp_url,  # URL RTSP da câmera IP
+        rtsp_url,
         "-map",
         "0:v:0",
         "-c:v",
         "copy",
-        "-an", # Remove áudio
+        "-an",
         "-f",
         "segment",
         "-segment_format",
         "mpegts",
         "-segment_time",
-        str(cfg.seg_time),  # 1s
+        str(cfg.seg_time),  # 1
         "-segment_start_number",
         str(start_num),
         "-reset_timestamps",
         "0",
         out_pattern,
     ]
-
     # Old -> Camera do notebook
     # ffmpeg_cmd = [
     #     "ffmpeg",
