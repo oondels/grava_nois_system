@@ -64,7 +64,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     )
 
     # Camera Dedicada
-    ffmpeg_cmd = [
+    ffmpeg_cmd_dedicada = [
         "ffmpeg",
         "-nostdin",
         "-loglevel",
@@ -77,8 +77,8 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         "nobuffer",
         "-flags",
         "low_delay",
-        "-use_wallclock_as_timestamps",
-        "1",
+        # "-use_wallclock_as_timestamps", Removido para remover erro de video 'longos' com segs errados
+        # "1",
         "-i",
         rtsp_url,
         "-map",
@@ -100,61 +100,61 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     ]
 
     # Old -> Camera do notebook
-    # ffmpeg_cmd = [
-    #     "ffmpeg",
-    #     "-nostdin",
-    #     # ENTRADA V4L2
-    #     "-f",
-    #     "v4l2",
-    #     "-thread_queue_size",
-    #     "512",
-    #     "-input_format",
-    #     "mjpeg",  # se a webcam suportar MJPEG, ajuda a CPU
-    #     "-framerate",
-    #     "30",  # pede 30 fps na captura
-    #     "-video_size",
-    #     "1280x720",  # 720p
-    #     "-use_wallclock_as_timestamps",
-    #     "1",
-    #     "-i",
-    #     cfg.device,
-    #     # SEM ÁUDIO (reduz CPU; add mapeamento se quiser microfone)
-    #     "-an",
-    #     # ENCODE H.264 (CPU) focado em baixa latência e fluidez
-    #     "-c:v",
-    #     "libx264",
-    #     "-preset",
-    #     "veryfast",  # ou "ultrafast" se precisar aliviar mais
-    #     "-tune",
-    #     "zerolatency",
-    #     "-pix_fmt",
-    #     "yuv420p",
-    #     "-r",
-    #     "30",  # garante 30 fps na saída
-    #     "-g",
-    #     "30",  # GOP de 30 (1 IDR por segundo)
-    #     "-keyint_min",
-    #     "30",
-    #     "-sc_threshold",
-    #     "0",  # evita IDR extra por detecção de cena
-    #     "-force_key_frames",
-    #     f"expr:gte(t,n_forced*{cfg.seg_time})",
-    #     # SAÍDA: SEGMENTOS DE 1s EM TS (mais estável para concat do que MP4)
-    #     "-f",
-    #     "segment",
-    #     "-segment_format",
-    #     "mpegts",
-    #     "-segment_time",
-    #     str(cfg.seg_time),
-    #     "-segment_start_number",
-    #     str(start_num),
-    #     "-reset_timestamps",
-    #     "0",  # mantém PTS contínuo entre arquivos
-    #     str(cfg.buffer_dir / "buffer%06d.ts"),
-    # ]
+    ffmpeg_cmd_notebook = [
+        "ffmpeg",
+        "-nostdin",
+        # ENTRADA V4L2
+        "-f",
+        "v4l2",
+        "-thread_queue_size",
+        "512",
+        "-input_format",
+        "mjpeg",  # se a webcam suportar MJPEG, ajuda a CPU
+        "-framerate",
+        "30",  # pede 30 fps na captura
+        "-video_size",
+        "1280x720",  # 720p
+        # "-use_wallclock_as_timestamps",
+        # "1",
+        "-i",
+        cfg.device,
+        # SEM ÁUDIO (reduz CPU; add mapeamento se quiser microfone)
+        "-an",
+        # ENCODE H.264 (CPU) focado em baixa latência e fluidez
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",  # ou "ultrafast" se precisar aliviar mais
+        "-tune",
+        "zerolatency",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        "30",  # garante 30 fps na saída
+        "-g",
+        "30",  # GOP de 30 (1 IDR por segundo)
+        "-keyint_min",
+        "30",
+        "-sc_threshold",
+        "0",  # evita IDR extra por detecção de cena
+        "-force_key_frames",
+        f"expr:gte(t,n_forced*{cfg.seg_time})",
+        # SAÍDA: SEGMENTOS DE 1s EM TS (mais estável para concat do que MP4)
+        "-f",
+        "segment",
+        "-segment_format",
+        "mpegts",
+        "-segment_time",
+        str(cfg.seg_time),
+        "-segment_start_number",
+        str(start_num),
+        "-reset_timestamps",
+        "0",  # mantém PTS contínuo entre arquivos
+        str(cfg.buffer_dir / "buffer%06d.ts"),
+    ]
 
     return subprocess.Popen(
-        ffmpeg_cmd,
+        ffmpeg_cmd_dedicada,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
@@ -185,9 +185,14 @@ class SegmentBuffer:
 
     def _index_loop(self) -> None:
         while not self._stop.is_set():
-            files = sorted(
-                self.cfg.buffer_dir.glob("buffer*.ts"), key=lambda p: p.stat().st_mtime
-            )
+            # ordena pelo número do arquivo
+            def _segnum(p):
+                try:
+                    return int(p.stem.replace("buffer", ""))
+                except Exception:
+                    return -1
+
+            files = sorted(self.cfg.buffer_dir.glob("buffer*.ts"), key=_segnum)
 
             # limpa excedentes no disco
             extra = files[: -self.cfg.max_segments]
@@ -218,26 +223,38 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo
     # total pela duração do segmento e arredondamos para garantir cobertura completa.
     need = max(1, int(round((cfg.pre_seconds + cfg.post_seconds) / cfg.seg_time)))
-    print(f"São necessarios {need} segmentos para o highlight.")
+    print(f"\n\n {need} segmentos capturados para o highlight.")
+
+    def _segnum_from_path(s):
+        try:
+            return int(Path(s).stem.replace("buffer", ""))
+        except:
+            return -1
 
     # Ultimos videos em buffer
-    selected_videos = segbuf.snapshot_last(need)
+    selected_videos = sorted(segbuf.snapshot_last(need), key=_segnum_from_path)
+
     if not selected_videos:
         print("Nenhum segmento disponível — encerrando.")
         return None
 
     # Copia os segmentos correspondentes para uma pasta de staging (não limpa o buffer)
-    target_dir = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
+    timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
+        "%Y%m%d-%H%M%SZ"
+    )
+    stage_root = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
+    target_dir = stage_root / f"click_{timestamp}"
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # copia com retentativas
     moved_paths: List[Path] = []
     for seg in selected_videos:
         src = Path(seg)
         if not src.exists():
             continue
         dst = target_dir / src.name
-        # tenta copiar com pequenas retentativas caso o arquivo ainda esteja sendo finalizado
         attempts = 3
+
         for i in range(attempts):
             try:
                 shutil.copy2(src, dst)
@@ -245,14 +262,30 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 break
             except Exception:
                 if i == attempts - 1:
-                    # Falha ao copiar este segmento — segue para o próximo
+                    # falhou este segmento — segue
                     pass
                 else:
                     time.sleep(0.1)
 
+    # se nada foi copiado, encerra
     if not moved_paths:
         print("Nenhum segmento movido — encerrando.")
         return None
+
+    # *filtro de sanidade* (existência e tamanho > 0)
+    moved_paths = [p for p in moved_paths if p.exists() and p.stat().st_size > 0]
+    if len(moved_paths) < 2:
+        print(f"Poucos segmentos válidos ({len(moved_paths)}) — abortando highlight.")
+        return None
+
+    # ordenar por número do buffer para garantir ordem correta
+    def _segnum(p: Path) -> int:
+        try:
+            return int(p.stem.replace("buffer", ""))
+        except Exception:
+            return -1
+
+    moved_paths.sort(key=_segnum)
 
     # Cria a lista de concat a partir dos arquivos movidos
     list_txt = target_dir / f"to_concat_{int(click_ts)}.txt"
@@ -273,7 +306,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 "ffmpeg",
                 "-nostdin",
                 "-fflags",
-                "+genpts",
+                "+genpts+igndts",
                 "-f",
                 "concat",
                 "-safe",
