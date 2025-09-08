@@ -1,0 +1,23 @@
+services:
+  grava_nois:
+    build: .
+    container_name: grava_nois
+    restart: unless-stopped
+    env_file:
+      - .env
+    working_dir: /usr/src/app
+    shm_size: 512m
+    volumes:
+      - ./.env:/usr/src/app/.env:ro
+      - ./files:/usr/src/app/files
+      - ./recorded_clips:/usr/src/app/recorded_clips
+      - ./queue_raw:/usr/src/app/queue_raw
+      - ./failed_clips:/usr/src/app/failed_clips
+      - ./buffered_seguiments_post_clique:/usr/src/app/buffered_seguiments_post_clique
+    # Network defaults to bridge, which is fine for RTSP on LAN.
+    # For GPIO or V4L2 webcam usage, uncomment the lines below:
+    # privileged: true               # needed to access GPIO or /dev/video*
+    # devices:
+    #   - "/dev/video0:/dev/video0"  # if capturing from a local webcam instead of RTSP
+    # network_mode: host             # if pigpio daemon runs on host or strict LAN access is needed
+    command: ["python", "main.py"]
