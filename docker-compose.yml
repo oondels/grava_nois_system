@@ -22,4 +22,4 @@ services:
       - "/dev/video0:/dev/video0" # camera local notebook
     privileged: true # needed to access GPIO or /dev/video*
     network_mode: host # if pigpio daemon runs on host or strict LAN access is needed
-    command: ["./gn_start.sh"]
+
