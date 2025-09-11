@@ -710,14 +710,14 @@ def main() -> int:
     base = Path(__file__).resolve().parent
 
     # Modo leve (pula watermark/thumbnail) por env GN_LIGHT_MODE=1/true/yes
-    # def _env_bool(name: str, default: bool = False) -> bool:
-    #     v = os.getenv(name)
-    #     if v is None:
-    #         return default
-    #     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+    def _env_bool(name: str, default: bool = False) -> bool:
+        v = os.getenv(name)
+        if v is None:
+            return default
+        return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
-    # light_mode = _env_bool("GN_LIGHT_MODE", False)
-    light_mode = True
+    light_mode = _env_bool("GN_LIGHT_MODE", False)
+    # light_mode = True
 
     # Permite configurar seg_time via env GN_SEG_TIME
     def _env_int(name: str, default: int) -> int:
