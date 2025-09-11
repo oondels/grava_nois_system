@@ -1,8 +1,10 @@
 services:
-  grava_nois:
+  grava_nois_system:
     build: .
-    container_name: grava_nois
+    container_name: grava_nois_system
     restart: unless-stopped
+    stdin_open: true # Matém o stdin aberto para receber input (Enter)
+    tty: true
     env_file:
       - .env
     working_dir: /usr/src/app
@@ -16,8 +18,8 @@ services:
       - ./buffered_seguiments_post_clique:/usr/src/app/buffered_seguiments_post_clique
     # Network defaults to bridge, which is fine for RTSP on LAN.
     # For GPIO or V4L2 webcam usage, uncomment the lines below:
-    # privileged: true               # needed to access GPIO or /dev/video*
-    # devices:
-    #   - "/dev/video0:/dev/video0"  # if capturing from a local webcam instead of RTSP
-    # network_mode: host             # if pigpio daemon runs on host or strict LAN access is needed
-    command: ["python", "main.py"]
+    devices:
+      - "/dev/video0:/dev/video0" # camera local notebook
+    privileged: true # needed to access GPIO or /dev/video*
+    network_mode: host # if pigpio daemon runs on host or strict LAN access is needed
+    command: ["./gn_start.sh"]

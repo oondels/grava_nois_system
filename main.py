@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys
+import sys, shutil
 from pathlib import Path
 import os, json, time, traceback
 from datetime import datetime, timezone
@@ -601,7 +601,8 @@ class ProcessingWorker:
             try:
                 dst_vid = pend_dir / file_to_preserve.name
                 if file_to_preserve.resolve() != dst_vid.resolve():
-                    file_to_preserve.replace(dst_vid)
+                    # file_to_preserve.replace(dst_vid)
+                    shutil.move(str(file_to_preserve), str(dst_vid))
             except Exception:
                 print(
                     f"[worker] aviso: falha ao mover vídeo para pendências: {file_to_preserve}"
@@ -609,7 +610,8 @@ class ProcessingWorker:
             try:
                 dst_json = pend_dir / meta_path.name
                 if meta_path.resolve() != dst_json.resolve():
-                    meta_path.replace(dst_json)
+                    # meta_path.replace(dst_json)
+                    shutil.move(str(meta_path), str(dst_json))
             except Exception:
                 print(
                     f"[worker] aviso: falha ao mover sidecar para pendências: {meta_path}"
@@ -642,7 +644,8 @@ class ProcessingWorker:
             err_path.write_text(traceback.format_exc())
 
             try:
-                mp4.replace(fail_mp4)
+                # mp4.replace(fail_mp4)
+                shutil.move(str(mp4), str(fail_mp4))
             except FileNotFoundError:
                 pass
             try:
@@ -650,7 +653,8 @@ class ProcessingWorker:
             except Exception:
                 pass
             try:
-                meta_path.replace(fail_json)
+                # meta_path.replace(fail_json)
+                shutil.move(str(meta_path), str(fail_json))
             except FileNotFoundError:
                 pass
         else:
@@ -898,20 +902,23 @@ def main() -> int:
             out = build_highlight(
                 cfg, segbuf
             )  # Constroi o clipe a partir dos seguimentos
-
+            # print("\n\n Clipe gerado e salvo")
+            # return
             if out:
                 try:
                     enqueue_clip(cfg, out)
                 except Exception as e:
+                    print(f"[main] falha ao enfileirar {out.name}: {e}")
                     pend = failed_dir_highlight / "enqueue_failed"
                     pend.mkdir(parents=True, exist_ok=True)
                     try:
                         # move o arquivo gerado para falha
-                        (
-                            (pend / out.name)
-                            if not out.exists()
-                            else out.replace(pend / out.name)
-                        )
+                        # (
+                        #     (pend / out.name)
+                        #     if not out.exists()
+                        #     else out.replace(pend / out.name)
+                        # )
+                        shutil.move(str(out), str(pend / out.name))
                     except Exception:
                         pass
                     # sidecar mínimo com erro

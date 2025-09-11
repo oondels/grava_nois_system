@@ -20,5 +20,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Default command runs the application
-CMD ["python", "main.py"]
+COPY gn_start.sh .
+# RUN echo "--- Verificando o conteúdo de entrypoint.sh no momento do build: ---" && cat ./entrypoint.sh && echo "----------------------------------------------------"
+CMD ["./gn_start.sh"]

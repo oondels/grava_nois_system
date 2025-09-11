@@ -9,6 +9,7 @@ import urllib.error
 import ssl
 import http.client
 from urllib.parse import urlparse
+from dataclasses import dataclass
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -154,7 +155,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     ]
 
     return subprocess.Popen(
-        ffmpeg_cmd_dedicada,
+        ffmpeg_cmd_notebook,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
@@ -430,6 +431,7 @@ def ffprobe_metadata(path: Path) -> Dict[str, Any]:
 
 
 def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
+    print("Enqueueando clipe...")
     """
     Move o arquivo para a fila (queue_dir) e salva metadados .json ao lado.
     """
@@ -463,7 +465,7 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
     meta_path = cfg.queue_dir / (clip_path.stem + ".json")
 
     # move para a fila e grava sidecar
-    clip_path.replace(dst)
+    shutil.move(str(clip_path), str(dst))
     meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"Enfileirado para tratamento: {dst}")
     return dst
