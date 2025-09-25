@@ -756,7 +756,7 @@ def main() -> int:
         out_wm_dir.mkdir(parents=True, exist_ok=True)
     failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
-    watermark_path = base / "files" / "grava-nois.png"
+    watermark_path = base / "files" / "replay_grava_nois.png"
 
     proc = start_ffmpeg(cfg)
     segbuf = SegmentBuffer(cfg)
@@ -772,7 +772,7 @@ def main() -> int:
         max_attempts=1,
         wm_margin=24,
         wm_opacity=0.6,
-        wm_rel_width=0.2,
+        wm_rel_width=0.15, # largura da marca d'água relativa ao vídeo = 7%
         light_mode=light_mode,
     )
     worker.start()
