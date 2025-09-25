@@ -4,13 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections import deque
 from typing import Deque, List, Optional, Tuple, Dict, Any
-import urllib.request
-import urllib.error
-import ssl
-import http.client
-from urllib.parse import urlparse
 from dataclasses import dataclass
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 
@@ -213,7 +209,7 @@ class SegmentBuffer:
 def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
     print("Botão apertado! Aguardando pós-buffer…")
 
-    # Psata para arquivos com erro de build
+    # Pasta para arquivos com erro de build
     fail_build_dir = cfg.failed_dir_highlight / "build_failed"
     fail_build_dir.mkdir(parents=True, exist_ok=True)
 
@@ -240,60 +236,25 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         print("Nenhum segmento capturado — encerrando.")
         return None
 
-    # Copia os segmentos correspondentes para uma pasta de staging (não limpa o buffer)
+    # Cria uma pasta de staging apenas para o arquivo de manifesto (concat list)
     timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
         "%Y%m%d-%H%M%SZ"
     )
-    stage_root = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
-    target_dir = stage_root / f"click_{timestamp}"
-    target_dir.mkdir(parents=True, exist_ok=True)
 
-    # copia com retentativas
-    moved_paths: List[Path] = []
-    for seg in selected_videos:
-        src = Path(seg)
-        if not src.exists():
-            continue
-        dst = target_dir / src.name
-        attempts = 3
-
-        for i in range(attempts):
-            try:
-                shutil.copy2(src, dst)
-                moved_paths.append(dst)
-                break
-            except Exception:
-                if i == attempts - 1:
-                    # falhou este segmento — segue
-                    pass
-                else:
-                    time.sleep(0.1)
-
-    # se nada foi copiado, encerra
-    if not moved_paths:
-        print("Nenhum segmento movido — encerrando.")
+    # Usamos a pasta de clipes gravados para o arquivo de lista temporário
+    concat_list_path = cfg.clips_dir / f"concat_{timestamp}.txt"
+    valid_segments = [
+        p
+        for p in (Path(s) for s in selected_videos)
+        if p.exists() and p.stat().st_size > 0
+    ]
+    if not valid_segments or len(valid_segments) < 2:
+        print("Nenhum segmento válido encontrado — encerrando.")
         return None
 
-    # *filtro de sanidade* (existência e tamanho > 0)
-    moved_paths = [p for p in moved_paths if p.exists() and p.stat().st_size > 0]
-    if len(moved_paths) < 2:
-        print(f"Poucos segmentos válidos ({len(moved_paths)}) — abortando highlight.")
-        return None
-
-    # ordenar por número do buffer para garantir ordem correta
-    def _segnum(p: Path) -> int:
-        try:
-            return int(p.stem.replace("buffer", ""))
-        except Exception:
-            return -1
-
-    moved_paths.sort(key=_segnum)
-
-    # Cria a lista de concat a partir dos arquivos movidos
-    list_txt = target_dir / f"to_concat_{int(click_ts)}.txt"
-    with open(list_txt, "w") as f:
-        for p in moved_paths:
-            f.write(f"file '{str(p)}'\n")
+    with open(concat_list_path, "w") as f:
+        for seg_path in valid_segments:
+            f.write(f"file '{seg_path.resolve()}'\n")
 
     timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
         "%Y%m%d-%H%M%SZ"
@@ -314,7 +275,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 "-safe",
                 "0",
                 "-i",
-                str(list_txt),
+                str(concat_list_path),
                 "-c",
                 "copy",
                 str(tmp_ts),
@@ -365,21 +326,8 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         return None
 
     finally:
-        # Limpa arquivos temporários: lista de concat e segmentos movidos
         try:
-            list_txt.unlink()
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-        try:
-            for p in moved_paths:
-                try:
-                    p.unlink()
-                except FileNotFoundError:
-                    pass
-                except Exception:
-                    pass
+            concat_list_path.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -581,29 +529,21 @@ def _http_post_json(
     headers: Optional[Dict[str, str]] = None,
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    
-    if headers:
-        for k, v in headers.items():
-            req.add_header(k, v)
-    # permissivo para ambientes com certificados locais
-    ctx = ssl.create_default_context()
-    
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            charset = resp.headers.get_content_charset() or "utf-8"
-            body = resp.read().decode(charset)
-            return json.loads(body) if body else {}
-    except urllib.error.HTTPError as e:
+        response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        response.raise_for_status()  # Lança HTTPError para respostas 4xx/5xx
+        return response.json() if response.text else {}
+
+    except requests.exceptions.HTTPError as e:
         try:
-            body = e.read().decode("utf-8")
+            body = e.response.text()
         except Exception:
             body = ""
-        raise RuntimeError(f"HTTP {e.code} ao POST {url}: {body}")
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Erro de rede ao POST {url}: {e}")
+        raise RuntimeError(
+            f"HTTP {e.response.status_code} ao POST {url}: {body}"
+        ) from e
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Erro de rede ao POST {url}: {e}") from e
 
 
 def register_clip_metadados(
@@ -621,9 +561,10 @@ def register_clip_metadados(
     client_id = os.getenv("CLIENT_ID")
     venue_id = os.getenv("VENUE_ID")
     base = api_base.rstrip("/")
+    token = os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
 
     url = f"{base}/api/videos/metadados/client/{client_id}/venue/{venue_id}"
-    headers: Dict[str, str] = {}
+    headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return _http_post_json(url, metadados, headers=headers, timeout=timeout)
@@ -635,74 +576,25 @@ def upload_file_to_signed_url(
     file_path: Path,
     content_type: str = "video/mp4",
     extra_headers: Optional[Dict[str, str]] = None,
-    timeout: float = 120.0,
+    timeout: float = 180.0,
 ) -> Tuple[int, str, Dict[str, str]]:
     """
     Envia o arquivo via HTTP PUT para uma URL assinada (S3/GCS/etc).
-
-    Retorna (status_code, reason). Lança exceção em erros de conexão.
+    Retorna (status_code, reason, response_headers). Lança exceção em erros de conexão.
     """
-    parsed = urlparse(upload_url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"URL inválida: {upload_url}")
-
-    # Prepara conexão
-    conn_cls = (
-        http.client.HTTPSConnection
-        if parsed.scheme == "https"
-        else http.client.HTTPConnection
-    )
-
-    netloc = parsed.netloc
-    path_qs = parsed.path or "/"
-    if parsed.query:
-        path_qs += f"?{parsed.query}"
-
-    file_size = file_path.stat().st_size
-
-    # Debug básico
-    print(f"[upload] URL: {parsed.scheme}://{parsed.netloc}{parsed.path}...")
-    # print(f"[upload] Tamanho: {file_size} bytes | Tipo: {content_type}")
-
-    headers = {
-        "Content-Type": content_type,
-        "Content-Length": str(file_size),
-    }
-    if extra_headers:
-        headers.update(extra_headers)
-
-    conn = conn_cls(netloc, timeout=timeout)
     try:
-        conn.putrequest("PUT", path_qs)
-        for k, v in headers.items():
-            conn.putheader(k, v)
-        conn.endheaders()
-
-        with file_path.open("rb") as f:
-            # Envia em blocos para evitar alto uso de memória
-            while True:
-                chunk = f.read(1024 * 1024)
-                if not chunk:
-                    break
-                conn.send(chunk)
-
-        resp = conn.getresponse()
-        # Debug de resposta
-        print(f"[upload] HTTP {resp.status} {resp.reason}")
-        try:
-            body = resp.read(512)
-            if body:
-                print(f"[upload] Resumo corpo: {body[:200]!r}")
-        except Exception:
-            pass
-        # Normaliza headers em minúsculo para conveniência
-        resp_headers = {k.lower(): v for k, v in resp.getheaders()}
-        return resp.status, resp.reason, resp_headers
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        with open(file_path, "rb") as f:
+            headers = {"Content-Type": content_type}
+            if extra_headers:
+                headers.update(extra_headers)
+            response = requests.put(
+                upload_url, data=f, headers=headers, timeout=timeout
+            )
+            return response.status_code, response.reason, dict(response.headers)
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(
+            f"Erro de rede durante o upload para {upload_url}: {e}"
+        ) from e
 
 
 # ---- Finalize uploaded clip -------------------------------------------------
@@ -724,7 +616,9 @@ def finalize_clip_uploaded(
     """
     base = api_base.rstrip("/")
     url = f"{base}/api/videos/{clip_id}/uploaded"
-    headers: Dict[str, str] = {}
+    token = os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
+
+    headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     payload: Dict[str, Any] = {"size_bytes": int(size_bytes), "sha256": str(sha256)}
