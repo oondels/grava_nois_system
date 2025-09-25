@@ -511,7 +511,7 @@ def add_image_watermark(
     # - format=rgba garante canal alpha; colorchannelmixer ajusta opacidade
     filt = (
         f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm];"
-        f"[0:v][wm]overlay=x=main_w-overlay_w-{int(margin)}:y=main_h-overlay_h-{int(margin)}[v]"
+        f"[0:v][wm]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(margin)}[v]"
     )
 
     cmd = [
