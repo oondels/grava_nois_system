@@ -31,12 +31,11 @@ class ProcessingWorker:
         out_wm_dir: Path,  # highlights_wm/
         failed_dir_highlight: Path,  # failed_clips/
         watermark_path: Path,  # assets/logo.png
-        scan_interval: float = 1,  # varredura a cada 1.5s
+        scan_interval: float = 1,  # varredura a cada 1
         max_attempts: int = 3,
         wm_margin: int = 24,
         wm_opacity: float = 0.4,
         wm_rel_width: float = 0.1,
-        *,
         light_mode: bool = True,  # Ativa o Light Mode (MVP)
         retry_failed: bool = True,
         retry_min_age_sec: float = 120.0,  # idade mínima do arquivo/sidecar p/ tentar de novo
@@ -70,7 +69,7 @@ class ProcessingWorker:
         # futuramente incluir outros diretorios:
         # retry_dirs += [ self.failed_dir / "enqueue_failed", self.failed_dir / "build_failed" ]
 
-        api_base = os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL")
+        api_base = os.getenv("API_BASE_URL")
 
         now = time.time()
         for rdir in retry_dirs:
@@ -271,7 +270,6 @@ class ProcessingWorker:
                 )
                 os.close(fd)
             except FileExistsError:
-                # outro worker pegou
                 continue
 
             try:
@@ -299,14 +297,14 @@ class ProcessingWorker:
         if not self.light_mode:
             # idempotência simples: se já existe saída final, não refazer
             out_mp4 = self.out_wm_dir / mp4.name
-            thumb_jpg = self.out_wm_dir / (mp4.stem + ".jpg")
+            # thumb_jpg = self.out_wm_dir / (mp4.stem + ".jpg")
             if out_mp4.exists() and thumb_jpg.exists():
                 meta.update(
                     {
                         "status": "watermarked",
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "wm_path": str(out_mp4),
-                        "thumbnail_path": str(thumb_jpg),
+                        # "thumbnail_path": str(thumb_jpg),
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
@@ -328,12 +326,12 @@ class ProcessingWorker:
                 rel_width=self.wm_rel_width,
                 codec="libx264",
                 crf=20,
-                preset="ultrafast",  # Pi agradece
+                preset="medium",
             )
             tmp_out.replace(out_mp4)  # atomic move
 
             # 2) thumbnail (meio do vídeo)
-            generate_thumbnail(out_mp4, thumb_jpg, at_sec=None)
+            # generate_thumbnail(out_mp4, thumb_jpg, at_sec=None)
 
             # 3) atualiza sidecar
             meta.update(
@@ -367,6 +365,8 @@ class ProcessingWorker:
         client_id = os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID")
         venue_id = os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID")
 
+        print(f"\n\n[worker] Tamanho do arquivo em mb: {upload_target.stat().st_size / (1024*1024):.2f} MB\n\n")
+        
         if api_base:
             try:  # Tenta fazer o registro com o servidor
                 size_upload = upload_target.stat().st_size
@@ -556,7 +556,7 @@ class ProcessingWorker:
 
             # Determina motivo para log/sidecar
             reason = "unknown"
-            if not (os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL")):
+            if not (os.getenv("API_BASE_URL")):
                 reason = "no_api_configured"
             elif (
                 isinstance(meta.get("remote_registration"), dict)
@@ -601,7 +601,6 @@ class ProcessingWorker:
             try:
                 dst_vid = pend_dir / file_to_preserve.name
                 if file_to_preserve.resolve() != dst_vid.resolve():
-                    # file_to_preserve.replace(dst_vid)
                     shutil.move(str(file_to_preserve), str(dst_vid))
             except Exception:
                 print(
@@ -666,7 +665,7 @@ class ProcessingWorker:
 
 def clear_buffer(cfg) -> None:
     """
-    Remove quaisquer segmentos remanescentes de execuções anteriores no diretório
+    Remove segmentos remanescentes de execuções anteriores no diretório
     de buffer (ex.: buffer%06d.ts/.mp4) e limpa também a pasta de staging usada na
     concatenação de segmentos. Isso garante que um highlight novo não concatene
     pedaços antigos.
@@ -717,7 +716,6 @@ def main() -> int:
         return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
     light_mode = _env_bool("GN_LIGHT_MODE", False)
-    # light_mode = True
 
     # Permite configurar seg_time via env GN_SEG_TIME
     def _env_int(name: str, default: int) -> int:
@@ -730,6 +728,7 @@ def main() -> int:
             return default
 
     seg_time_env = _env_int("GN_SEG_TIME", 1)
+    print(f"[startup] segmento de {seg_time_env}s, modo leve: {light_mode}")
 
     cfg = CaptureConfig(
         buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
@@ -739,8 +738,8 @@ def main() -> int:
         seg_time=seg_time_env,
         pre_seconds=25,
         post_seconds=10,
-        scan_interval=0.5,
-        max_buffer_seconds=60,
+        scan_interval=1,
+        max_buffer_seconds=40,
         failed_dir_highlight=base / "failed_clips",
     )
 
@@ -757,7 +756,7 @@ def main() -> int:
         out_wm_dir.mkdir(parents=True, exist_ok=True)
     failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
-    watermark_path = base / "files" / "grava-nois.png"
+    watermark_path = base / "files" / "replay_grava_nois.png"
 
     proc = start_ffmpeg(cfg)
     segbuf = SegmentBuffer(cfg)
@@ -770,18 +769,15 @@ def main() -> int:
         failed_dir_highlight=failed_dir_highlight,
         watermark_path=watermark_path,
         scan_interval=1,
-        max_attempts=3,
+        max_attempts=1,
         wm_margin=24,
         wm_opacity=0.6,
-        wm_rel_width=0.2,
+        wm_rel_width=0.11, # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
         light_mode=light_mode,
     )
     worker.start()
 
     # --- Disparo por ENTER ou GPIO (Raspberry Pi) ---
-    # Implementa dois mecanismos de disparo concorrentes que empurram eventos
-    # para uma fila: 1) ENTER (stdin) e 2) botão físico via GPIO (opcional).
-
     trigger_q: queue.Queue[str] = queue.Queue()
     stop_evt = threading.Event()
 
@@ -902,8 +898,7 @@ def main() -> int:
             out = build_highlight(
                 cfg, segbuf
             )  # Constroi o clipe a partir dos seguimentos
-            # print("\n\n Clipe gerado e salvo")
-            # return
+
             if out:
                 try:
                     enqueue_clip(cfg, out)
