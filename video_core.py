@@ -213,7 +213,7 @@ class SegmentBuffer:
 def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
     print("Botão apertado! Aguardando pós-buffer…")
 
-    # Psata para arquivos com erro de build
+    # Pasta para arquivos com erro de build
     fail_build_dir = cfg.failed_dir_highlight / "build_failed"
     fail_build_dir.mkdir(parents=True, exist_ok=True)
 
@@ -240,60 +240,25 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         print("Nenhum segmento capturado — encerrando.")
         return None
 
-    # Copia os segmentos correspondentes para uma pasta de staging (não limpa o buffer)
+    # Cria uma pasta de staging apenas para o arquivo de manifesto (concat list)
     timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
         "%Y%m%d-%H%M%SZ"
     )
-    stage_root = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
-    target_dir = stage_root / f"click_{timestamp}"
-    target_dir.mkdir(parents=True, exist_ok=True)
 
-    # copia com retentativas
-    moved_paths: List[Path] = []
-    for seg in selected_videos:
-        src = Path(seg)
-        if not src.exists():
-            continue
-        dst = target_dir / src.name
-        attempts = 3
-
-        for i in range(attempts):
-            try:
-                shutil.copy2(src, dst)
-                moved_paths.append(dst)
-                break
-            except Exception:
-                if i == attempts - 1:
-                    # falhou este segmento — segue
-                    pass
-                else:
-                    time.sleep(0.1)
-
-    # se nada foi copiado, encerra
-    if not moved_paths:
-        print("Nenhum segmento movido — encerrando.")
+    # Usamos a pasta de clipes gravados para o arquivo de lista temporário
+    concat_list_path = cfg.clips_dir / f"concat_{timestamp}.txt"
+    valid_segments = [
+        p
+        for p in (Path(s) for s in selected_videos)
+        if p.exists() and p.stat().st_size > 0
+    ]
+    if not valid_segments or len(valid_segments) < 2:
+        print("Nenhum segmento válido encontrado — encerrando.")
         return None
 
-    # *filtro de sanidade* (existência e tamanho > 0)
-    moved_paths = [p for p in moved_paths if p.exists() and p.stat().st_size > 0]
-    if len(moved_paths) < 2:
-        print(f"Poucos segmentos válidos ({len(moved_paths)}) — abortando highlight.")
-        return None
-
-    # ordenar por número do buffer para garantir ordem correta
-    def _segnum(p: Path) -> int:
-        try:
-            return int(p.stem.replace("buffer", ""))
-        except Exception:
-            return -1
-
-    moved_paths.sort(key=_segnum)
-
-    # Cria a lista de concat a partir dos arquivos movidos
-    list_txt = target_dir / f"to_concat_{int(click_ts)}.txt"
-    with open(list_txt, "w") as f:
-        for p in moved_paths:
-            f.write(f"file '{str(p)}'\n")
+    with open(concat_list_path, "w") as f:
+        for seg_path in valid_segments:
+            f.write(f"file '{seg_path.resolve()}'\n")
 
     timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
         "%Y%m%d-%H%M%SZ"
@@ -314,7 +279,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 "-safe",
                 "0",
                 "-i",
-                str(list_txt),
+                str(concat_list_path),
                 "-c",
                 "copy",
                 str(tmp_ts),
@@ -365,21 +330,8 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         return None
 
     finally:
-        # Limpa arquivos temporários: lista de concat e segmentos movidos
         try:
-            list_txt.unlink()
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-        try:
-            for p in moved_paths:
-                try:
-                    p.unlink()
-                except FileNotFoundError:
-                    pass
-                except Exception:
-                    pass
+            concat_list_path.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -584,13 +536,13 @@ def _http_post_json(
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
-    
+
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
     # permissivo para ambientes com certificados locais
     ctx = ssl.create_default_context()
-    
+
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             charset = resp.headers.get_content_charset() or "utf-8"
