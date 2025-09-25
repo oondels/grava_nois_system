@@ -772,7 +772,7 @@ def main() -> int:
         max_attempts=1,
         wm_margin=24,
         wm_opacity=0.6,
-        wm_rel_width=0.15, # largura da marca d'água relativa ao vídeo = 7%
+        wm_rel_width=0.11, # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
         light_mode=light_mode,
     )
     worker.start()
