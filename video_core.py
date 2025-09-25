@@ -25,8 +25,8 @@ class CaptureConfig:
     device: str = "/dev/video0"
     seg_time: int = 1
     pre_seconds: int = 25
-    post_seconds: int = 5
-    scan_interval: float = 0.5
+    post_seconds: int = 10
+    scan_interval: float = 1
     max_buffer_seconds: int = 40
 
     @property
@@ -218,13 +218,13 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     fail_build_dir.mkdir(parents=True, exist_ok=True)
 
     click_ts = time.time()
-    time.sleep(max(0, cfg.post_seconds) + 0.70)
+    time.sleep(max(0, cfg.post_seconds) + 0.50)
 
     # Calcula quantos segmentos de vídeo são necessários para cobrir o tempo total do highlight
     # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo
     # total pela duração do segmento e arredondamos para garantir cobertura completa.
     need = max(1, int(round((cfg.pre_seconds + cfg.post_seconds) / cfg.seg_time)))
-    print(f"\n\n {need} segmentos capturados para o highlight.")
+    print(f"\n\n {need} segmentos são necessários para o highlight.")
 
     def _segnum_from_path(s):
         try:
@@ -234,9 +234,10 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
 
     # Ultimos videos em buffer
     selected_videos = sorted(segbuf.snapshot_last(need), key=_segnum_from_path)
+    print(f"Total de segmentos selecionados: {len(selected_videos)}")
 
     if not selected_videos:
-        print("Nenhum segmento disponível — encerrando.")
+        print("Nenhum segmento capturado — encerrando.")
         return None
 
     # Copia os segmentos correspondentes para uma pasta de staging (não limpa o buffer)
@@ -491,6 +492,7 @@ def add_image_watermark(
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
     - Requer ffmpeg no PATH. Não requer MoviePy.
     """
+    print("\n\nAdicionando marca d'água...\n\n")
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
     if not in_p.exists():
@@ -509,7 +511,7 @@ def add_image_watermark(
     # - format=rgba garante canal alpha; colorchannelmixer ajusta opacidade
     filt = (
         f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm];"
-        f"[0:v][wm]overlay=x=main_w-overlay_w-{int(margin)}:y=main_h-overlay_h-{int(margin)}"
+        f"[0:v][wm]overlay=x=main_w-overlay_w-{int(margin)}:y=main_h-overlay_h-{int(margin)}[v]"
     )
 
     cmd = [
@@ -523,7 +525,7 @@ def add_image_watermark(
         "-filter_complex",
         filt,
         "-map",
-        "0:v:0",
+        "[v]",
         "-map",
         "0:a?",
         "-c:v",
@@ -582,11 +584,13 @@ def _http_post_json(
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
     # permissivo para ambientes com certificados locais
     ctx = ssl.create_default_context()
+    
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             charset = resp.headers.get_content_charset() or "utf-8"
@@ -614,8 +618,8 @@ def register_clip_metadados(
     Espera que o backend exponha POST {api_base}/api/videos/metadados.
     Se `token` for fornecido, envia como `Authorization: Bearer <token>`.
     """
-    client_id = os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID")
-    venue_id = os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID")
+    client_id = os.getenv("CLIENT_ID")
+    venue_id = os.getenv("VENUE_ID")
     base = api_base.rstrip("/")
 
     url = f"{base}/api/videos/metadados/client/{client_id}/venue/{venue_id}"
