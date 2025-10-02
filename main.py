@@ -12,7 +12,6 @@ from video_core import (
     build_highlight,
     enqueue_clip,
     add_image_watermark,
-    generate_thumbnail,
     ffprobe_metadata,
     register_clip_metadados,
     upload_file_to_signed_url,
@@ -292,19 +291,16 @@ class ProcessingWorker:
         # idempotência e pré-processamento conforme modo
         upload_target = mp4
         out_mp4 = None
-        thumb_jpg = None
 
         if not self.light_mode:
             # idempotência simples: se já existe saída final, não refazer
             out_mp4 = self.out_wm_dir / mp4.name
-            # thumb_jpg = self.out_wm_dir / (mp4.stem + ".jpg")
-            if out_mp4.exists() and thumb_jpg.exists():
+            if out_mp4.exists():
                 meta.update(
                     {
                         "status": "watermarked",
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "wm_path": str(out_mp4),
-                        # "thumbnail_path": str(thumb_jpg),
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
@@ -330,9 +326,6 @@ class ProcessingWorker:
             )
             tmp_out.replace(out_mp4)  # atomic move
 
-            # 2) thumbnail (meio do vídeo)
-            # generate_thumbnail(out_mp4, thumb_jpg, at_sec=None)
-
             # 3) atualiza sidecar
             meta.update(
                 {
@@ -340,7 +333,6 @@ class ProcessingWorker:
                     "attempts": attempts,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "wm_path": str(out_mp4),
-                    "thumbnail_path": str(thumb_jpg),
                     "meta_wm": ffprobe_metadata(out_mp4),
                 }
             )
@@ -543,11 +535,20 @@ class ProcessingWorker:
             isinstance(meta.get("remote_upload"), dict)
             and meta["remote_upload"].get("status") == "uploaded"
         )
+        finalized_ok = (
+            isinstance(meta.get("remote_finalize"), dict)
+            and meta["remote_finalize"].get("status") == "ok"
+        )
 
-        if uploaded_ok:
+        if uploaded_ok and finalized_ok:
+            # remove artefatos da fila após confirmação completa
             try:
-                mp4.unlink()
-            except FileNotFoundError:
+                mp4.unlink(missing_ok=True)
+            except Exception:
+                pass
+            try:
+                meta_path.unlink(missing_ok=True)
+            except Exception:
                 pass
         else:
             # Cria pasta para pendências de upload dentro de failed_clips/
@@ -689,19 +690,6 @@ def clear_buffer(cfg) -> None:
             except Exception as e:
                 print(f"[startup] erro ao apagar {p}: {e}")
 
-    # Limpa a pasta de staging usada pelo build_highlight (se sobrou algo)
-    try:
-        stage_dir = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
-        if stage_dir.exists():
-            for p in stage_dir.glob("*"):
-                try:
-                    if p.is_file():
-                        p.unlink()
-                except Exception as e:
-                    print(f"[startup] erro ao limpar staging {p}: {e}")
-    except Exception as e:
-        print(f"[startup] erro ao acessar staging: {e}")
-
     print(f"[startup] buffer limpo: {removed} segmentos removidos")
 
 
@@ -729,6 +717,8 @@ def main() -> int:
 
     seg_time_env = _env_int("GN_SEG_TIME", 1)
     print(f"[startup] segmento de {seg_time_env}s, modo leve: {light_mode}")
+
+    worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
 
     cfg = CaptureConfig(
         buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
@@ -769,7 +759,7 @@ def main() -> int:
         failed_dir_highlight=failed_dir_highlight,
         watermark_path=watermark_path,
         scan_interval=1,
-        max_attempts=1,
+        max_attempts=worker_max_attempts,
         wm_margin=24,
         wm_opacity=0.6,
         wm_rel_width=0.11, # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
