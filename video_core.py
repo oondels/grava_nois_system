@@ -55,107 +55,103 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
     # Permite configurar a URL RTSP via env GN_RTSP_URL
     # Ex.: rtsp://user:pass@192.168.1.21:2399/cam/realmonitor?channel=1&subtype=0
-    rtsp_url = os.getenv(
-        "GN_RTSP_URL",
-        "rtsp://admin:wa0i4Ochu@192.168.68.104:554/cam/realmonitor?channel=1&subtype=0",
-    )
+    rtsp_url = (os.getenv("GN_RTSP_URL") or "").strip()
 
-    # Camera Dedicada
-    ffmpeg_cmd_dedicada = [
-        "ffmpeg",
-        "-nostdin",
-        "-loglevel",
-        "warning",
-        "-rtsp_transport",
-        "tcp",
-        "-rtsp_flags",
-        "prefer_tcp",
-        "-fflags",
-        "nobuffer",
-        "-flags",
-        "low_delay",
-        # "-use_wallclock_as_timestamps", Removido para remover erro de video 'longos' com segs errados
-        # "1",
-        "-i",
-        rtsp_url,
-        "-map",
-        "0:v:0",
-        "-c:v",
-        "copy",
-        "-an",
-        "-f",
-        "segment",
-        "-segment_format",
-        "mpegts",
-        "-segment_time",
-        str(cfg.seg_time),  # 1
-        "-segment_start_number",
-        str(start_num),
-        "-reset_timestamps",
-        "0",
-        out_pattern,
-    ]
+    use_rtsp = bool(rtsp_url)
 
-    # Old -> Camera do notebook
-    ffmpeg_cmd_notebook = [
-        "ffmpeg",
-        "-nostdin",
-        # ENTRADA V4L2
-        "-f",
-        "v4l2",
-        "-thread_queue_size",
-        "512",
-        "-input_format",
-        "mjpeg",  # se a webcam suportar MJPEG, ajuda a CPU
-        "-framerate",
-        "30",  # pede 30 fps na captura
-        "-video_size",
-        "1280x720",  # 720p
-        # "-use_wallclock_as_timestamps",
-        # "1",
-        "-i",
-        cfg.device,
-        # SEM ÁUDIO (reduz CPU; add mapeamento se quiser microfone)
-        "-an",
-        # ENCODE H.264 (CPU) focado em baixa latência e fluidez
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",  # ou "ultrafast" se precisar aliviar mais
-        "-tune",
-        "zerolatency",
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        "30",  # garante 30 fps na saída
-        "-g",
-        "30",  # GOP de 30 (1 IDR por segundo)
-        "-keyint_min",
-        "30",
-        "-sc_threshold",
-        "0",  # evita IDR extra por detecção de cena
-        "-force_key_frames",
-        f"expr:gte(t,n_forced*{cfg.seg_time})",
-        # SAÍDA: SEGMENTOS DE 1s EM TS (mais estável para concat do que MP4)
-        "-f",
-        "segment",
-        "-segment_format",
-        "mpegts",
-        "-segment_time",
-        str(cfg.seg_time),
-        "-segment_start_number",
-        str(start_num),
-        "-reset_timestamps",
-        "0",  # mantém PTS contínuo entre arquivos
-        str(cfg.buffer_dir / "buffer%06d.ts"),
-    ]
+    if use_rtsp:
+        cmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "warning",
+            "-rtsp_transport",
+            "tcp",
+            "-rtsp_flags",
+            "prefer_tcp",
+            "-fflags",
+            "nobuffer",
+            "-flags",
+            "low_delay",
+            "-i",
+            rtsp_url,
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "copy",
+            "-an",
+            "-f",
+            "segment",
+            "-segment_format",
+            "mpegts",
+            "-segment_time",
+            str(cfg.seg_time),
+            "-segment_start_number",
+            str(start_num),
+            "-reset_timestamps",
+            "0",
+            out_pattern,
+        ]
+    else:
+        framerate_raw = os.getenv("GN_INPUT_FRAMERATE", "30")
+        video_size = os.getenv("GN_VIDEO_SIZE", "1280x720")
+        gop = max(1, int(float(framerate_raw)))
+        cmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-f",
+            "v4l2",
+            "-thread_queue_size",
+            "512",
+            "-input_format",
+            "mjpeg",
+            "-framerate",
+            str(framerate_raw),
+            "-video_size",
+            str(video_size),
+            "-i",
+            cfg.device,
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(framerate_raw),
+            "-g",
+            str(gop),
+            "-keyint_min",
+            str(gop),
+            "-sc_threshold",
+            "0",
+            "-force_key_frames",
+            f"expr:gte(t,n_forced*{cfg.seg_time})",
+            "-f",
+            "segment",
+            "-segment_format",
+            "mpegts",
+            "-segment_time",
+            str(cfg.seg_time),
+            "-segment_start_number",
+            str(start_num),
+            "-reset_timestamps",
+            "0",
+            out_pattern,
+        ]
 
-    return subprocess.Popen(
-        ffmpeg_cmd_notebook,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg não encontrado no PATH") from exc
 
 
 # ---- Segment buffer (indexer thread) ---------------------------------------

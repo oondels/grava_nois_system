@@ -898,7 +898,9 @@ def main() -> int:
             out = build_highlight(
                 cfg, segbuf
             )  # Constroi o clipe a partir dos seguimentos
-
+            
+            return
+            
             if out:
                 try:
                     enqueue_clip(cfg, out)
