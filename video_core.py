@@ -24,6 +24,8 @@ class CaptureConfig:
     post_seconds: int = 10
     scan_interval: float = 1
     max_buffer_seconds: int = 40
+    pre_segments: Optional[int] = None
+    post_segments: Optional[int] = None
 
     @property
     def max_segments(self) -> int:
@@ -210,12 +212,26 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     fail_build_dir.mkdir(parents=True, exist_ok=True)
 
     click_ts = time.time()
-    time.sleep(max(0, cfg.post_seconds) + 0.50)
+    if cfg.post_segments is not None:
+        wait_after = cfg.post_segments * cfg.seg_time
+    else:
+        wait_after = cfg.post_seconds
+    time.sleep(max(0, wait_after) + 0.50)
 
     # Calcula quantos segmentos de vídeo são necessários para cobrir o tempo total do highlight
     # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo
     # total pela duração do segmento e arredondamos para garantir cobertura completa.
-    need = max(1, int(round((cfg.pre_seconds + cfg.post_seconds) / cfg.seg_time)))
+    pre_seg = (
+        cfg.pre_segments
+        if cfg.pre_segments is not None
+        else max(1, int(round(cfg.pre_seconds / cfg.seg_time)))
+    )
+    post_seg = (
+        cfg.post_segments
+        if cfg.post_segments is not None
+        else max(1, int(round(cfg.post_seconds / cfg.seg_time)))
+    )
+    need = max(1, pre_seg + post_seg)
     print(f"\n\n {need} segmentos são necessários para o highlight.")
 
     def _segnum_from_path(s):
@@ -403,6 +419,8 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
         "pre_seconds": cfg.pre_seconds,
         "post_seconds": cfg.post_seconds,
         "seg_time": cfg.seg_time,
+        "pre_segments": cfg.pre_segments,
+        "post_segments": cfg.post_segments,
         "status": "queued",
     }
 

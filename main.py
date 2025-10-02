@@ -720,17 +720,31 @@ def main() -> int:
 
     worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
 
+    rtsp_mode = bool((os.getenv("GN_RTSP_URL") or "").strip())
+    if rtsp_mode:
+        pre_seg_cfg = _env_int("GN_RTSP_PRE_SEGMENTS", 6)
+        post_seg_cfg = _env_int("GN_RTSP_POST_SEGMENTS", 2)
+        pre_sec_cfg = pre_seg_cfg * seg_time_env
+        post_sec_cfg = post_seg_cfg * seg_time_env
+    else:
+        pre_seg_cfg = None
+        post_seg_cfg = None
+        pre_sec_cfg = 25
+        post_sec_cfg = 10
+
     cfg = CaptureConfig(
         buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
         clips_dir=base / "recorded_clips",
         queue_dir=base / "queue_raw",
         device="/dev/video0",
         seg_time=seg_time_env,
-        pre_seconds=25,
-        post_seconds=10,
+        pre_seconds=pre_sec_cfg,
+        post_seconds=post_sec_cfg,
         scan_interval=1,
         max_buffer_seconds=40,
         failed_dir_highlight=base / "failed_clips",
+        pre_segments=pre_seg_cfg,
+        post_segments=post_seg_cfg,
     )
 
     # Limpa o buffer
@@ -861,10 +875,15 @@ def main() -> int:
             except Exception as e:
                 print(f"[gpio] falha ao configurar GPIO (pigpio): {e}")
 
+    if cfg.pre_segments is not None and cfg.post_segments is not None:
+        capture_desc = f"{cfg.pre_segments} seg + {cfg.post_segments} seg"
+    else:
+        capture_desc = f"{cfg.pre_seconds}s + {cfg.post_seconds}s"
+
     prompt = (
         f"Gravando… pressione ENTER"
         + (f" ou botão GPIO (BCM {gpio_pin_env})" if gpio_pin_env else "")
-        + f" para capturar {cfg.pre_seconds}s + {cfg.post_seconds}s (Ctrl+C sai)"
+        + f" para capturar {capture_desc} (Ctrl+C sai)"
     )
     print(prompt)
 
