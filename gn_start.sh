@@ -138,7 +138,6 @@ mkdir -p \
   "${PROJECT_ROOT}/recorded_clips" \
   "${PROJECT_ROOT}/queue_raw" \
   "${PROJECT_ROOT}/failed_clips" \
-  "${PROJECT_ROOT}/buffered_seguiments_post_clique" \
   "${PROJECT_ROOT}/files"
 
 # 3) Checagens do Docker

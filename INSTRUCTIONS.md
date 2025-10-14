@@ -88,7 +88,6 @@ O container `grava_nois_system` será iniciado em segundo plano. Ele:
 * `recorded_clips/` — clipes recém‑gerados
 * `queue_raw/` — clipes aguardando upload
 * `failed_clips/` — clipes com falha
-* `buffered_seguiments_post_clique/` — staging temporário
 * `files/` — arquivos auxiliares (ex: watermark)
 
 ---

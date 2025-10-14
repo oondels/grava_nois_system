@@ -12,7 +12,6 @@ from video_core import (
     build_highlight,
     enqueue_clip,
     add_image_watermark,
-    generate_thumbnail,
     ffprobe_metadata,
     register_clip_metadados,
     upload_file_to_signed_url,
@@ -292,19 +291,16 @@ class ProcessingWorker:
         # idempotência e pré-processamento conforme modo
         upload_target = mp4
         out_mp4 = None
-        thumb_jpg = None
 
         if not self.light_mode:
             # idempotência simples: se já existe saída final, não refazer
             out_mp4 = self.out_wm_dir / mp4.name
-            # thumb_jpg = self.out_wm_dir / (mp4.stem + ".jpg")
-            if out_mp4.exists() and thumb_jpg.exists():
+            if out_mp4.exists():
                 meta.update(
                     {
                         "status": "watermarked",
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "wm_path": str(out_mp4),
-                        # "thumbnail_path": str(thumb_jpg),
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
@@ -330,9 +326,6 @@ class ProcessingWorker:
             )
             tmp_out.replace(out_mp4)  # atomic move
 
-            # 2) thumbnail (meio do vídeo)
-            # generate_thumbnail(out_mp4, thumb_jpg, at_sec=None)
-
             # 3) atualiza sidecar
             meta.update(
                 {
@@ -340,7 +333,6 @@ class ProcessingWorker:
                     "attempts": attempts,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "wm_path": str(out_mp4),
-                    "thumbnail_path": str(thumb_jpg),
                     "meta_wm": ffprobe_metadata(out_mp4),
                 }
             )
@@ -543,11 +535,20 @@ class ProcessingWorker:
             isinstance(meta.get("remote_upload"), dict)
             and meta["remote_upload"].get("status") == "uploaded"
         )
+        finalized_ok = (
+            isinstance(meta.get("remote_finalize"), dict)
+            and meta["remote_finalize"].get("status") == "ok"
+        )
 
-        if uploaded_ok:
+        if uploaded_ok and finalized_ok:
+            # remove artefatos da fila após confirmação completa
             try:
-                mp4.unlink()
-            except FileNotFoundError:
+                mp4.unlink(missing_ok=True)
+            except Exception:
+                pass
+            try:
+                meta_path.unlink(missing_ok=True)
+            except Exception:
                 pass
         else:
             # Cria pasta para pendências de upload dentro de failed_clips/
@@ -689,19 +690,6 @@ def clear_buffer(cfg) -> None:
             except Exception as e:
                 print(f"[startup] erro ao apagar {p}: {e}")
 
-    # Limpa a pasta de staging usada pelo build_highlight (se sobrou algo)
-    try:
-        stage_dir = Path(__file__).resolve().parent / "buffered_seguiments_post_clique"
-        if stage_dir.exists():
-            for p in stage_dir.glob("*"):
-                try:
-                    if p.is_file():
-                        p.unlink()
-                except Exception as e:
-                    print(f"[startup] erro ao limpar staging {p}: {e}")
-    except Exception as e:
-        print(f"[startup] erro ao acessar staging: {e}")
-
     print(f"[startup] buffer limpo: {removed} segmentos removidos")
 
 
@@ -730,17 +718,33 @@ def main() -> int:
     seg_time_env = _env_int("GN_SEG_TIME", 1)
     print(f"[startup] segmento de {seg_time_env}s, modo leve: {light_mode}")
 
+    worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
+
+    rtsp_mode = bool((os.getenv("GN_RTSP_URL") or "").strip())
+    if rtsp_mode:
+        pre_seg_cfg = _env_int("GN_RTSP_PRE_SEGMENTS", 6)
+        post_seg_cfg = _env_int("GN_RTSP_POST_SEGMENTS", 2)
+        pre_sec_cfg = pre_seg_cfg * seg_time_env
+        post_sec_cfg = post_seg_cfg * seg_time_env
+    else:
+        pre_seg_cfg = None
+        post_seg_cfg = None
+        pre_sec_cfg = 25
+        post_sec_cfg = 10
+
     cfg = CaptureConfig(
         buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
         clips_dir=base / "recorded_clips",
         queue_dir=base / "queue_raw",
         device="/dev/video0",
         seg_time=seg_time_env,
-        pre_seconds=25,
-        post_seconds=10,
+        pre_seconds=pre_sec_cfg,
+        post_seconds=post_sec_cfg,
         scan_interval=1,
         max_buffer_seconds=40,
         failed_dir_highlight=base / "failed_clips",
+        pre_segments=pre_seg_cfg,
+        post_segments=post_seg_cfg,
     )
 
     # Limpa o buffer
@@ -769,7 +773,7 @@ def main() -> int:
         failed_dir_highlight=failed_dir_highlight,
         watermark_path=watermark_path,
         scan_interval=1,
-        max_attempts=1,
+        max_attempts=worker_max_attempts,
         wm_margin=24,
         wm_opacity=0.6,
         wm_rel_width=0.11, # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
@@ -871,10 +875,15 @@ def main() -> int:
             except Exception as e:
                 print(f"[gpio] falha ao configurar GPIO (pigpio): {e}")
 
+    if cfg.pre_segments is not None and cfg.post_segments is not None:
+        capture_desc = f"{cfg.pre_segments} seg + {cfg.post_segments} seg"
+    else:
+        capture_desc = f"{cfg.pre_seconds}s + {cfg.post_seconds}s"
+
     prompt = (
         f"Gravando… pressione ENTER"
         + (f" ou botão GPIO (BCM {gpio_pin_env})" if gpio_pin_env else "")
-        + f" para capturar {cfg.pre_seconds}s + {cfg.post_seconds}s (Ctrl+C sai)"
+        + f" para capturar {capture_desc} (Ctrl+C sai)"
     )
     print(prompt)
 
@@ -898,7 +907,9 @@ def main() -> int:
             out = build_highlight(
                 cfg, segbuf
             )  # Constroi o clipe a partir dos seguimentos
-
+            
+            return
+            
             if out:
                 try:
                     enqueue_clip(cfg, out)
