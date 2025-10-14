@@ -1,4 +1,4 @@
-import os, re, json, time, hashlib, subprocess, threading, platform, shutil
+import os, re, json, time, hashlib, subprocess, threading, platform, shutil, socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -6,6 +6,7 @@ from collections import deque
 from typing import Deque, List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
+from urllib.parse import urlparse
 import requests
 
 load_dotenv()
@@ -38,6 +39,54 @@ class CaptureConfig:
         self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
 
+# ---- Health check RTSP ------------------------------------------------------
+def check_rtsp_connectivity(rtsp_url: str, timeout: int = 5, max_retries: int = 10) -> bool:
+    """
+    Verifica se a câmera RTSP está acessível antes de iniciar o FFmpeg.
+
+    Args:
+        rtsp_url: URL RTSP completa (ex: rtsp://user:pass@192.168.1.21:554/cam/realmonitor)
+        timeout: Tempo limite por tentativa em segundos
+        max_retries: Número máximo de tentativas
+
+    Returns:
+        True se a câmera estiver acessível, False caso contrário
+    """
+    try:
+        parsed = urlparse(rtsp_url)
+        host = parsed.hostname
+        port = parsed.port or 554
+
+        if not host:
+            print("[rtsp-check] ERRO: URL RTSP inválida (hostname não encontrado)")
+            return False
+
+        print(f"[rtsp-check] Verificando conectividade com câmera {host}:{port}...")
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"[rtsp-check] Tentativa {attempt}/{max_retries}...")
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                sock.connect((host, port))
+                sock.close()
+                print(f"[rtsp-check] ✓ Câmera acessível em {host}:{port}!")
+                return True
+            except (socket.timeout, socket.error, OSError) as e:
+                print(f"[rtsp-check] ✗ Falha: {e}")
+                if attempt < max_retries:
+                    wait_time = 5
+                    print(f"[rtsp-check] Aguardando {wait_time}s antes de tentar novamente...")
+                    time.sleep(wait_time)
+
+        print(f"[rtsp-check] ERRO: Câmera não acessível após {max_retries} tentativas.")
+        return False
+
+    except Exception as e:
+        print(f"[rtsp-check] ERRO inesperado ao verificar conectividade: {e}")
+        return False
+
+
 # ---- FFmpeg recorder --------------------------------------------------------
 def _calc_start_number(buffer_dir: Path) -> int:
     pattern = re.compile(r"buffer(\d{3,})\.ts$")
@@ -60,6 +109,21 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     rtsp_url = (os.getenv("GN_RTSP_URL") or "").strip()
 
     use_rtsp = bool(rtsp_url)
+
+    # Health check: verifica conectividade com câmera RTSP antes de iniciar FFmpeg
+    if use_rtsp:
+        max_retries = int(os.getenv("GN_RTSP_MAX_RETRIES", "10"))
+        timeout = int(os.getenv("GN_RTSP_TIMEOUT", "5"))
+
+        if not check_rtsp_connectivity(rtsp_url, timeout=timeout, max_retries=max_retries):
+            raise RuntimeError(
+                f"Câmera RTSP não acessível após {max_retries} tentativas. "
+                "Verifique:\n"
+                "  1. Se a câmera está ligada e conectada à rede\n"
+                "  2. Se o endereço IP e porta estão corretos em GN_RTSP_URL\n"
+                "  3. Se há conectividade de rede entre Raspberry e câmera\n"
+                "  4. Se o firewall não está bloqueando a porta RTSP (padrão: 554)"
+            )
 
     if use_rtsp:
         cmd = [
@@ -145,15 +209,33 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             out_pattern,
         ]
 
+    # Configurar logging do FFmpeg
+    log_dir = Path(os.getenv("GN_LOG_DIR", "/usr/src/app/logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = log_dir / "ffmpeg.log"
+
     try:
+        # Abre arquivo de log em modo append
+        log_file = open(log_file_path, "a", buffering=1)  # line buffering
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        log_file.write(f"\n{'='*80}\n")
+        log_file.write(f"[{timestamp}] Iniciando FFmpeg\n")
+        log_file.write(f"Comando: {' '.join(cmd)}\n")
+        log_file.write(f"{'='*80}\n\n")
+        log_file.flush()
+
+        print(f"[ffmpeg] Logs sendo salvos em: {log_file_path}")
+
         return subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,  # Combina stderr com stdout
             stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg não encontrado no PATH") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Erro ao iniciar FFmpeg: {exc}") from exc
 
 
 # ---- Segment buffer (indexer thread) ---------------------------------------

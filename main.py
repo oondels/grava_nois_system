@@ -723,7 +723,7 @@ def main() -> int:
     rtsp_mode = bool((os.getenv("GN_RTSP_URL") or "").strip())
     if rtsp_mode:
         pre_seg_cfg = _env_int("GN_RTSP_PRE_SEGMENTS", 6)
-        post_seg_cfg = _env_int("GN_RTSP_POST_SEGMENTS", 2)
+        post_seg_cfg = _env_int("GN_RTSP_POST_SEGMENTS", 3)
         pre_sec_cfg = pre_seg_cfg * seg_time_env
         post_sec_cfg = post_seg_cfg * seg_time_env
     else:
@@ -907,8 +907,6 @@ def main() -> int:
             out = build_highlight(
                 cfg, segbuf
             )  # Constroi o clipe a partir dos seguimentos
-            
-            return
             
             if out:
                 try:

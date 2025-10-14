@@ -9,12 +9,23 @@ services:
       - .env
     working_dir: /usr/src/app
     shm_size: 512m
+
+    # Health check: verifica se FFmpeg está rodando corretamente
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f ffmpeg || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Aguarda 60s antes de começar health checks (tempo para câmera inicializar)
+
     volumes:
       - ./.env:/usr/src/app/.env:ro
       - ./files:/usr/src/app/files
       - ./recorded_clips:/usr/src/app/recorded_clips
       - ./queue_raw:/usr/src/app/queue_raw
       - ./failed_clips:/usr/src/app/failed_clips
+      - ./logs:/usr/src/app/logs  # Diretório para logs do FFmpeg
+
     # Network defaults to bridge, which is fine for RTSP on LAN.
     # For GPIO or V4L2 webcam usage, uncomment the lines below:
     devices:
