@@ -197,16 +197,38 @@ Após o worker, o JSON recebe:
 
 Calcula o próximo número inicial para `-segment_start_number` com base nos arquivos existentes.
 
+### `check_rtsp_connectivity(rtsp_url: str, timeout: int = 5, max_retries: int = 10) -> bool`
+
+**NOVO**: Verifica conectividade TCP com câmera RTSP antes de iniciar FFmpeg.
+
+- Extrai host/porta da URL RTSP usando `urlparse`
+- Tenta conectar via socket TCP com timeout configurável
+- Retry automático com intervalo de 5s entre tentativas
+- Logs detalhados de cada tentativa (sucesso/falha)
+- Configurável via `GN_RTSP_MAX_RETRIES` e `GN_RTSP_TIMEOUT`
+
+**Propósito**: Resolver problema de inicialização quando Docker inicia antes da câmera estar pronta (ex: após queda de energia).
+
+**Retorno**: `True` se câmera acessível, `False` caso contrário.
+
 ### `start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen`
 
 Inicia o FFmpeg em modo segmentado com:
 
-- `f v4l2 -i /dev/video0`
+- **Health check RTSP (NOVO)**: Antes de iniciar FFmpeg, verifica conectividade com câmera via `check_rtsp_connectivity()`
+- Aguarda até 50s (configurável) pela câmera estar disponível
+- Se câmera não estiver acessível, lança `RuntimeError` com mensagens de diagnóstico detalhadas
+- `f v4l2 -i /dev/video0` (modo V4L2) ou `rtsp://...` (modo RTSP)
 - H.264 `ultrafast` + `zerolatency`
 - `force_key_frames expr:gte(t,n_forced*seg_time)`
 - `f segment -segment_time seg_time -reset_timestamps 1`
+- **Logging robusto (NOVO)**: stdout/stderr do FFmpeg salvos em `logs/ffmpeg.log` (não mais `/dev/null`)
 
 **Retorno**: `Popen` do processo do FFmpeg.
+
+**Exceções**:
+- `RuntimeError`: Câmera RTSP não acessível após max_retries tentativas
+- `RuntimeError`: ffmpeg não encontrado no PATH
 
 ### `SegmentBuffer`
 
@@ -330,10 +352,13 @@ Se `pigpio`/`pigpiod` não estiver disponível, o serviço continua funcionando 
 
 ## 8) Roadmap (próximos passos)
 
-- **Uploader**: implementar worker de upload com URL pré-assinada, seguindo o fluxo já definido no backend.
-- **GPIO**: substituir ENTER por botão físico (GPIO) chamando `build_highlight()`.
-- **Logs** e métricas: logging estruturado (JSON) e contadores de sucesso/falha.
+- ✅ **GPIO**: botão físico implementado (pigpio) — dispara `build_highlight()`.
+- ✅ **Uploader**: worker implementado com URL pré-assinada do backend.
+- ✅ **Health check RTSP**: retry automático para evitar falhas de inicialização.
+- ✅ **Logging robusto**: FFmpeg logs salvos em arquivo para debug.
+- **Logs estruturados**: logging em JSON e contadores de sucesso/falha.
 - **Watchdog**: substituir varredura por eventos de filesystem para reduzir latência.
+- **Métricas**: integração com Prometheus/Grafana para monitoramento.
 
 ---
 
@@ -341,8 +366,48 @@ Se `pigpio`/`pigpiod` não estiver disponível, o serviço continua funcionando 
 
 - **Sem vídeo/permite acesso**: verifique permissões de `/dev/video0` e módulos V4L2.
 - **FFmpeg ausente**: instale `ffmpeg` (inclui `ffprobe`).
-- **CPU alta** no Pi: evite rodar múltiplas marca d’água em paralelo; mantenha `preset=ultrafast`.
+- **CPU alta** no Pi: evite rodar múltiplas marca d'água em paralelo; mantenha `preset=ultrafast`.
 - **Arquivos não aparecem**: confirme caminhos (`buffer_dir`, `clips_dir`, `queue_dir`) e se o processo tem permissões de escrita.
+
+### **NOVO: Problemas de Conexão com Câmera RTSP**
+
+**Sintoma**: "Nenhum segmento capturado — encerrando" ao clicar no botão.
+
+**Causas comuns**:
+1. Câmera não está ligada ou acessível na rede
+2. Docker iniciou antes da câmera finalizar boot (comum após queda de energia)
+3. URL RTSP incorreta ou firewall bloqueando porta 554
+4. FFmpeg não conseguiu iniciar conexão
+
+**Diagnóstico**:
+```bash
+# 1. Verificar logs do sistema
+docker logs grava_nois_system
+
+# 2. Verificar logs do FFmpeg
+tail -f logs/ffmpeg.log
+
+# 3. Testar conectividade TCP com câmera
+nc -zv <IP_CAMERA> 554
+
+# 4. Verificar health do container
+docker ps  # Coluna STATUS deve mostrar "healthy"
+```
+
+**Solução implementada** (v2.0+): O sistema agora possui retry automático:
+- Aguarda até 50s (10 tentativas × 5s) pela câmera estar disponível
+- Logs detalhados de cada tentativa de conexão
+- Docker reinicia automaticamente se FFmpeg falhar
+- Health check com período de inicialização de 60s
+
+**Ajustar configuração** (se necessário):
+```bash
+# No arquivo .env, aumente o número de tentativas
+GN_RTSP_MAX_RETRIES=20  # 20 x 5s = 100s de espera
+
+# Ou aumente o timeout por tentativa
+GN_RTSP_TIMEOUT=10      # 10s por tentativa
+```
 
 ---
 
