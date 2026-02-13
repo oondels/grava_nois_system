@@ -403,10 +403,11 @@ class ProcessingWorker:
                 )
                 # status opcional: manter "watermarked" e anotar registro remoto
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                logger.info(f"Registro remoto OK: clip_id={resp.get('clip_id')}")
+                resp_data = (resp or {}).get("data") or {}
+                logger.info(f"Registro remoto OK: clip_id={resp_data.get('clip_id')}")
 
                 # 3.2) upload para a URL assinada, se fornecida
-                upload_url = (resp or {}).get("upload_url")
+                upload_url = resp_data.get("upload_url")
                 if upload_url:
                     logger.info("Iniciando upload para URL assinada (Supabase)")
                     t0 = time.time()
@@ -441,7 +442,7 @@ class ProcessingWorker:
 
                         # 3.3) Finaliza upload no backend (validação de integridade)
                         if 200 <= status_code < 300:
-                            clip_id = (resp or {}).get("clip_id")
+                            clip_id = resp_data.get("clip_id")
                             if clip_id:
                                 try:
                                     logger.info(
