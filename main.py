@@ -13,11 +13,10 @@ from video_core import (
     enqueue_clip,
     add_image_watermark,
     ffprobe_metadata,
-    register_clip_metadados,
-    upload_file_to_signed_url,
-    finalize_clip_uploaded,
+    _sha256_file,
 )
-from video_core import _sha256_file  # util interno
+from src.utils.logger import logger
+from src.services.api_client import GravaNoisAPIClient
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -128,8 +127,8 @@ class ProcessingWorker:
                     if not api_base:
                         # loga esporadicamente para não poluir stdout
                         if now - self._last_noapi_log > 15:
-                            print(
-                                "[worker:retry] GN_API_BASE ausente — ignorando retries por enquanto."
+                            logger.warning(
+                                "GN_API_BASE ausente — ignorando retries por enquanto"
                             )
                             self._last_noapi_log = now
                         continue
@@ -158,13 +157,13 @@ class ProcessingWorker:
                     meta["updated_at"] = datetime.now(timezone.utc).isoformat()
                     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
-                    print(
-                        f"[worker:retry] reprocessando {vid.name} (tentativa {meta['attempts']}/{self.max_attempts})"
+                    logger.info(
+                        f"Reprocessando {vid.name} (tentativa {meta['attempts']}/{self.max_attempts})"
                     )
                     self._process_one(vid, meta_path)
 
                 except Exception as e:
-                    print(f"[worker:retry] falhou {vid.name}: {e}")
+                    logger.error(f"Falha ao reprocessar {vid.name}: {e}")
                     # reaproveita tratamento padrão de falhas
                     self._handle_failure(vid, meta_path, e)
                 finally:
@@ -189,9 +188,9 @@ class ProcessingWorker:
 
                 if self.retry_failed:
                     self._scan_retry_failed()
-            except Exception:
+            except Exception as e:
                 # loga e continua o loop
-                print("[worker] erro inesperado no loop:\n", traceback.format_exc())
+                logger.exception(f"Erro inesperado no loop do worker: {e}")
             self._stop.wait(self.scan_interval)
 
     def _scan_once(self):
@@ -274,7 +273,7 @@ class ProcessingWorker:
             try:
                 self._process_one(mp4, meta_path)
             except Exception as e:
-                print(f"[worker] falhou {mp4.name}: {e}")
+                logger.error(f"Falha ao processar {mp4.name}: {e}")
                 self._handle_failure(mp4, meta_path, e)
             finally:
                 # libera o lock (remove .lock)
@@ -352,34 +351,30 @@ class ProcessingWorker:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
         # 3.1) registra intenção de upload no backend (POST /api/videos/metadados)
-        api_base = os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL")
-        api_token = os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
-        client_id = os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID")
-        venue_id = os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID")
+        api_client = GravaNoisAPIClient()
 
-        print(f"\n\n[worker] Tamanho do arquivo em mb: {upload_target.stat().st_size / (1024*1024):.2f} MB\n\n")
-        
-        if api_base:
+        file_size_mb = upload_target.stat().st_size / (1024 * 1024)
+        logger.info(f"Tamanho do arquivo: {file_size_mb:.2f} MB")
+
+        if api_client.is_configured():
             try:  # Tenta fazer o registro com o servidor
                 size_upload = upload_target.stat().st_size
                 sha256_upload = _sha256_file(upload_target)
                 meta_up = ffprobe_metadata(upload_target)
 
                 payload = {
-                    "venue_id": venue_id,
+                    "venue_id": api_client.venue_id,
                     "duration_sec": float(meta_up.get("duration_sec") or 0.0),
                     "captured_at": meta.get("created_at"),
                     "meta": meta_up,
                     "sha256": sha256_upload,
                 }
 
-                print("[worker] Enviando registro de metadados ao backend…")
-                resp = register_clip_metadados(
-                    api_base, payload, token=api_token, timeout=15.0
-                )
+                logger.info("Enviando registro de metadados ao backend...")
+                resp = api_client.register_clip_metadados(payload, timeout=15.0)
 
                 # Aguarda Resposta do Backend
-                print(f"[worker] Resposta do backend: {json.dumps(resp)[:300]}")
+                logger.debug(f"Resposta do backend: {json.dumps(resp)[:300]}")
                 meta.setdefault("remote_registration", {})
                 meta["remote_registration"].update(
                     {
@@ -390,15 +385,15 @@ class ProcessingWorker:
                 )
                 # status opcional: manter "watermarked" e anotar registro remoto
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                print(f"[worker] registro remoto OK: clip_id={resp.get('clip_id')}")
+                logger.info(f"Registro remoto OK: clip_id={resp.get('clip_id')}")
 
                 # 3.2) upload para a URL assinada, se fornecida
                 upload_url = (resp or {}).get("upload_url")
                 if upload_url:
-                    print("[worker] Iniciando upload para URL assinada (Supabase)")
+                    logger.info("Iniciando upload para URL assinada (Supabase)")
                     t0 = time.time()
                     try:
-                        status_code, reason, resp_headers = upload_file_to_signed_url(
+                        status_code, reason, resp_headers = api_client.upload_file_to_signed_url(
                             upload_url,
                             upload_target,
                             content_type="video/mp4",
@@ -422,31 +417,28 @@ class ProcessingWorker:
                         meta_path.write_text(
                             json.dumps(meta, ensure_ascii=False, indent=2)
                         )
-                        # TODO: Verificar confirmação do backend
-                        print(
-                            f"[worker] upload finalizado: HTTP {status_code} {reason} em {dt_ms} ms"
+                        logger.info(
+                            f"Upload finalizado: HTTP {status_code} {reason} em {dt_ms} ms"
                         )
 
                         # 3.3) Finaliza upload no backend (validação de integridade)
                         if 200 <= status_code < 300:
                             clip_id = (resp or {}).get("clip_id")
-                            if clip_id and api_base:
+                            if clip_id:
                                 try:
-                                    print(
-                                        f"[worker] Notificando backend upload concluído (clip_id={clip_id})…"
+                                    logger.info(
+                                        f"Notificando backend sobre upload concluído (clip_id={clip_id})"
                                     )
                                     etag = None
                                     try:
                                         etag = (resp_headers or {}).get("etag")
                                     except Exception:
                                         etag = None
-                                    fin = finalize_clip_uploaded(
-                                        api_base,
+                                    fin = api_client.finalize_clip_uploaded(
                                         clip_id=clip_id,
                                         size_bytes=size_upload,
                                         sha256=sha256_upload,
                                         etag=etag,
-                                        token=api_token,
                                         timeout=20.0,
                                     )
                                     meta.setdefault("remote_finalize", {})
@@ -462,10 +454,9 @@ class ProcessingWorker:
                                     meta_path.write_text(
                                         json.dumps(meta, ensure_ascii=False, indent=2)
                                     )
-                                    print(
-                                        "[worker] Finalização confirmada pelo backend."
-                                    )
+                                    logger.info("Finalização confirmada pelo backend")
                                 except Exception as e:
+                                    logger.error(f"Falha ao finalizar upload no backend: {e}")
                                     meta.setdefault("remote_finalize", {})
                                     meta["remote_finalize"].update(
                                         {
@@ -478,9 +469,6 @@ class ProcessingWorker:
                                     )
                                     meta_path.write_text(
                                         json.dumps(meta, ensure_ascii=False, indent=2)
-                                    )
-                                    print(
-                                        f"[worker] Falha ao finalizar upload no backend: {e}"
                                     )
                     except Exception as e:
                         dt_ms = int((time.time() - t0) * 1000)
@@ -497,10 +485,11 @@ class ProcessingWorker:
                         meta_path.write_text(
                             json.dumps(meta, ensure_ascii=False, indent=2)
                         )
-                        print(f"[worker] upload falhou: {e}")
+                        logger.error(f"Upload falhou: {e}")
                 else:
-                    print("[worker] Nenhuma upload_url na resposta; pulando upload.")
+                    logger.warning("Nenhuma upload_url na resposta; pulando upload")
             except Exception as e:
+                logger.error(f"Registro remoto falhou: {e}")
                 meta.setdefault("remote_registration", {})
                 meta["remote_registration"].update(
                     {
@@ -510,9 +499,8 @@ class ProcessingWorker:
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                print(f"[worker] Registro remoto falhou: {e}")
         else:
-            print("Sem api url configurada, pulando registro")
+            logger.warning("API não configurada, pulando registro remoto")
             # sem configuração de API, apenas registra um hint no sidecar
             meta.setdefault("remote_registration", {})
             meta["remote_registration"].update(
@@ -603,18 +591,18 @@ class ProcessingWorker:
                 dst_vid = pend_dir / file_to_preserve.name
                 if file_to_preserve.resolve() != dst_vid.resolve():
                     shutil.move(str(file_to_preserve), str(dst_vid))
-            except Exception:
-                print(
-                    f"[worker] aviso: falha ao mover vídeo para pendências: {file_to_preserve}"
+            except Exception as e:
+                logger.warning(
+                    f"Falha ao mover vídeo para pendências: {file_to_preserve} - {e}"
                 )
             try:
                 dst_json = pend_dir / meta_path.name
                 if meta_path.resolve() != dst_json.resolve():
                     # meta_path.replace(dst_json)
                     shutil.move(str(meta_path), str(dst_json))
-            except Exception:
-                print(
-                    f"[worker] aviso: falha ao mover sidecar para pendências: {meta_path}"
+            except Exception as e:
+                logger.warning(
+                    f"Falha ao mover sidecar para pendências: {meta_path} - {e}"
                 )
             # Garante limpeza da fila para não reprocessar
             try:
@@ -676,7 +664,7 @@ def clear_buffer(cfg) -> None:
     try:
         cfg.buffer_dir.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        print(f"[startup] não foi possível garantir a pasta de buffer: {e}")
+        logger.error(f"Não foi possível garantir a pasta de buffer: {e}")
 
     removed = 0
     # Apaga apenas arquivos que seguem o padrão de segmentos
@@ -688,9 +676,9 @@ def clear_buffer(cfg) -> None:
             except FileNotFoundError:
                 pass
             except Exception as e:
-                print(f"[startup] erro ao apagar {p}: {e}")
+                logger.warning(f"Erro ao apagar {p}: {e}")
 
-    print(f"[startup] buffer limpo: {removed} segmentos removidos")
+    logger.info(f"Buffer limpo: {removed} segmentos removidos")
 
 
 def main() -> int:
@@ -716,7 +704,7 @@ def main() -> int:
             return default
 
     seg_time_env = _env_int("GN_SEG_TIME", 1)
-    print(f"[startup] segmento de {seg_time_env}s, modo leve: {light_mode}")
+    logger.info(f"Segmento de {seg_time_env}s, modo leve: {light_mode}")
 
     worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
 
@@ -803,9 +791,9 @@ def main() -> int:
                     stop_evt.set()
                     break
                 trigger_q.put("enter")
-        except Exception:
+        except Exception as e:
             # Loga e encerra o listener sem derrubar o serviço.
-            print("[stdin] erro no listener:\n", traceback.format_exc())
+            logger.exception(f"Erro no listener de stdin: {e}")
 
     stdin_t = threading.Thread(target=_stdin_listener, daemon=True)
     stdin_t.start()
@@ -818,7 +806,7 @@ def main() -> int:
         try:
             gpio_pin = int(gpio_pin_env)
         except ValueError:
-            print(f"[gpio] pino inválido em GN_GPIO_PIN/GPIO_PIN: {gpio_pin_env!r}")
+            logger.error(f"Pino GPIO inválido em GN_GPIO_PIN/GPIO_PIN: {gpio_pin_env!r}")
             gpio_pin = None
 
         if gpio_pin is not None:
@@ -845,8 +833,8 @@ def main() -> int:
 
                 pi = _connect_pi()
                 if not pi or not pi.connected:
-                    print(
-                        "[gpio] pigpiod não está acessível. Rode 'pigpiod' e tente novamente."
+                    logger.error(
+                        "pigpiod não está acessível. Rode 'pigpiod' e tente novamente"
                     )
                 else:
                     # Configura pino como entrada com pull-up; botão ao GND.
@@ -867,13 +855,13 @@ def main() -> int:
 
                     # Use FALLING_EDGE para já filtrar nível
                     cb = pi.callback(gpio_pin, pigpio.FALLING_EDGE, on_edge)
-                    print(
-                        f"[gpio] pigpio habilitado no pino BCM {gpio_pin} (debounce {int(debounce_ms)}ms)"
+                    logger.info(
+                        f"pigpio habilitado no pino BCM {gpio_pin} (debounce {int(debounce_ms)}ms)"
                     )
             except ImportError:
-                print("[gpio] pigpio não encontrado; seguindo apenas com ENTER.")
+                logger.warning("pigpio não encontrado; seguindo apenas com ENTER")
             except Exception as e:
-                print(f"[gpio] falha ao configurar GPIO (pigpio): {e}")
+                logger.error(f"Falha ao configurar GPIO (pigpio): {e}")
 
     if cfg.pre_segments is not None and cfg.post_segments is not None:
         capture_desc = f"{cfg.pre_segments} seg + {cfg.post_segments} seg"
@@ -885,7 +873,7 @@ def main() -> int:
         + (f" ou botão GPIO (BCM {gpio_pin_env})" if gpio_pin_env else "")
         + f" para capturar {capture_desc} (Ctrl+C sai)"
     )
-    print(prompt)
+    logger.info(prompt)
 
     try:
         while not stop_evt.is_set():  # Verifica se o evento foi acionado (Botao)
@@ -900,7 +888,7 @@ def main() -> int:
                 elapsed = now - last_gpio_ok_ts
                 if elapsed < gpio_cooldown_sec:
                     restante = int(gpio_cooldown_sec - elapsed)
-                    print(f"[gpio] Ignorado: cooldown ativo ({restante}s restantes)")
+                    logger.info(f"GPIO ignorado: cooldown ativo ({restante}s restantes)")
                     continue
                 last_gpio_ok_ts = now
 
@@ -912,7 +900,7 @@ def main() -> int:
                 try:
                     enqueue_clip(cfg, out)
                 except Exception as e:
-                    print(f"[main] falha ao enfileirar {out.name}: {e}")
+                    logger.error(f"Falha ao enfileirar {out.name}: {e}")
                     pend = failed_dir_highlight / "enqueue_failed"
                     pend.mkdir(parents=True, exist_ok=True)
                     try:
@@ -938,7 +926,7 @@ def main() -> int:
                     )
 
     except KeyboardInterrupt:
-        print("\nEncerrando…")
+        logger.info("Encerrando...")
     finally:
         # Sinaliza para todos os loops/threads que devem encerrar.
         stop_evt.set()

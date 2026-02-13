@@ -7,7 +7,8 @@ from typing import Deque, List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
 from urllib.parse import urlparse
-import requests
+
+from src.utils.logger import logger
 
 load_dotenv()
 
@@ -58,32 +59,32 @@ def check_rtsp_connectivity(rtsp_url: str, timeout: int = 5, max_retries: int = 
         port = parsed.port or 554
 
         if not host:
-            print("[rtsp-check] ERRO: URL RTSP inválida (hostname não encontrado)")
+            logger.error("URL RTSP inválida (hostname não encontrado)")
             return False
 
-        print(f"[rtsp-check] Verificando conectividade com câmera {host}:{port}...")
+        logger.info(f"Verificando conectividade com câmera {host}:{port}...")
 
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"[rtsp-check] Tentativa {attempt}/{max_retries}...")
+                logger.info(f"Tentativa {attempt}/{max_retries}...")
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(timeout)
                 sock.connect((host, port))
                 sock.close()
-                print(f"[rtsp-check] ✓ Câmera acessível em {host}:{port}!")
+                logger.info(f"Câmera acessível em {host}:{port}")
                 return True
             except (socket.timeout, socket.error, OSError) as e:
-                print(f"[rtsp-check] ✗ Falha: {e}")
+                logger.warning(f"Falha na tentativa {attempt}: {e}")
                 if attempt < max_retries:
                     wait_time = 5
-                    print(f"[rtsp-check] Aguardando {wait_time}s antes de tentar novamente...")
+                    logger.info(f"Aguardando {wait_time}s antes de tentar novamente...")
                     time.sleep(wait_time)
 
-        print(f"[rtsp-check] ERRO: Câmera não acessível após {max_retries} tentativas.")
+        logger.error(f"Câmera não acessível após {max_retries} tentativas")
         return False
 
     except Exception as e:
-        print(f"[rtsp-check] ERRO inesperado ao verificar conectividade: {e}")
+        logger.exception(f"Erro inesperado ao verificar conectividade RTSP: {e}")
         return False
 
 
@@ -224,7 +225,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         log_file.write(f"{'='*80}\n\n")
         log_file.flush()
 
-        print(f"[ffmpeg] Logs sendo salvos em: {log_file_path}")
+        logger.info(f"FFmpeg logs sendo salvos em: {log_file_path}")
 
         return subprocess.Popen(
             cmd,
@@ -287,7 +288,7 @@ class SegmentBuffer:
 
 # ---- Constroi clip após usuarios clicar no botao ------------------------------------------------------
 def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
-    print("Botão apertado! Aguardando pós-buffer…")
+    logger.info("Botão apertado! Aguardando pós-buffer...")
 
     # Pasta para arquivos com erro de build
     fail_build_dir = cfg.failed_dir_highlight / "build_failed"
@@ -314,7 +315,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         else max(1, int(round(cfg.post_seconds / cfg.seg_time)))
     )
     need = max(1, pre_seg + post_seg)
-    print(f"\n\n {need} segmentos são necessários para o highlight.")
+    logger.info(f"{need} segmentos são necessários para o highlight")
 
     def _segnum_from_path(s):
         try:
@@ -324,10 +325,10 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
 
     # Ultimos videos em buffer
     selected_videos = sorted(segbuf.snapshot_last(need), key=_segnum_from_path)
-    print(f"Total de segmentos selecionados: {len(selected_videos)}")
+    logger.info(f"Total de segmentos selecionados: {len(selected_videos)}")
 
     if not selected_videos:
-        print("Nenhum segmento capturado — encerrando.")
+        logger.warning("Nenhum segmento capturado — encerrando")
         return None
 
     # Cria uma pasta de staging apenas para o arquivo de manifesto (concat list)
@@ -343,7 +344,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         if p.exists() and p.stat().st_size > 0
     ]
     if not valid_segments or len(valid_segments) < 2:
-        print("Nenhum segmento válido encontrado — encerrando.")
+        logger.warning("Nenhum segmento válido encontrado — encerrando")
         return None
 
     with open(concat_list_path, "w") as f:
@@ -399,10 +400,12 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             check=True,
         )
 
-        print(f"Saved {out_mp4}")
+        logger.info(f"Highlight salvo: {out_mp4}")
         return out_mp4
 
     except Exception as e:
+        logger.exception(f"Falha ao construir highlight: {e}")
+
         # Move quaisquer saídas parciais para a pasta de falha
         try:
             if tmp_ts.exists():
@@ -424,17 +427,6 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             concat_list_path.unlink(missing_ok=True)
         except Exception:
             pass
-
-
-def _sha256_file(p: Path, chunk: int = 1024 * 1024) -> str:
-    h = hashlib.sha256()
-    with p.open("rb") as f:
-        while True:
-            b = f.read(chunk)
-            if not b:
-                break
-            h.update(b)
-    return h.hexdigest()
 
 
 def ffprobe_metadata(path: Path) -> Dict[str, Any]:
@@ -474,10 +466,10 @@ def ffprobe_metadata(path: Path) -> Dict[str, Any]:
 
 
 def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
-    print("Enqueueando clipe...")
     """
     Move o arquivo para a fila (queue_dir) e salva metadados .json ao lado.
     """
+    logger.info("Enfileirando clipe...")
     clip_path = clip_path.resolve()
     size_bytes = clip_path.stat().st_size
     # Em modo leve, evitamos hash caro neste momento
@@ -512,7 +504,7 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
     # move para a fila e grava sidecar
     shutil.move(str(clip_path), str(dst))
     meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-    print(f"Enfileirado para tratamento: {dst}")
+    logger.info(f"Enfileirado para tratamento: {dst}")
     return dst
 
 
@@ -536,7 +528,7 @@ def add_image_watermark(
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
     - Requer ffmpeg no PATH. Não requer MoviePy.
     """
-    print("\n\nAdicionando marca d'água...\n\n")
+    logger.info("Adicionando marca d'água ao vídeo...")
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
     if not in_p.exists():
@@ -587,6 +579,19 @@ def add_image_watermark(
     subprocess.run(cmd, check=True)
 
 
+# ---- Hash helper ------------------------------------------------------------
+def _sha256_file(p: Path, chunk: int = 1024 * 1024) -> str:
+    """Calcula hash SHA-256 de um arquivo."""
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        while True:
+            b = f.read(chunk)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
 # ---- Thumbnail helper (opcional) -------------------------------------------
 def generate_thumbnail(
     input_path: Path, output_path: Path, at_sec: float | None = None
@@ -616,108 +621,3 @@ def generate_thumbnail(
         str(output_path),
     ]
     subprocess.run(cmd, check=True)
-
-
-# ---- HTTP helper & registration --------------------------------------------
-def _http_post_json(
-    url: str,
-    payload: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None,
-    timeout: float = 10.0,
-) -> Dict[str, Any]:
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        response.raise_for_status()  # Lança HTTPError para respostas 4xx/5xx
-        return response.json() if response.text else {}
-
-    except requests.exceptions.HTTPError as e:
-        try:
-            body = e.response.text()
-        except Exception:
-            body = ""
-        raise RuntimeError(
-            f"HTTP {e.response.status_code} ao POST {url}: {body}"
-        ) from e
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Erro de rede ao POST {url}: {e}") from e
-
-
-def register_clip_metadados(
-    api_base: str,
-    metadados: Dict[str, Any],
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-) -> Dict[str, Any]:
-    """
-    Envia metadados do clipe para o backend e retorna o payload de resposta.
-
-    Espera que o backend exponha POST {api_base}/api/videos/metadados.
-    Se `token` for fornecido, envia como `Authorization: Bearer <token>`.
-    """
-    client_id = os.getenv("CLIENT_ID")
-    venue_id = os.getenv("VENUE_ID")
-    base = api_base.rstrip("/")
-    token = os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
-
-    url = f"{base}/api/videos/metadados/client/{client_id}/venue/{venue_id}"
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return _http_post_json(url, metadados, headers=headers, timeout=timeout)
-
-
-# ---- Signed URL upload ------------------------------------------------------
-def upload_file_to_signed_url(
-    upload_url: str,
-    file_path: Path,
-    content_type: str = "video/mp4",
-    extra_headers: Optional[Dict[str, str]] = None,
-    timeout: float = 180.0,
-) -> Tuple[int, str, Dict[str, str]]:
-    """
-    Envia o arquivo via HTTP PUT para uma URL assinada (S3/GCS/etc).
-    Retorna (status_code, reason, response_headers). Lança exceção em erros de conexão.
-    """
-    try:
-        with open(file_path, "rb") as f:
-            headers = {"Content-Type": content_type}
-            if extra_headers:
-                headers.update(extra_headers)
-            response = requests.put(
-                upload_url, data=f, headers=headers, timeout=timeout
-            )
-            return response.status_code, response.reason, dict(response.headers)
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(
-            f"Erro de rede durante o upload para {upload_url}: {e}"
-        ) from e
-
-
-# ---- Finalize uploaded clip -------------------------------------------------
-def finalize_clip_uploaded(
-    api_base: str,
-    clip_id: str,
-    size_bytes: int,
-    sha256: str,
-    *,
-    etag: Optional[str] = None,
-    token: Optional[str] = None,
-    timeout: float = 10.0,
-) -> Dict[str, Any]:
-    """
-    Notifica o backend que o upload foi concluído e valida integridade.
-
-    POST {api_base}/api/videos/{clip_id}/uploaded
-    Body: { "size_bytes": number, "sha256": string }
-    """
-    base = api_base.rstrip("/")
-    url = f"{base}/api/videos/{clip_id}/uploaded"
-    token = os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
-
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    payload: Dict[str, Any] = {"size_bytes": int(size_bytes), "sha256": str(sha256)}
-    if etag:
-        payload["etag"] = etag
-    return _http_post_json(url, payload, headers=headers, timeout=timeout)
