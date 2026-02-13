@@ -1,6 +1,8 @@
 # Grava Nóis — Sistema de Captura de Vídeos
 
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, processar com marca d'água/thumbnail e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
+>
+> **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-required-green.svg)](https://ffmpeg.org/)
@@ -97,6 +99,11 @@ GN_VENUE_ID=uuid-do-local
 GN_GPIO_PIN=17
 GN_GPIO_COOLDOWN_SEC=120
 
+# Janela de funcionamento local (opcional)
+GN_TIME_ZONE=America/Sao_Paulo
+GN_START_TIME=07:00
+GN_END_TIME=23:30
+
 # Modo leve (recomendado para Pi 3B/1GB)
 GN_LIGHT_MODE=1
 
@@ -138,10 +145,12 @@ O `SegmentBuffer` mantém apenas os últimos ~40 segundos de vídeo, apagando se
 
 Ao pressionar ENTER ou botão físico:
 
-1. Sistema aguarda `post_seconds` (padrão: 3 segmentos = 3s)
-2. Seleciona `pre_segments + post_segments` (padrão: 6 + 3 = 9 segmentos)
-3. Concatena com `ffmpeg` (sem reencode)
-4. Salva em `recorded_clips/highlight_YYYYMMDD-HHMMSSZ.mp4`
+1. Sistema valida se o horário atual está dentro da janela `GN_START_TIME` → `GN_END_TIME` no fuso `GN_TIME_ZONE`
+2. Se estiver fora da janela, o trigger é ignorado e o `build_highlight()` não é executado
+3. Se estiver dentro da janela, aguarda `post_seconds` (padrão: 3 segmentos = 3s)
+4. Seleciona `pre_segments + post_segments` (padrão: 6 + 3 = 9 segmentos)
+5. Concatena com `ffmpeg` (sem reencode)
+6. Salva em `recorded_clips/highlight_YYYYMMDD-HHMMSSZ.mp4`
 
 ### 4. Enfileiramento
 
@@ -188,6 +197,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 - **Retry automático:** Até 3 tentativas com backoff
 - **Pasta de falhas:** Vídeos que falharam vão para `failed_clips/upload_failed/`
 - **Reprocessamento:** Sistema tenta reprocessar falhas periodicamente
+- **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
 
 ---
 
@@ -285,6 +295,19 @@ GN_LIGHT_MODE=1                 # 0=normal (watermark), 1=leve (sem watermark)
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
 ```
+
+#### Janela de Funcionamento
+
+```bash
+GN_TIME_ZONE=America/Sao_Paulo  # Fuso para validação de horário local
+GN_START_TIME=07:00             # Início da janela (HH:MM)
+GN_END_TIME=23:30               # Fim da janela (HH:MM)
+```
+
+Observações:
+- Se `GN_START_TIME`/`GN_END_TIME` estiverem inválidos, o sistema faz fallback para `07:00` e `23:30`.
+- Se `GN_TIME_ZONE` estiver inválido, o sistema faz fallback para `America/Sao_Paulo`.
+- A comparação usa apenas hora/minuto.
 
 #### Logging
 
@@ -483,7 +506,18 @@ mv failed_clips/upload_failed/*.mp4 queue_raw/
 mv failed_clips/upload_failed/*.json queue_raw/
 ```
 
-### 5. CPU/Memória Alta
+### 5. Upload Rejeitado por Horário Comercial (HTTP 403)
+
+**Sintomas:**
+- Log com `Upload rejeitado por horário. Arquivo será excluído: ...`
+- O arquivo não aparece em `failed_clips/upload_failed/`
+
+**Comportamento esperado:**
+- O worker entende essa resposta como rejeição de regra de negócio (não erro transitório).
+- O vídeo e o sidecar JSON são removidos localmente.
+- Não entra em `max_attempts` e não passa por retry.
+
+### 6. CPU/Memória Alta
 
 **Soluções:**
 
@@ -501,7 +535,7 @@ export GN_BUFFER_DIR=/home/pi/buffer
 # (Editar main.py: scan_interval=3 em vez de 1)
 ```
 
-### 6. Logs Muito Grandes
+### 7. Logs Muito Grandes
 
 ```bash
 # Logs rotativos estão ativados por padrão
@@ -655,4 +689,4 @@ Em caso de problemas:
 ---
 
 **Última atualização:** 2026-02-13
-**Versão:** 2.1.0 (com refatoração de logging e API client)
+**Versão:** 2.2.0 (janela de horário no trigger e descarte de 403 por horário no worker)
