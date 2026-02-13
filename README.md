@@ -107,6 +107,9 @@ GN_END_TIME=23:30
 # Modo leve (recomendado para Pi 3B/1GB)
 GN_LIGHT_MODE=1
 
+# Modo desenvolvimento (sem chamadas externas)
+DEV=true
+
 # Configurações de buffer
 GN_SEG_TIME=1
 GN_RTSP_PRE_SEGMENTS=6
@@ -191,6 +194,13 @@ O `ProcessingWorker` varre a fila periodicamente:
 2. Faz upload direto (sem marca d'água)
 3. Notifica backend sobre conclusão
 4. Remove arquivo da fila
+
+**Modo DEV (`DEV=true`):**
+1. Executa processamento local normalmente (watermark no modo normal, ou fluxo leve)
+2. Não chama API externa (`register/upload/finalize`)
+3. Marca `remote_registration` como `skipped` com motivo `DEV mode`
+4. Limpa `queue_raw` (remove vídeo cru + sidecar) sem mover para `failed_clips`
+5. Preserva o arquivo final local em `highlights_wm/` quando estiver no modo normal
 
 ### 6. Tratamento de Erros
 
@@ -295,6 +305,17 @@ GN_LIGHT_MODE=1                 # 0=normal (watermark), 1=leve (sem watermark)
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
 ```
+
+#### Modo Desenvolvimento
+
+```bash
+DEV=true                        # Pula chamadas de rede no ProcessingWorker
+```
+
+Com `DEV=true`:
+- O processamento local do vídeo continua ativo.
+- O worker não faz requisições HTTP para registro, upload e finalização.
+- O item é removido de `queue_raw` como sucesso local (sem `upload_failed`).
 
 #### Janela de Funcionamento
 
@@ -535,7 +556,26 @@ export GN_BUFFER_DIR=/home/pi/buffer
 # (Editar main.py: scan_interval=3 em vez de 1)
 ```
 
-### 7. Logs Muito Grandes
+### 7. Modo DEV Não Está Isolando Rede
+
+**Sintomas:**
+- Mesmo com `.env` configurado, ainda aparecem logs de chamada HTTP.
+
+**Checklist:**
+
+```bash
+# O valor deve ser true/1/yes (case-insensitive)
+grep '^DEV=' .env
+
+# Exemplo válido
+DEV=true
+```
+
+**Observação:**
+- Em `DEV=true`, o worker deve logar:
+  `Modo DEV ativado. Pulando comunicação com a API e upload para a nuvem.`
+
+### 8. Logs Muito Grandes
 
 ```bash
 # Logs rotativos estão ativados por padrão
@@ -689,4 +729,4 @@ Em caso de problemas:
 ---
 
 **Última atualização:** 2026-02-13
-**Versão:** 2.2.0 (janela de horário no trigger e descarte de 403 por horário no worker)
+**Versão:** 2.3.0 (modo DEV com short-circuit de rede no worker)

@@ -352,13 +352,29 @@ class ProcessingWorker:
             )
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
+        # Faz verificação se esta em ambiente de desenvolvimento
+        is_dev = os.getenv("DEV", "").strip().lower() in {"true", "1", "yes"}
+
         # 3.1) registra intenção de upload no backend (POST /api/videos/metadados)
         api_client = GravaNoisAPIClient()
 
         file_size_mb = upload_target.stat().st_size / (1024 * 1024)
         logger.info(f"Tamanho do arquivo: {file_size_mb:.2f} MB")
 
-        if api_client.is_configured():
+        if is_dev:
+            logger.info(
+                "Modo DEV ativado. Pulando comunicação com a API e upload para a nuvem."
+            )
+            meta.setdefault("remote_registration", {})
+            meta["remote_registration"].update(
+                {
+                    "status": "skipped",
+                    "reason": "DEV mode",
+                }
+            )
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+        if not is_dev and api_client.is_configured():
             try:  # Tenta fazer o registro com o servidor
                 size_upload = upload_target.stat().st_size
                 sha256_upload = _sha256_file(upload_target)
@@ -573,7 +589,7 @@ class ProcessingWorker:
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-        else:
+        elif not is_dev:
             logger.warning("API não configurada, pulando registro remoto")
             # sem configuração de API, apenas registra um hint no sidecar
             meta.setdefault("remote_registration", {})
@@ -602,7 +618,7 @@ class ProcessingWorker:
             and meta["remote_finalize"].get("status") == "ok"
         )
 
-        if uploaded_ok and finalized_ok:
+        if is_dev or (uploaded_ok and finalized_ok):
             # remove artefatos da fila após confirmação completa
             try:
                 mp4.unlink(missing_ok=True)
