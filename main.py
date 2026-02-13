@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import threading
 import queue
+import requests
 from video_core import (
     CaptureConfig,
     SegmentBuffer,
@@ -490,6 +491,78 @@ class ProcessingWorker:
                 else:
                     logger.warning("Nenhuma upload_url na resposta; pulando upload")
             except Exception as e:
+                http_response = None
+                if isinstance(e, requests.exceptions.HTTPError):
+                    http_response = getattr(e, "response", None)
+                else:
+                    cause = getattr(e, "__cause__", None)
+                    if isinstance(cause, requests.exceptions.HTTPError):
+                        http_response = getattr(cause, "response", None)
+
+                if http_response is not None and http_response.status_code == 403:
+                    err_code = ""
+                    err_message = ""
+                    try:
+                        err_payload = http_response.json()
+                    except ValueError:
+                        err_payload = {}
+                    except Exception:
+                        err_payload = {}
+
+                    if isinstance(err_payload, dict):
+                        err_obj = err_payload.get("error")
+                        if isinstance(err_obj, dict):
+                            err_code = str(err_obj.get("code") or "").strip()
+                            err_message = str(err_obj.get("message") or "").strip()
+                        if not err_message:
+                            err_message = str(
+                                err_payload.get("message") or err_payload.get("detail") or ""
+                            ).strip()
+
+                    if not err_message:
+                        try:
+                            err_message = str(http_response.text or "").strip()
+                        except Exception:
+                            err_message = ""
+
+                    msg_l = err_message.lower()
+                    code_is_time_window = (
+                        err_code == "request_outside_allowed_time_window"
+                    )
+                    msg_is_time_window = any(
+                        token in msg_l
+                        for token in (
+                            "request_outside_allowed_time_window",
+                            "outside allowed time window",
+                            "outside the allowed time window",
+                            "allowed time window",
+                            "business hours",
+                            "horário comercial",
+                            "horario comercial",
+                            "fora do horário",
+                            "fora do horario",
+                        )
+                    )
+
+                    if code_is_time_window or msg_is_time_window:
+                        logger.warning(
+                            f"Upload rejeitado por horário. Arquivo será excluído: {mp4.name}"
+                        )
+                        try:
+                            upload_target.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        if upload_target != mp4:
+                            try:
+                                mp4.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+                        try:
+                            meta_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        return
+
                 logger.error(f"Registro remoto falhou: {e}")
                 meta.setdefault("remote_registration", {})
                 meta["remote_registration"].update(
