@@ -212,8 +212,17 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
 
     # Configurar logging do FFmpeg (fallback relativo à raiz do projeto)
     base_dir = Path(__file__).resolve().parent
-    log_dir = Path(os.getenv("GN_LOG_DIR", base_dir / "logs"))
-    log_dir.mkdir(parents=True, exist_ok=True)
+    default_log_dir = base_dir / "logs"
+    log_dir = Path(os.getenv("GN_LOG_DIR", default_log_dir))
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(
+            f"GN_LOG_DIR inválido ou sem permissão ({log_dir}): {e}. "
+            f"Usando fallback local: {default_log_dir}"
+        )
+        log_dir = default_log_dir
+        log_dir.mkdir(parents=True, exist_ok=True)
     log_file_path = log_dir / "ffmpeg.log"
 
     try:

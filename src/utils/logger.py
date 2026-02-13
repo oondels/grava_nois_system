@@ -45,9 +45,17 @@ def setup_logger(name: str = "grava_nois") -> logging.Logger:
     # Handler para arquivo rotativo (DEBUG)
     # Usa fallback relativo à raiz do projeto se GN_LOG_DIR não estiver definido
     base_dir = Path(__file__).resolve().parent.parent.parent
-    log_dir = Path(os.getenv("GN_LOG_DIR", base_dir / "logs"))
-
-    log_dir.mkdir(parents=True, exist_ok=True)
+    default_log_dir = base_dir / "logs"
+    log_dir = Path(os.getenv("GN_LOG_DIR", default_log_dir))
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(
+            f"GN_LOG_DIR inválido ou sem permissão ({log_dir}): {e}. "
+            f"Usando fallback local: {default_log_dir}"
+        )
+        log_dir = default_log_dir
+        log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "app.log"
 
     # Arquivo rotativo: máximo 10MB por arquivo, mantém 5 backups
