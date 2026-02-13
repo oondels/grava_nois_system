@@ -333,8 +333,12 @@ Observações:
 #### Logging
 
 ```bash
-GN_LOG_DIR=/caminho/custom/logs # Diretório de logs (padrão: ./logs)
+GN_LOG_DIR=/caminho/custom/logs # Diretório de logs (fallback: <raiz-do-projeto>/logs)
 ```
+
+Observações:
+- Se `GN_LOG_DIR` não for definido, o sistema cria e usa `logs/` na raiz do projeto (mesma pasta de `main.py`).
+- O fallback padrão não depende de caminho absoluto de container Docker.
 
 ### Câmera V4L2 (Local)
 
@@ -594,6 +598,7 @@ rm logs/app.log.*
 
 - **Console:** INFO e acima (mensagens importantes)
 - **Arquivo `logs/app.log`:** DEBUG e acima (tudo)
+- **Arquivo `logs/ffmpeg.log`:** saída consolidada do FFmpeg (`stdout` + `stderr`)
 
 ### Formato
 
@@ -729,4 +734,4 @@ Em caso de problemas:
 ---
 
 **Última atualização:** 2026-02-13
-**Versão:** 2.3.0 (modo DEV com short-circuit de rede no worker)
+**Versão:** 2.3.1 (fallback dinâmico de logs na raiz do projeto)

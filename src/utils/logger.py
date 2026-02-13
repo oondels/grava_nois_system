@@ -43,17 +43,9 @@ def setup_logger(name: str = "grava_nois") -> logging.Logger:
     logger.addHandler(console_handler)
 
     # Handler para arquivo rotativo (DEBUG)
-    # Usa caminho relativo ao diretório atual se GN_LOG_DIR não estiver definido
-    default_log_dir = os.getenv("GN_LOG_DIR")
-    if default_log_dir:
-        log_dir = Path(default_log_dir)
-    else:
-        # Tenta usar /usr/src/app/logs se existir (container Docker), senão usa ./logs
-        docker_log_dir = Path("/usr/src/app/logs")
-        if docker_log_dir.parent.exists() and os.access(docker_log_dir.parent, os.W_OK):
-            log_dir = docker_log_dir
-        else:
-            log_dir = Path.cwd() / "logs"
+    # Usa fallback relativo à raiz do projeto se GN_LOG_DIR não estiver definido
+    base_dir = Path(__file__).resolve().parent.parent.parent
+    log_dir = Path(os.getenv("GN_LOG_DIR", base_dir / "logs"))
 
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "app.log"

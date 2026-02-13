@@ -210,8 +210,9 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             out_pattern,
         ]
 
-    # Configurar logging do FFmpeg
-    log_dir = Path(os.getenv("GN_LOG_DIR", "/usr/src/app/logs"))
+    # Configurar logging do FFmpeg (fallback relativo à raiz do projeto)
+    base_dir = Path(__file__).resolve().parent
+    log_dir = Path(os.getenv("GN_LOG_DIR", base_dir / "logs"))
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file_path = log_dir / "ffmpeg.log"
 
