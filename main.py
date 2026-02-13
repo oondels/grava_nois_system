@@ -406,10 +406,11 @@ class ProcessingWorker:
                 print("Resposta do backend:")
                 print(resp)
                 resp_data = (resp or {}).get("data") or {}
-                logger.info(f"Registro remoto OK: clip_id={resp_data.get('clip_id')}")
+                resp_clip = resp_data.get("clip") or {}
+                logger.info(f"Registro remoto OK: clip_id={resp_clip.get('clip_id')}")
 
                 # 3.2) upload para a URL assinada, se fornecida
-                upload_url = resp_data.get("upload_url")
+                upload_url = resp_clip.get("upload_url")
                 if upload_url:
                     logger.info("Iniciando upload para URL assinada (Supabase)")
                     t0 = time.time()
