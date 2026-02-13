@@ -403,6 +403,8 @@ class ProcessingWorker:
                 )
                 # status opcional: manter "watermarked" e anotar registro remoto
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+                print("Resposta do backend:")
+                print(resp)
                 resp_data = (resp or {}).get("data") or {}
                 logger.info(f"Registro remoto OK: clip_id={resp_data.get('clip_id')}")
 
