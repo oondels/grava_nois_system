@@ -294,7 +294,7 @@ class ProcessingWorker:
         out_mp4 = None
 
         if not self.light_mode:
-            # idempotência simples: se já existe saída final, não refazer
+            # APENAS atualiza o sidecar e define o target
             out_mp4 = self.out_wm_dir / mp4.name
             if out_mp4.exists():
                 meta.update(
@@ -305,41 +305,36 @@ class ProcessingWorker:
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                # remove o original da fila
-                try:
-                    mp4.unlink()
-                except FileNotFoundError:
-                    pass
-                return
+                upload_target = out_mp4
+            else:
+                # 1) watermark centro
+                tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
+                add_image_watermark(
+                    input_path=str(mp4),
+                    watermark_path=str(self.watermark_path),
+                    output_path=str(tmp_out),
+                    margin=self.wm_margin,
+                    opacity=self.wm_opacity,
+                    rel_width=self.wm_rel_width,
+                    codec="libx264",
+                    crf=20,
+                    preset="medium",
+                )
+                tmp_out.replace(out_mp4)  # atomic move
 
-            # 1) watermark canto inferior direito
-            tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
-            add_image_watermark(
-                input_path=str(mp4),
-                watermark_path=str(self.watermark_path),
-                output_path=str(tmp_out),
-                margin=self.wm_margin,
-                opacity=self.wm_opacity,
-                rel_width=self.wm_rel_width,
-                codec="libx264",
-                crf=20,
-                preset="medium",
-            )
-            tmp_out.replace(out_mp4)  # atomic move
+                # 3) atualiza sidecar
+                meta.update(
+                    {
+                        "status": "watermarked",
+                        "attempts": attempts,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "wm_path": str(out_mp4),
+                        "meta_wm": ffprobe_metadata(out_mp4),
+                    }
+                )
+                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
-            # 3) atualiza sidecar
-            meta.update(
-                {
-                    "status": "watermarked",
-                    "attempts": attempts,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "wm_path": str(out_mp4),
-                    "meta_wm": ffprobe_metadata(out_mp4),
-                }
-            )
-            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-
-            upload_target = out_mp4
+                upload_target = out_mp4
         else:
             # Modo leve: sem watermark/thumbnail — upload do arquivo da fila
             meta.update(
@@ -380,49 +375,79 @@ class ProcessingWorker:
                 sha256_upload = _sha256_file(upload_target)
                 meta_up = ffprobe_metadata(upload_target)
 
-                payload = {
-                    "venue_id": api_client.venue_id,
-                    "duration_sec": float(meta_up.get("duration_sec") or 0.0),
-                    "captured_at": meta.get("created_at"),
-                    "meta": meta_up,
-                    "sha256": sha256_upload,
-                }
-
-                logger.info("Enviando registro de metadados ao backend...")
-                resp = api_client.register_clip_metadados(payload, timeout=15.0)
-
-                # Aguarda Resposta do Backend
-                logger.debug(f"Resposta do backend: {json.dumps(resp)[:300]}")
-                meta.setdefault("remote_registration", {})
-                meta["remote_registration"].update(
-                    {
-                        "status": "registered",
-                        "registered_at": datetime.now(timezone.utc).isoformat(),
-                        "response": resp,
-                    }
+                # Verifica se já registramos os metadados antes (Retentativa)
+                already_uploaded = (
+                    meta.get("remote_upload", {}).get("status") == "uploaded"
                 )
-                # status opcional: manter "watermarked" e anotar registro remoto
-                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                print("Resposta do backend:")
-                print(resp)
+                already_finalized = (
+                    meta.get("remote_finalize", {}).get("status") == "ok"
+                )
+
+                # ---------------------------------------------------------
+                # 1) REGISTRO DE METADADOS (Pula se já fez upload AWS antes)
+                # ---------------------------------------------------------
+                if already_uploaded:
+                    logger.info(
+                        "Vídeo já enviado à AWS anteriormente. Reutilizando metadados locais para finalizar."
+                    )
+                    resp = meta.get("remote_registration", {}).get("response", {})
+                else:
+                    # Verifica se o modo de envio de vídeo esta em desenvolvimento
+                    is_dev_video_mode = os.getenv(
+                        "DEV_VIDEO_MODE", ""
+                    ).strip().lower() in {
+                        "true",
+                        "1",
+                        "yes",
+                    }
+                    payload = {
+                        "venue_id": api_client.venue_id,
+                        "duration_sec": float(meta_up.get("duration_sec") or 0.0),
+                        "captured_at": meta.get("created_at"),
+                        "meta": meta_up,
+                        "sha256": sha256_upload,
+                        "dev": is_dev_video_mode,
+                    }
+
+                    # Enviando registro de metadados ao backend..
+                    resp = api_client.register_clip_metadados(payload, timeout=15.0)
+
+                    # Aguarda Resposta do Backend
+                    logger.debug(f"Resposta do backend: {json.dumps(resp)[:300]}")
+                    meta.setdefault("remote_registration", {})
+                    meta["remote_registration"].update(
+                        {
+                            "status": "registered",
+                            "registered_at": datetime.now(timezone.utc).isoformat(),
+                            "response": resp,
+                        }
+                    )
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
                 resp_data = (resp or {}).get("data") or {}
                 resp_clip = resp_data.get("clip") or {}
-                logger.info(f"Registro remoto OK: clip_id={resp_clip.get('clip_id')}")
+                clip_id = resp_clip.get("clip_id")
+                logger.info(f"Registro remoto OK: clip_id={clip_id}")
 
-                # 3.2) upload para a URL assinada, se fornecida
+                # ---------------------------------------------------------
+                # 2) UPLOAD PARA AWS S3 (Pula se já foi feito com sucesso)
+                # ---------------------------------------------------------
                 upload_url = resp_clip.get("upload_url")
-                if upload_url:
-                    logger.info("Iniciando upload para URL assinada (Supabase)")
+                if upload_url and not already_uploaded:
+                    logger.info("Iniciando upload para URL assinada (AWS S3)")
                     t0 = time.time()
                     try:
-                        status_code, reason, resp_headers = api_client.upload_file_to_signed_url(
-                            upload_url,
-                            upload_target,
-                            content_type="video/mp4",
-                            extra_headers=None,
-                            timeout=180.0,
+                        status_code, reason, resp_headers = (
+                            api_client.upload_file_to_signed_url(
+                                upload_url,
+                                upload_target,
+                                content_type="video/mp4",
+                                extra_headers=None,
+                                timeout=180.0,
+                            )
                         )
                         dt_ms = int((time.time() - t0) * 1000)
+
                         meta.setdefault("remote_upload", {})
                         meta["remote_upload"].update(
                             {
@@ -434,6 +459,7 @@ class ProcessingWorker:
                                 "attempted_at": datetime.now(timezone.utc).isoformat(),
                                 "duration_ms": dt_ms,
                                 "file_size": size_upload,
+                                "etag": (resp_headers or {}).get("etag"),
                             }
                         )
                         meta_path.write_text(
@@ -443,55 +469,6 @@ class ProcessingWorker:
                             f"Upload finalizado: HTTP {status_code} {reason} em {dt_ms} ms"
                         )
 
-                        # 3.3) Finaliza upload no backend (validação de integridade)
-                        if 200 <= status_code < 300:
-                            clip_id = resp_data.get("clip_id")
-                            if clip_id:
-                                try:
-                                    logger.info(
-                                        f"Notificando backend sobre upload concluído (clip_id={clip_id})"
-                                    )
-                                    etag = None
-                                    try:
-                                        etag = (resp_headers or {}).get("etag")
-                                    except Exception:
-                                        etag = None
-                                    fin = api_client.finalize_clip_uploaded(
-                                        clip_id=clip_id,
-                                        size_bytes=size_upload,
-                                        sha256=sha256_upload,
-                                        etag=etag,
-                                        timeout=20.0,
-                                    )
-                                    meta.setdefault("remote_finalize", {})
-                                    meta["remote_finalize"].update(
-                                        {
-                                            "status": "ok",
-                                            "finalized_at": datetime.now(
-                                                timezone.utc
-                                            ).isoformat(),
-                                            "response": fin,
-                                        }
-                                    )
-                                    meta_path.write_text(
-                                        json.dumps(meta, ensure_ascii=False, indent=2)
-                                    )
-                                    logger.info("Finalização confirmada pelo backend")
-                                except Exception as e:
-                                    logger.error(f"Falha ao finalizar upload no backend: {e}")
-                                    meta.setdefault("remote_finalize", {})
-                                    meta["remote_finalize"].update(
-                                        {
-                                            "status": "failed",
-                                            "error": str(e),
-                                            "attempted_at": datetime.now(
-                                                timezone.utc
-                                            ).isoformat(),
-                                        }
-                                    )
-                                    meta_path.write_text(
-                                        json.dumps(meta, ensure_ascii=False, indent=2)
-                                    )
                     except Exception as e:
                         dt_ms = int((time.time() - t0) * 1000)
                         meta.setdefault("remote_upload", {})
@@ -508,8 +485,60 @@ class ProcessingWorker:
                             json.dumps(meta, ensure_ascii=False, indent=2)
                         )
                         logger.error(f"Upload falhou: {e}")
-                else:
+
+                elif not upload_url and not already_uploaded:
                     logger.warning("Nenhuma upload_url na resposta; pulando upload")
+
+                # ---------------------------------------------------------
+                # 3) FINALIZAÇÃO NO BACKEND (Validação S3/Database) - (validação de integridade)
+                # ---------------------------------------------------------
+                # Atualizamos a variável com o estado após o passo 2
+                is_currently_uploaded = (
+                    meta.get("remote_upload", {}).get("status") == "uploaded"
+                )
+                if is_currently_uploaded and not already_finalized:
+                    clip_id = resp_clip.get("clip_id", None)
+                    if clip_id:
+                        try:
+                            saved_etag = meta.get("remote_upload", {}).get("etag")
+
+                            fin = api_client.finalize_clip_uploaded(
+                                clip_id=clip_id,
+                                size_bytes=size_upload,
+                                sha256=sha256_upload,
+                                etag=saved_etag,
+                                timeout=20.0,
+                            )
+                            meta.setdefault("remote_finalize", {})
+                            meta["remote_finalize"].update(
+                                {
+                                    "status": "ok",
+                                    "finalized_at": datetime.now(
+                                        timezone.utc
+                                    ).isoformat(),
+                                    "response": fin,
+                                }
+                            )
+                            meta_path.write_text(
+                                json.dumps(meta, ensure_ascii=False, indent=2)
+                            )
+                            logger.info("Finalização confirmada pelo backend")
+                        except Exception as e:
+                            logger.error(f"Falha ao finalizar upload no backend: {e}")
+                            meta.setdefault("remote_finalize", {})
+                            meta["remote_finalize"].update(
+                                {
+                                    "status": "failed",
+                                    "error": str(e),
+                                    "attempted_at": datetime.now(
+                                        timezone.utc
+                                    ).isoformat(),
+                                }
+                            )
+                            meta_path.write_text(
+                                json.dumps(meta, ensure_ascii=False, indent=2)
+                            )
+
             except Exception as e:
                 http_response = None
                 if isinstance(e, requests.exceptions.HTTPError):
@@ -536,7 +565,9 @@ class ProcessingWorker:
                             err_message = str(err_obj.get("message") or "").strip()
                         if not err_message:
                             err_message = str(
-                                err_payload.get("message") or err_payload.get("detail") or ""
+                                err_payload.get("message")
+                                or err_payload.get("detail")
+                                or ""
                             ).strip()
 
                     if not err_message:
@@ -593,6 +624,7 @@ class ProcessingWorker:
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
         elif not is_dev:
             logger.warning("API não configurada, pulando registro remoto")
             # sem configuração de API, apenas registra um hint no sidecar
@@ -623,15 +655,16 @@ class ProcessingWorker:
         )
 
         if is_dev or (uploaded_ok and finalized_ok):
-            # remove artefatos da fila após confirmação completa
-            try:
-                mp4.unlink(missing_ok=True)
-            except Exception:
-                pass
-            try:
-                meta_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            # remove artefatos da fila E o arquivo com watermark final
+            logger.info(f"Limpando artefatos locais para o clipe {mp4.name}...")
+            for file_to_delete in [mp4, meta_path, upload_target]:
+                try:
+                    if file_to_delete and file_to_delete.exists():
+                        file_to_delete.unlink()
+                except Exception as e:
+                    logger.warning(
+                        f"Aviso: Não foi possível apagar o artefato {file_to_delete}: {e}"
+                    )
         else:
             # Cria pasta para pendências de upload dentro de failed_clips/
             pend_dir = self.failed_dir_highlight / "upload_failed"
@@ -796,9 +829,7 @@ def is_within_business_hours() -> bool:
         try:
             return datetime.strptime(raw, "%H:%M").time()
         except Exception:
-            logger.warning(
-                f"{env_name} inválido ({raw!r}); usando padrão {fallback!r}"
-            )
+            logger.warning(f"{env_name} inválido ({raw!r}); usando padrão {fallback!r}")
             return datetime.strptime(fallback, "%H:%M").time()
 
     start_t = _parse_hhmm(start_str, default_start, "GN_START_TIME")
@@ -893,7 +924,7 @@ def main() -> int:
         max_attempts=worker_max_attempts,
         wm_margin=24,
         wm_opacity=0.6,
-        wm_rel_width=0.11, # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
+        wm_rel_width=0.11,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
         light_mode=light_mode,
     )
     worker.start()
@@ -935,7 +966,9 @@ def main() -> int:
         try:
             gpio_pin = int(gpio_pin_env)
         except ValueError:
-            logger.error(f"Pino GPIO inválido em GN_GPIO_PIN/GPIO_PIN: {gpio_pin_env!r}")
+            logger.error(
+                f"Pino GPIO inválido em GN_GPIO_PIN/GPIO_PIN: {gpio_pin_env!r}"
+            )
             gpio_pin = None
 
         if gpio_pin is not None:
@@ -1012,12 +1045,14 @@ def main() -> int:
                 continue
 
             # Aplica cooldown apenas para o botão GPIO
-            if trig == "gpio":
+            if trig in ("gpio", "enter"):
                 now = time.time()
                 elapsed = now - last_gpio_ok_ts
                 if elapsed < gpio_cooldown_sec:
                     restante = int(gpio_cooldown_sec - elapsed)
-                    logger.info(f"GPIO ignorado: cooldown ativo ({restante}s restantes)")
+                    logger.info(
+                        f"GPIO ignorado: cooldown ativo ({restante}s restantes)"
+                    )
                     continue
                 last_gpio_ok_ts = now
 
@@ -1028,7 +1063,7 @@ def main() -> int:
             out = build_highlight(
                 cfg, segbuf
             )  # Constroi o clipe a partir dos seguimentos
-            
+
             if out:
                 try:
                     enqueue_clip(cfg, out)

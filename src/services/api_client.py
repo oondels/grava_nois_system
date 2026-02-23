@@ -133,8 +133,8 @@ class GravaNoisAPIClient:
 
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
+        logger.info("Enviando registro de metadados ao backend...")
 
-        logger.info(f"Registrando metadados no backend: {url}")
         return self._http_post_json(url, metadados, headers=headers, timeout=timeout)
 
     def upload_file_to_signed_url(

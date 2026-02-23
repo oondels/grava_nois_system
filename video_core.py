@@ -41,7 +41,9 @@ class CaptureConfig:
 
 
 # ---- Health check RTSP ------------------------------------------------------
-def check_rtsp_connectivity(rtsp_url: str, timeout: int = 5, max_retries: int = 10) -> bool:
+def check_rtsp_connectivity(
+    rtsp_url: str, timeout: int = 5, max_retries: int = 10
+) -> bool:
     """
     Verifica se a câmera RTSP está acessível antes de iniciar o FFmpeg.
 
@@ -116,7 +118,9 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         max_retries = int(os.getenv("GN_RTSP_MAX_RETRIES", "10"))
         timeout = int(os.getenv("GN_RTSP_TIMEOUT", "5"))
 
-        if not check_rtsp_connectivity(rtsp_url, timeout=timeout, max_retries=max_retries):
+        if not check_rtsp_connectivity(
+            rtsp_url, timeout=timeout, max_retries=max_retries
+        ):
             raise RuntimeError(
                 f"Câmera RTSP não acessível após {max_retries} tentativas. "
                 "Verifique:\n"
@@ -437,6 +441,13 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             concat_list_path.unlink(missing_ok=True)
         except Exception:
             pass
+        # Deleta o arquivo .ts intermediário do disco
+        try:
+            if "tmp_ts" in locals() and tmp_ts.exists():
+                tmp_ts.unlink(missing_ok=True)
+                logger.debug(f"Arquivo temporário removido: {tmp_ts.name}")
+        except Exception as e:
+            logger.warning(f"Não foi possível remover o arquivo temporário .ts: {e}")
 
 
 def ffprobe_metadata(path: Path) -> Dict[str, Any]:
@@ -519,7 +530,7 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
 
 
 # ---- Watermark util (MoviePy v2) -------------------------------------------
-# Posição corrigida para canto inferior direito
+# Posição corrigida para centro
 def add_image_watermark(
     input_path: str,
     watermark_path: str,
@@ -532,7 +543,7 @@ def add_image_watermark(
     preset: str = "medium",
 ) -> None:
     """
-    Aplica marca d'água de imagem no canto inferior direito usando ffmpeg.
+    Aplica marca d'água de imagem no central usando ffmpeg.
 
     - Dimensiona a marca d'água para `rel_width * largura_do_vídeo`.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
@@ -586,7 +597,15 @@ def add_image_watermark(
         "96k",
         str(output_path),
     ]
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            f"Erro crítico no FFmpeg (Watermark):\nComando: {' '.join(cmd)}\nDetalhes:\n{e.stderr}"
+        )
+        raise RuntimeError(
+            f"FFmpeg falhou ao aplicar marca d'água: {e.stderr[-200:]}"
+        ) from e
 
 
 # ---- Hash helper ------------------------------------------------------------

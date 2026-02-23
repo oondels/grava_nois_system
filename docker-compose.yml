@@ -24,7 +24,7 @@ services:
       - ./recorded_clips:/usr/src/app/recorded_clips
       - ./queue_raw:/usr/src/app/queue_raw
       - ./failed_clips:/usr/src/app/failed_clips
-      - ./logs:/usr/src/app/logs  # Diretório para logs do FFmpeg
+      - ./logs:/usr/src/app/logs  # Diretório para logs
 
     # Network defaults to bridge, which is fine for RTSP on LAN.
     # For GPIO or V4L2 webcam usage, uncomment the lines below:
