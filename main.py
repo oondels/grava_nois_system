@@ -197,7 +197,7 @@ class ProcessingWorker:
 
     def _scan_once(self):
         # ----------------------------------------------------------------------------
-        # Varre a pasta de fila (self.queue_dir) em busca de vídeos a processar e
+        # Varre a pasta de fila (self.queue_dir) em busca de vídeos para processar e
         # despacha cada item com segurança entre múltiplos workers.
         #
         # O QUE FAZ (alto nível)
