@@ -175,7 +175,13 @@ class GravaNoisAPIClient:
                     f"Upload concluído: HTTP {response.status_code} {response.reason}"
                 )
 
-                return response.status_code, response.reason, dict(response.headers)
+                normalized_headers = {
+                    str(key).strip().lower(): value
+                    for key, value in dict(response.headers).items()
+                    if key is not None
+                }
+
+                return response.status_code, response.reason, normalized_headers
 
         except requests.exceptions.RequestException as e:
             error_msg = f"Erro de rede durante upload para {upload_url}: {e}"
