@@ -257,7 +257,7 @@ Move o highlight para `queue_dir` e cria sidecar JSON com metadados e `status="q
 
 ### `add_image_watermark(input_path, watermark_path, output_path, margin=24, opacity=0.6, rel_width=0.2, codec="libx264", crf=20, preset="medium")`
 
-Aplica marca d’água usando ffmpeg no **canto inferior direito**:
+Aplica marca d’água usando ffmpeg no **centro**:
 
 - `rel_width` escala a logo para `rel_width * largura_do_vídeo`.
 - Posição `(x, y) = (W - w - margin, H - h - margin)`.
@@ -298,7 +298,7 @@ Worker de varredura de diretório para aplicar watermark e gerar thumbnail. Em m
 
 **`_process_one(mp4, meta_path)`**:
 
-- Modo normal: aplica watermark (canto inferior direito) e gera thumbnail; atualiza sidecar (`status="watermarked"`, caminhos e `meta_wm`).
+- Modo normal: aplica watermark (centro) e gera thumbnail; atualiza sidecar (`status="watermarked"`, caminhos e `meta_wm`).
 - Modo leve: atualiza sidecar para `status="ready_for_upload"` e faz upload diretamente do `mp4` da fila (sem reencode/thumbnail). Após sucesso, notifica o backend e remove o arquivo da fila.
 
 **`_handle_failure(mp4, meta_path, err)`**:

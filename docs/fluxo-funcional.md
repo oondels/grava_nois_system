@@ -200,7 +200,7 @@ flowchart TD
 
     Process --> Mode{light_mode?}
 
-    Mode -->|Não| WM[add_image_watermark<br/>canto inferior direito]
+    Mode -->|Não| WM[add_image_watermark<br/>centro]
     WM --> SaveWM[Atomic replace para<br/>highlights_wm/]
     SaveWM --> UpdateJSON1[Atualiza JSON:<br/>status=watermarked<br/>wm_path, meta_wm]
 
@@ -440,7 +440,7 @@ grava_nois_system/
 - Ideal para Raspberry Pi 3B/4B com recursos limitados
 
 ### Modo Completo (GN_LIGHT_MODE=0)
-- Aplica watermark no canto inferior direito
+- Aplica watermark no centro
 - Pode gerar thumbnail (opcional)
 - Reencoda vídeo com H.264 CRF 20
 - Maior qualidade visual, porém mais pesado

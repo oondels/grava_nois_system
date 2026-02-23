@@ -182,7 +182,7 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Aplica marca d'água (canto inferior direito)
+1. Aplica marca d'água (centro)
 2. Gera thumbnail (meio do vídeo)
 3. Registra metadados no backend → recebe `upload_url`
 4. Faz upload para URL assinada (S3/Supabase)
