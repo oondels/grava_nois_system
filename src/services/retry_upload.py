@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from src.services.api_client import GravaNoisAPIClient
+from src.services.api_error_policy import extract_api_error_from_exception
 from src.utils.logger import logger
 from video_core import ffprobe_metadata, _sha256_file
 
@@ -182,6 +183,23 @@ def retry_failed_uploads(
                 failed += 1
 
         except Exception as e:
+            api_error = extract_api_error_from_exception(e)
+            if api_error and api_error.should_delete_local_record:
+                logger.warning(
+                    "Retry: removendo registro local por erro nao-retriavel da API (%s)",
+                    api_error.short_label(),
+                )
+                try:
+                    video_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                try:
+                    sidecar_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                failed += 1
+                continue
+
             logger.error(f"Retry: falha em {video_path.name}: {e}")
             meta.setdefault("remote_upload", {})
             meta["remote_upload"].update(
