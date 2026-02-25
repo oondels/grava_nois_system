@@ -94,6 +94,8 @@ GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=seu_token_jwt_aqui
 GN_CLIENT_ID=uuid-do-cliente
 GN_VENUE_ID=uuid-do-local
+DEVICE_ID=raspberrypi-001
+DEVICE_SECRET=troque_por_um_segredo_forte
 
 # GPIO (opcional)
 GN_GPIO_PIN=17
@@ -109,6 +111,9 @@ GN_LIGHT_MODE=1
 
 # Modo desenvolvimento (sem chamadas externas)
 DEV=true
+
+# Dry-run da assinatura HMAC (sem chamar backend)
+GN_HMAC_DRY_RUN=0
 
 # Configurações de buffer
 GN_SEG_TIME=1
@@ -288,6 +293,10 @@ GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 GN_CLIENT_ID=550e8400-e29b-41d4-a716-446655440000
 GN_VENUE_ID=6ba7b810-9dad-11d1-80b4-00c04fd430c8
+CLIENT_ID=550e8400-e29b-41d4-a716-446655440000  # fallback para X-Client-Id
+DEVICE_ID=raspberrypi-001
+DEVICE_SECRET=troque_por_um_segredo_forte
+GN_HMAC_DRY_RUN=0  # 1=nao envia request; apenas monta, assina e loga
 ```
 
 #### GPIO
@@ -338,6 +347,8 @@ GN_LOG_DIR=/caminho/custom/logs # Diretório de logs (fallback: <raiz-do-projeto
 
 Observações:
 - Se `GN_LOG_DIR` não for definido, o sistema cria e usa `logs/` na raiz do projeto (mesma pasta de `main.py`).
+- Em falhas `401/403` nas rotas assinadas, o logger registra somente `path`, `timestamp`, `nonce`, `body_sha256` e assinatura truncada.
+- `DEVICE_SECRET` nunca é escrito nos logs.
 - O fallback padrão não depende de caminho absoluto de container Docker.
 
 ### Câmera V4L2 (Local)
