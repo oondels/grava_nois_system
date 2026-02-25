@@ -540,15 +540,34 @@ class ProcessingWorker:
                             )
 
             except Exception as e:
+                def _delete_blocked_clip(log_reason: str):
+                    logger.warning(f"{log_reason} Arquivo será excluído: {mp4.name}")
+                    try:
+                        upload_target.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    if upload_target != mp4:
+                        try:
+                            mp4.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    try:
+                        meta_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
                 http_response = None
                 if isinstance(e, requests.exceptions.HTTPError):
                     http_response = getattr(e, "response", None)
                 else:
                     cause = getattr(e, "__cause__", None)
-                    if isinstance(cause, requests.exceptions.HTTPError):
-                        http_response = getattr(cause, "response", None)
+                    while cause is not None:
+                        if isinstance(cause, requests.exceptions.HTTPError):
+                            http_response = getattr(cause, "response", None)
+                            break
+                        cause = getattr(cause, "__cause__", None)
 
-                if http_response is not None and http_response.status_code == 403:
+                if http_response is not None:
                     err_code = ""
                     err_message = ""
                     try:
@@ -595,24 +614,48 @@ class ProcessingWorker:
                         )
                     )
 
-                    if code_is_time_window or msg_is_time_window:
-                        logger.warning(
-                            f"Upload rejeitado por horário. Arquivo será excluído: {mp4.name}"
-                        )
-                        try:
-                            upload_target.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-                        if upload_target != mp4:
-                            try:
-                                mp4.unlink(missing_ok=True)
-                            except Exception:
-                                pass
-                        try:
-                            meta_path.unlink(missing_ok=True)
-                        except Exception:
-                            pass
+                    if (
+                        http_response.status_code == 403
+                        and (code_is_time_window or msg_is_time_window)
+                    ):
+                        _delete_blocked_clip("Upload rejeitado por horário.")
                         return
+
+                    msg_is_reupload_blocked = any(
+                        token in msg_l
+                        for token in (
+                            "transição inválida para reupload",
+                            "transicao invalida para reupload",
+                            "invalid transition for reupload",
+                        )
+                    )
+                    code_is_reupload_conflict = (
+                        http_response.status_code == 409
+                        and err_code.strip().upper() == "CONFLICT"
+                        and "reupload" in msg_l
+                    )
+
+                    if http_response.status_code == 409 and (
+                        msg_is_reupload_blocked or code_is_reupload_conflict
+                    ):
+                        _delete_blocked_clip(
+                            "Upload bloqueado pelo backend (reupload não permitido)."
+                        )
+                        return
+
+                raw_error_l = str(e).lower()
+                if (
+                    "http 409" in raw_error_l
+                    and (
+                        "transição inválida para reupload" in raw_error_l
+                        or "transicao invalida para reupload" in raw_error_l
+                        or "invalid transition for reupload" in raw_error_l
+                    )
+                ):
+                    _delete_blocked_clip(
+                        "Upload bloqueado pelo backend (reupload não permitido)."
+                    )
+                    return
 
                 logger.error(f"Registro remoto falhou: {e}")
                 meta.setdefault("remote_registration", {})
