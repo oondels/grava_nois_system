@@ -151,6 +151,38 @@ class LegacyCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(cfgs), 1)
         self.assertEqual(cfgs[0].clips_dir, base / "recorded_clips")
 
+    def test_cameras_json_respects_segment_env_overrides(self) -> None:
+        """GN_CAMERAS_JSON mode also honors GN_RTSP_PRE_SEGMENTS/GN_RTSP_POST_SEGMENTS."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with self._patched({
+                "GN_CAMERAS_JSON": '[{"id":"cam01","rtsp_url":"rtsp://10.0.0.1/live","enabled":true}]',
+                "GN_RTSP_PRE_SEGMENTS": "20",
+                "GN_RTSP_POST_SEGMENTS": "10",
+            }):
+                cfgs = load_capture_configs(base=base, seg_time=1)
+        cfg = cfgs[0]
+        self.assertEqual(cfg.pre_segments, 20)
+        self.assertEqual(cfg.post_segments, 10)
+        self.assertEqual(cfg.pre_seconds, 20)
+        self.assertEqual(cfg.post_seconds, 10)
+
+    def test_rtsp_urls_csv_respects_segment_env_overrides(self) -> None:
+        """GN_RTSP_URLS mode also honors GN_RTSP_PRE_SEGMENTS/GN_RTSP_POST_SEGMENTS."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with self._patched({
+                "GN_RTSP_URLS": "rtsp://10.0.0.1/live",
+                "GN_RTSP_PRE_SEGMENTS": "8",
+                "GN_RTSP_POST_SEGMENTS": "4",
+            }):
+                cfgs = load_capture_configs(base=base, seg_time=1)
+        cfg = cfgs[0]
+        self.assertEqual(cfg.pre_segments, 8)
+        self.assertEqual(cfg.post_segments, 4)
+        self.assertEqual(cfg.pre_seconds, 8)
+        self.assertEqual(cfg.post_seconds, 4)
+
     # ------------------------------------------------------------------ no env vars
 
     def test_no_env_vars_returns_v4l2_default(self) -> None:

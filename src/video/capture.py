@@ -82,6 +82,15 @@ def _calc_start_number(buffer_dir: Path) -> int:
     return (max(nums) + 1) if nums else 0
 
 
+def _tail_file(path: Path, max_lines: int = 20) -> str:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        return "".join(lines[-max_lines:]).strip()
+    except Exception:
+        return ""
+
+
 def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     start_num = _calc_start_number(cfg.buffer_dir)
     out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
@@ -206,6 +215,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         log_dir.mkdir(parents=True, exist_ok=True)
     log_file_path = log_dir / f"ffmpeg_{cfg.camera_id}.log"
 
+    log_file = None
     try:
         # Abre arquivo de log em modo append
         log_file = open(log_file_path, "a", buffering=1)  # line buffering
@@ -218,13 +228,38 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
 
         logger.info(f"FFmpeg logs sendo salvos em: {log_file_path}")
 
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             stdout=log_file,
             stderr=subprocess.STDOUT,  # Combina stderr com stdout
             stdin=subprocess.DEVNULL,
         )
+
+        # O processo filho mantém o fd aberto; no pai podemos fechar para evitar vazamento.
+        try:
+            log_file.close()
+        except Exception:
+            pass
+
+        startup_check_sec = max(
+            0.1, float(os.getenv("GN_FFMPEG_STARTUP_CHECK_SEC", "1.0"))
+        )
+        time.sleep(startup_check_sec)
+        return_code = proc.poll()
+        if return_code is not None:
+            tail = _tail_file(log_file_path, max_lines=20)
+            detail = f"\nÚltimas linhas do log:\n{tail}" if tail else ""
+            raise RuntimeError(
+                f"FFmpeg encerrou durante inicialização para {cfg.camera_id} "
+                f"(exit code {return_code}). Verifique URL/credenciais RTSP. "
+                f"Log: {log_file_path}{detail}"
+            )
+        return proc
     except FileNotFoundError as exc:
+        if log_file is not None and not log_file.closed:
+            log_file.close()
         raise RuntimeError("ffmpeg não encontrado no PATH") from exc
     except Exception as exc:
+        if log_file is not None and not log_file.closed:
+            log_file.close()
         raise RuntimeError(f"Erro ao iniciar FFmpeg: {exc}") from exc
