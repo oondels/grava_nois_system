@@ -1,4 +1,3 @@
-# PRD.md  
 # Suporte a Múltiplas Câmeras RTSP (N Câmeras)
 
 ## 1. Visão Geral
@@ -269,8 +268,8 @@ Mudanças estruturais:
 
 O projeto será considerado concluído quando:
 
-- [ ]  Sistema suporta ≥ 2 câmeras simultaneamente
-- [ ]  1 trigger gera highlights para todas as câmeras
+- [x]  Sistema suporta ≥ 2 câmeras simultaneamente
+- [x]  1 trigger gera highlights para todas as câmeras
 - [ ]  Nenhuma colisão de arquivos ocorre sob concorrência
 - [ ]  Falha de uma câmera não afeta as demais
 - [ ]  Compatibilidade legado validada

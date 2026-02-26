@@ -6,13 +6,16 @@ from pathlib import Path
 import os
 import json
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import threading
 import queue
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-from src.config.settings import CaptureConfig
+from src.config.settings import CaptureConfig, load_capture_configs
 from src.utils.logger import logger
 from src.utils.time_utils import is_within_business_hours
 from src.video.buffer import SegmentBuffer, clear_buffer
@@ -21,6 +24,69 @@ from src.video.processor import build_highlight, enqueue_clip
 from src.workers.processing_worker import ProcessingWorker
 
 load_dotenv()
+
+
+@dataclass
+class CameraRuntime:
+    cfg: CaptureConfig
+    proc: object
+    segbuf: SegmentBuffer
+    capture_lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def _trigger_fan_out(
+    runtimes: list[CameraRuntime],
+    failed_dir_highlight: Path,
+    executor: ThreadPoolExecutor,
+    trigger_id: str,
+) -> None:
+    """Dispatch trigger concurrently to all active cameras."""
+
+    def _process_one(rt: CameraRuntime) -> None:
+        cfg = rt.cfg
+        if not rt.capture_lock.acquire(blocking=False):
+            logger.info(f"[{cfg.camera_id}][{trigger_id}] busy – skipping")
+            return
+        try:
+            logger.info(f"[{cfg.camera_id}][{trigger_id}] building highlight")
+            out = build_highlight(cfg, rt.segbuf)
+            if out:
+                try:
+                    enqueue_clip(cfg, out)
+                    logger.info(f"[{cfg.camera_id}][{trigger_id}] success: {out.name}")
+                except Exception as e:
+                    logger.error(f"[{cfg.camera_id}][{trigger_id}] enqueue failed: {e}")
+                    pend = failed_dir_highlight / "enqueue_failed"
+                    pend.mkdir(parents=True, exist_ok=True)
+                    try:
+                        shutil.move(str(out), str(pend / out.name))
+                    except Exception:
+                        pass
+                    meta = {
+                        "type": "highlight_raw",
+                        "camera_id": cfg.camera_id,
+                        "trigger_id": trigger_id,
+                        "status": "enqueue_failed",
+                        "file_name": out.name,
+                        "error": str(e),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    (pend / f"{out.stem}.json").write_text(
+                        json.dumps(meta, ensure_ascii=False, indent=2)
+                    )
+            else:
+                logger.warning(f"[{cfg.camera_id}][{trigger_id}] no highlight built")
+        except Exception as e:
+            logger.error(f"[{cfg.camera_id}][{trigger_id}] error: {e}")
+        finally:
+            rt.capture_lock.release()
+
+    futs = [executor.submit(_process_one, rt) for rt in runtimes]
+    for fut in futs:
+        try:
+            fut.result()
+        except Exception as e:
+            logger.error(f"[{trigger_id}] unhandled error in fan-out: {e}")
 
 
 def main() -> int:
@@ -49,39 +115,20 @@ def main() -> int:
     logger.info(f"Segmento de {seg_time_env}s, modo leve: {light_mode}")
 
     worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
+    camera_cfgs = load_capture_configs(base=base, seg_time=seg_time_env)
+    logger.info(f"Câmeras ativas: {len(camera_cfgs)}")
 
-    rtsp_mode = bool((os.getenv("GN_RTSP_URL") or "").strip())
-    if rtsp_mode:
-        pre_seg_cfg = _env_int("GN_RTSP_PRE_SEGMENTS", 6)
-        post_seg_cfg = _env_int("GN_RTSP_POST_SEGMENTS", 3)
-        pre_sec_cfg = pre_seg_cfg * seg_time_env
-        post_sec_cfg = post_seg_cfg * seg_time_env
-    else:
-        pre_seg_cfg = None
-        post_seg_cfg = None
-        pre_sec_cfg = 25
-        post_sec_cfg = 10
+    runtimes: list[CameraRuntime] = []
+    for cfg in camera_cfgs:
+        clear_buffer(cfg)
+        cfg.ensure_dirs()
+        proc = start_ffmpeg(cfg)
+        segbuf = SegmentBuffer(cfg)
+        segbuf.start()
+        runtimes.append(CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf))
 
-    cfg = CaptureConfig(
-        buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
-        clips_dir=base / "recorded_clips",
-        queue_dir=base / "queue_raw",
-        device="/dev/video0",
-        seg_time=seg_time_env,
-        pre_seconds=pre_sec_cfg,
-        post_seconds=post_sec_cfg,
-        scan_interval=1,
-        max_buffer_seconds=40,
-        failed_dir_highlight=base / "failed_clips",
-        pre_segments=pre_seg_cfg,
-        post_segments=post_seg_cfg,
-    )
-
-    # Limpa o buffer
-    clear_buffer(cfg)
-
-    # Verifica a existencia de todos os arquivos necessários
-    cfg.ensure_dirs()
+    max_workers = _env_int("GN_TRIGGER_MAX_WORKERS", len(runtimes))
+    trigger_executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
 
     # pastas do worker
     out_wm_dir = base / "highlights_wm"
@@ -91,14 +138,12 @@ def main() -> int:
     failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
     watermark_path = base / "files" / "replay_grava_nois.png"
-
-    proc = start_ffmpeg(cfg)
-    segbuf = SegmentBuffer(cfg)
-    segbuf.start()
+    primary_runtime = runtimes[0]
+    primary_cfg = primary_runtime.cfg
 
     # inicia worker
     worker = ProcessingWorker(
-        queue_dir=cfg.queue_dir,
+        queue_dir=primary_cfg.queue_dir,
         out_wm_dir=out_wm_dir,
         failed_dir_highlight=failed_dir_highlight,
         watermark_path=watermark_path,
@@ -207,10 +252,10 @@ def main() -> int:
             except Exception as e:
                 logger.error(f"Falha ao configurar GPIO (pigpio): {e}")
 
-    if cfg.pre_segments is not None and cfg.post_segments is not None:
-        capture_desc = f"{cfg.pre_segments} seg + {cfg.post_segments} seg"
+    if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:
+        capture_desc = f"{primary_cfg.pre_segments} seg + {primary_cfg.post_segments} seg"
     else:
-        capture_desc = f"{cfg.pre_seconds}s + {cfg.post_seconds}s"
+        capture_desc = f"{primary_cfg.pre_seconds}s + {primary_cfg.post_seconds}s"
 
     prompt = (
         f"Gravando… pressione ENTER"
@@ -242,38 +287,8 @@ def main() -> int:
                 logger.warning("Fora do horário de funcionamento")
                 continue
 
-            out = build_highlight(
-                cfg, segbuf
-            )  # Constroi o clipe a partir dos seguimentos
-
-            if out:
-                try:
-                    enqueue_clip(cfg, out)
-                except Exception as e:
-                    logger.error(f"Falha ao enfileirar {out.name}: {e}")
-                    pend = failed_dir_highlight / "enqueue_failed"
-                    pend.mkdir(parents=True, exist_ok=True)
-                    try:
-                        # move o arquivo gerado para falha
-                        # (
-                        #     (pend / out.name)
-                        #     if not out.exists()
-                        #     else out.replace(pend / out.name)
-                        # )
-                        shutil.move(str(out), str(pend / out.name))
-                    except Exception:
-                        pass
-                    # sidecar mínimo com erro
-                    meta = {
-                        "type": "highlight_raw",
-                        "status": "enqueue_failed",
-                        "file_name": out.name,
-                        "error": str(e),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    (pend / f"{out.stem}.json").write_text(
-                        json.dumps(meta, ensure_ascii=False, indent=2)
-                    )
+            trigger_id = uuid.uuid4().hex[:8]
+            _trigger_fan_out(runtimes, failed_dir_highlight, trigger_executor, trigger_id)
 
     except KeyboardInterrupt:
         logger.info("Encerrando...")
@@ -295,15 +310,21 @@ def main() -> int:
             # Ignora falhas durante o desligamento.
             pass
         # Para a thread do SegmentBuffer e espera até 2s para concluir.
-        segbuf.stop(join_timeout=2)
-        try:
-            # Solicita término do processo ffmpeg (libera o dispositivo de vídeo).
-            proc.terminate()
-        except Exception:
-            # Ignora falhas durante o desligamento.
-            pass
+        for runtime in runtimes:
+            runtime.segbuf.stop(join_timeout=2)
+        for runtime in runtimes:
+            try:
+                # Solicita término do processo ffmpeg (libera o dispositivo de vídeo).
+                runtime.proc.terminate()
+            except Exception:
+                # Ignora falhas durante o desligamento.
+                pass
         try:
             worker.stop()
+        except Exception:
+            pass
+        try:
+            trigger_executor.shutdown(wait=False)
         except Exception:
             pass
 

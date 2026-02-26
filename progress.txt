@@ -1,1 +1,19 @@
- 
+
+== [ralph] iteration: trigger fan-out ==
+Task: 1 trigger gera highlights para todas as câmeras
+Status: PASSED
+
+What worked:
+- Added `capture_lock: threading.Lock` to `CameraRuntime` dataclass (using `field(default_factory=threading.Lock)`)
+- Extracted `_trigger_fan_out()` as module-level function for testability
+- Fan-out uses `ThreadPoolExecutor` (configurable via `GN_TRIGGER_MAX_WORKERS`)
+- Per-camera lock with `acquire(blocking=False)` skips busy cameras without blocking others
+- Lock always released in `finally` block
+- `trigger_id = uuid.uuid4().hex[:8]` logged with `camera_id` for observability
+- Replaced single-camera trigger block in `main()` with fan-out call
+- Tests: 4 fan-out tests + 2 existing settings tests all pass (6/6)
+
+Learnings:
+- Import `dotenv` may not be available in base conda env; `pip install python-dotenv` needed
+- Module-level functions (not nested in `main()`) are easier to test with `patch("main.func")`
+- `ThreadPoolExecutor` context manager in tests cleanly waits for all futures
