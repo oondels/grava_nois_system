@@ -271,7 +271,7 @@ O projeto será considerado concluído quando:
 - [x]  Sistema suporta ≥ 2 câmeras simultaneamente
 - [x]  1 trigger gera highlights para todas as câmeras
 - [x]  Nenhuma colisão de arquivos ocorre sob concorrência
-- [ ]  Falha de uma câmera não afeta as demais
+- [x]  Falha de uma câmera não afeta as demais
 - [ ]  Compatibilidade legado validada
 - [ ]  Testes automatizados cobrindo:
     - Parser

@@ -34,3 +34,18 @@ Learnings:
 - `fake_run` for subprocess: create output file via `Path(cmd[-1]).touch()` - ffmpeg output is always the last arg
 - `build_highlight` needs `clips_dir` and `failed_dir_highlight` to exist before calling
 - `segbuf.snapshot_last` needs >= 2 non-empty existing files or build returns None early
+
+== [ralph] iteration: câmera falha não afeta as demais ==
+Task: Falha de uma câmera não afeta as demais
+Status: PASSED
+
+What worked:
+- Feature already implemented in `_trigger_fan_out` via per-camera try/except/finally inside `_process_one`
+- Exceptions from `build_highlight` are caught at camera level; other cameras continue executing
+- Lock released in `finally` block even on exception
+- `test_camera_failure_does_not_affect_others` in test_trigger_fanout.py already validates this behavior
+- All 20 tests pass (no code changes required; marked PRD task complete)
+
+Learnings:
+- pytest not installed in base conda env; `pip install pytest python-dotenv` needed
+- Run `python -m pytest tests/ -v` from project root to run all tests
