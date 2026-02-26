@@ -17,3 +17,20 @@ Learnings:
 - Import `dotenv` may not be available in base conda env; `pip install python-dotenv` needed
 - Module-level functions (not nested in `main()`) are easier to test with `patch("main.func")`
 - `ThreadPoolExecutor` context manager in tests cleanly waits for all futures
+
+== [ralph] iteration: no file collisions ==
+Task: Nenhuma colisão de arquivos ocorre sob concorrência
+Status: PASSED
+
+What worked:
+- Changed timestamp format in build_highlight from `%Y%m%d-%H%M%SZ` to `%Y%m%d-%H%M%S-%fZ` (microsecond precision via %f)
+- Removed redundant duplicate `timestamp =` assignment (lines 86-88 were identical to lines 67-69)
+- Added `cfg.camera_id` to output filenames: `highlight_{camera_id}_{timestamp}.ts/mp4`
+- Directory isolation already ensured per-camera by `load_capture_configs` (use_isolated_dirs=True for multi-camera)
+- Tests: 4 collision tests + 6 existing tests all pass (10/10)
+
+Learnings:
+- `patch.object(proc_mod.time, "sleep")` and `patch.object(proc_mod.time, "time", ...)` works when module uses `import time` (not `from time import ...`)
+- `fake_run` for subprocess: create output file via `Path(cmd[-1]).touch()` - ffmpeg output is always the last arg
+- `build_highlight` needs `clips_dir` and `failed_dir_highlight` to exist before calling
+- `segbuf.snapshot_last` needs >= 2 non-empty existing files or build returns None early

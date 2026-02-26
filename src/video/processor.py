@@ -65,7 +65,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
 
     # Cria uma pasta de staging apenas para o arquivo de manifesto (concat list)
     timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
-        "%Y%m%d-%H%M%SZ"
+        "%Y%m%d-%H%M%S-%fZ"
     )
 
     # Usamos a pasta de clipes gravados para o arquivo de lista temporário
@@ -83,11 +83,8 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         for seg_path in valid_segments:
             f.write(f"file '{seg_path.resolve()}'\n")
 
-    timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
-        "%Y%m%d-%H%M%SZ"
-    )
-    tmp_ts = cfg.clips_dir / f"highlight_{timestamp}.ts"
-    out_mp4 = cfg.clips_dir / f"highlight_{timestamp}.mp4"
+    tmp_ts = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.ts"
+    out_mp4 = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.mp4"
 
     try:
         # concat TS -> TS (regen PTS)
