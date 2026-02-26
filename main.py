@@ -19,6 +19,7 @@ from video_core import (
 )
 from src.utils.logger import logger
 from src.services.api_client import GravaNoisAPIClient
+from src.services.api_error_policy import extract_api_error_from_exception
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -555,6 +556,14 @@ class ProcessingWorker:
                         meta_path.unlink(missing_ok=True)
                     except Exception:
                         pass
+
+                api_error = extract_api_error_from_exception(e)
+                if api_error and api_error.should_delete_local_record:
+                    _delete_blocked_clip(
+                        "Registro removido por erro não-retriável da API "
+                        f"({api_error.short_label()})."
+                    )
+                    return
 
                 http_response = None
                 if isinstance(e, requests.exceptions.HTTPError):

@@ -94,6 +94,8 @@ GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=seu_token_jwt_aqui
 GN_CLIENT_ID=uuid-do-cliente
 GN_VENUE_ID=uuid-do-local
+DEVICE_ID=raspberrypi-001
+DEVICE_SECRET=troque_por_um_segredo_forte
 
 # GPIO (opcional)
 GN_GPIO_PIN=17
@@ -109,6 +111,9 @@ GN_LIGHT_MODE=1
 
 # Modo desenvolvimento (sem chamadas externas)
 DEV=true
+
+# Dry-run da assinatura HMAC (sem chamar backend)
+GN_HMAC_DRY_RUN=0
 
 # Configurações de buffer
 GN_SEG_TIME=1
@@ -208,6 +213,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 - **Pasta de falhas:** Vídeos que falharam vão para `failed_clips/upload_failed/`
 - **Reprocessamento:** Sistema tenta reprocessar falhas periodicamente
 - **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
+- **Erros HMAC/device não-retriáveis:** Quando a API retorna erros de autenticação/integridade do device (ex.: `signature_mismatch`, `client_mismatch`, `device_revoked`), o worker remove o registro local (vídeo + sidecar) para evitar loop infinito de retry.
 
 ---
 
@@ -223,8 +229,12 @@ grava_nois_system/
 ├── src/
 │   ├── utils/
 │   │   └── logger.py            # Sistema de logging centralizado
+│   ├── security/
+│   │   ├── hmac.py              # Hash/HMAC/nonce/timestamp
+│   │   └── request_signer.py    # Canonical string + headers HMAC
 │   └── services/
-│       └── api_client.py        # Cliente HTTP para backend
+│       ├── api_client.py        # Cliente HTTP para backend
+│       └── api_error_policy.py  # Regra de decisão para erros da API
 │
 ├── files/
 │   └── replay_grava_nois.png    # Logo para marca d'água
@@ -240,6 +250,10 @@ grava_nois_system/
 │   ├── upload_failed/           # Falhas de upload (retry automático)
 │   ├── build_failed/            # Falhas na construção
 │   └── enqueue_failed/          # Falhas ao enfileirar
+│
+├── tests/
+│   ├── test_security_signing.py # Testes de assinatura HMAC
+│   └── test_api_error_policy.py # Testes de política de erros da API
 │
 └── docs/
     ├── README.md                # Documentação original
@@ -288,6 +302,10 @@ GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 GN_CLIENT_ID=550e8400-e29b-41d4-a716-446655440000
 GN_VENUE_ID=6ba7b810-9dad-11d1-80b4-00c04fd430c8
+CLIENT_ID=550e8400-e29b-41d4-a716-446655440000  # fallback para X-Client-Id
+DEVICE_ID=raspberrypi-001
+DEVICE_SECRET=troque_por_um_segredo_forte
+GN_HMAC_DRY_RUN=0  # 1=nao envia request; apenas monta, assina e loga
 ```
 
 #### GPIO
@@ -338,6 +356,8 @@ GN_LOG_DIR=/caminho/custom/logs # Diretório de logs (fallback: <raiz-do-projeto
 
 Observações:
 - Se `GN_LOG_DIR` não for definido, o sistema cria e usa `logs/` na raiz do projeto (mesma pasta de `main.py`).
+- Em falhas `401/403` nas rotas assinadas, o logger registra somente `path`, `timestamp`, `nonce`, `body_sha256` e assinatura truncada.
+- `DEVICE_SECRET` nunca é escrito nos logs.
 - O fallback padrão não depende de caminho absoluto de container Docker.
 
 ### Câmera V4L2 (Local)
@@ -542,7 +562,45 @@ mv failed_clips/upload_failed/*.json queue_raw/
 - O vídeo e o sidecar JSON são removidos localmente.
 - Não entra em `max_attempts` e não passa por retry.
 
-### 6. CPU/Memória Alta
+### 6. Erros HMAC/Autenticação do Device
+
+Quando o backend retorna erro no formato:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "message": "signature_mismatch",
+  "error": { "code": "UNAUTHORIZED", "details": null },
+  "requestId": "..."
+}
+```
+
+o device aplica uma política local (em `src/services/api_error_policy.py`) para decidir exclusão imediata ou retry.
+
+**Apaga registro local (vídeo + sidecar):**
+- `missing_headers`
+- `invalid_timestamp`
+- `invalid_nonce`
+- `invalid_body_hash`
+- `invalid_signature_format`
+- `device_not_found`
+- `device_revoked`
+- `client_mismatch`
+- `missing_raw_body`
+- `integrity_failed`
+- `signature_mismatch`
+- `device_not_authenticated`
+- `Forbidden - video does not belong to device client`
+
+**Mantém em retry/backoff:**
+- `timestamp_out_of_range` (normalmente resolvido com timestamp novo/sincronismo de relógio)
+- `replay_detected` (nonce já usado; próximo envio gera nonce novo)
+- `replay_store_unavailable`
+- `device_hmac_verification_failed`
+- outros erros transitórios de rede/infra
+
+### 7. CPU/Memória Alta
 
 **Soluções:**
 
@@ -560,7 +618,7 @@ export GN_BUFFER_DIR=/home/pi/buffer
 # (Editar main.py: scan_interval=3 em vez de 1)
 ```
 
-### 7. Modo DEV Não Está Isolando Rede
+### 8. Modo DEV Não Está Isolando Rede
 
 **Sintomas:**
 - Mesmo com `.env` configurado, ainda aparecem logs de chamada HTTP.
@@ -579,7 +637,7 @@ DEV=true
 - Em `DEV=true`, o worker deve logar:
   `Modo DEV ativado. Pulando comunicação com a API e upload para a nuvem.`
 
-### 8. Logs Muito Grandes
+### 9. Logs Muito Grandes
 
 ```bash
 # Logs rotativos estão ativados por padrão
