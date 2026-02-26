@@ -272,7 +272,7 @@ O projeto será considerado concluído quando:
 - [x]  1 trigger gera highlights para todas as câmeras
 - [x]  Nenhuma colisão de arquivos ocorre sob concorrência
 - [x]  Falha de uma câmera não afeta as demais
-- [ ]  Compatibilidade legado validada
+- [x]  Compatibilidade legado validada
 - [ ]  Testes automatizados cobrindo:
     - Parser
     - Fan-out
