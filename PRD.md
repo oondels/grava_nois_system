@@ -273,7 +273,7 @@ O projeto será considerado concluído quando:
 - [x]  Nenhuma colisão de arquivos ocorre sob concorrência
 - [x]  Falha de uma câmera não afeta as demais
 - [x]  Compatibilidade legado validada
-- [ ]  Testes automatizados cobrindo:
+- [x]  Testes automatizados cobrindo:
     - Parser
     - Fan-out
     - Isolamento de diretórios

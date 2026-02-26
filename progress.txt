@@ -49,3 +49,18 @@ What worked:
 Learnings:
 - pytest not installed in base conda env; `pip install pytest python-dotenv` needed
 - Run `python -m pytest tests/ -v` from project root to run all tests
+
+== [ralph] iteration: compatibilidade legado validada ==
+Task: Compatibilidade legado validada
+Status: PASSED
+
+What worked:
+- Created `tests/test_legacy_compatibility.py` with 11 tests covering the full fallback chain
+- `_patched()` helper clears all 3 config sources (GN_CAMERAS_JSON, GN_RTSP_URLS, GN_RTSP_URL) before each test
+- Tests: single-camera mode, flat paths (no camera_id subdirectory), priority chain, disabled cameras, CSV multi-URL, v4l2 default
+- All 31 tests pass (11 new + 20 existing)
+
+Learnings:
+- `patch.dict(os.environ, env, clear=False)` with key="" effectively disables that var (falsy after `.strip()`)
+- For legacy mode, `use_isolated_dirs=False` → `camera_suffix = Path()` → paths stay flat (no camera_id appended)
+- Single-camera JSON or CSV also gets `use_isolated_dirs=False` (only triggered when `len > 1`)
