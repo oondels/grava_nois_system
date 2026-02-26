@@ -278,6 +278,7 @@ O projeto será considerado concluído quando:
     - Fan-out
     - Isolamento de diretórios
     - Worker multi-camera
+- [x]  Houver logs de conexao com cada camera
 
 ---
 
@@ -315,6 +316,6 @@ O projeto será considerado concluído quando:
 
 ## 16. Estado Atual da Aprovação
 
-**Status:** Aguardando validação de engenharia para iniciar Fase A.
+**Status:** Aguarando validação de engenharia para iniciar Fase A.
 
 Fim do PRD.

@@ -19,7 +19,7 @@ load_dotenv()
 
 
 def check_rtsp_connectivity(
-    rtsp_url: str, timeout: int = 5, max_retries: int = 10
+    rtsp_url: str, timeout: int = 5, max_retries: int = 10, camera_id: str = ""
 ) -> bool:
     """
     Verifica se a câmera RTSP está acessível antes de iniciar o FFmpeg.
@@ -28,42 +28,44 @@ def check_rtsp_connectivity(
         rtsp_url: URL RTSP completa (ex: rtsp://user:pass@192.168.1.21:554/cam/realmonitor)
         timeout: Tempo limite por tentativa em segundos
         max_retries: Número máximo de tentativas
+        camera_id: Identificador da câmera para logs (opcional)
 
     Returns:
         True se a câmera estiver acessível, False caso contrário
     """
+    prefix = f"[{camera_id}] " if camera_id else ""
     try:
         parsed = urlparse(rtsp_url)
         host = parsed.hostname
         port = parsed.port or 554
 
         if not host:
-            logger.error("URL RTSP inválida (hostname não encontrado)")
+            logger.error(f"{prefix}URL RTSP inválida (hostname não encontrado)")
             return False
 
-        logger.info(f"Verificando conectividade com câmera {host}:{port}...")
+        logger.info(f"{prefix}Verificando conectividade com câmera {host}:{port}...")
 
         for attempt in range(1, max_retries + 1):
             try:
-                logger.info(f"Tentativa {attempt}/{max_retries}...")
+                logger.info(f"{prefix}Tentativa {attempt}/{max_retries}...")
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(timeout)
                 sock.connect((host, port))
                 sock.close()
-                logger.info(f"Câmera acessível em {host}:{port}")
+                logger.info(f"{prefix}Câmera acessível em {host}:{port}")
                 return True
             except (socket.timeout, socket.error, OSError) as e:
-                logger.warning(f"Falha na tentativa {attempt}: {e}")
+                logger.warning(f"{prefix}Falha na tentativa {attempt}: {e}")
                 if attempt < max_retries:
                     wait_time = 5
-                    logger.info(f"Aguardando {wait_time}s antes de tentar novamente...")
+                    logger.info(f"{prefix}Aguardando {wait_time}s antes de tentar novamente...")
                     time.sleep(wait_time)
 
-        logger.error(f"Câmera não acessível após {max_retries} tentativas")
+        logger.error(f"{prefix}Câmera não acessível após {max_retries} tentativas")
         return False
 
     except Exception as e:
-        logger.exception(f"Erro inesperado ao verificar conectividade RTSP: {e}")
+        logger.exception(f"{prefix}Erro inesperado ao verificar conectividade RTSP: {e}")
         return False
 
 
@@ -83,9 +85,8 @@ def _calc_start_number(buffer_dir: Path) -> int:
 def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     start_num = _calc_start_number(cfg.buffer_dir)
     out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
-    # Permite configurar a URL RTSP via env GN_RTSP_URL
-    # Ex.: rtsp://user:pass@192.168.1.21:2399/cam/realmonitor?channel=1&subtype=0
-    rtsp_url = (os.getenv("GN_RTSP_URL") or "").strip()
+    # URL RTSP por câmera (fallback legado via GN_RTSP_URL)
+    rtsp_url = (cfg.rtsp_url or os.getenv("GN_RTSP_URL") or "").strip()
 
     use_rtsp = bool(rtsp_url)
 
@@ -95,7 +96,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         timeout = int(os.getenv("GN_RTSP_TIMEOUT", "5"))
 
         if not check_rtsp_connectivity(
-            rtsp_url, timeout=timeout, max_retries=max_retries
+            rtsp_url, timeout=timeout, max_retries=max_retries, camera_id=cfg.camera_id
         ):
             raise RuntimeError(
                 f"Câmera RTSP não acessível após {max_retries} tentativas. "
@@ -203,7 +204,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         )
         log_dir = default_log_dir
         log_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = log_dir / "ffmpeg.log"
+    log_file_path = log_dir / f"ffmpeg_{cfg.camera_id}.log"
 
     try:
         # Abre arquivo de log em modo append

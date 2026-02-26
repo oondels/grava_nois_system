@@ -83,3 +83,18 @@ Learnings:
 - No-API path (is_configured=False, not is_dev): file moves to failed_clips/<cam>/upload_failed/
 - DEV=true path: file deleted from queue after processing
 - `_scan_once()` is the unit to test; no need to start the background thread
+
+== [ralph] iteration: logs de conexao com cada camera ==
+Task: Houver logs de conexao com cada camera
+Status: PASSED
+
+What worked:
+- Added `camera_id: str = ""` parameter to `check_rtsp_connectivity` in `src/video/capture.py`
+- Computed `prefix = f"[{camera_id}] " if camera_id else ""` and prepended it to every logger call in the function
+- Passed `cfg.camera_id` from `start_ffmpeg` to `check_rtsp_connectivity`
+- Created `tests/test_connection_logs.py` with 5 tests verifying camera_id appears in success/failure/invalid-url logs, isolation between cameras, and backward-compat with no camera_id
+- All 42 tests pass
+
+Learnings:
+- Patch `src.video.capture.socket.socket`, `src.video.capture.logger`, and `src.video.capture.time.sleep` to unit-test `check_rtsp_connectivity` without real sockets or delays
+- Default `camera_id=""` preserves backward compatibility (no prefix in logs when not set)
