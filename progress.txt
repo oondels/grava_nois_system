@@ -64,3 +64,22 @@ Learnings:
 - `patch.dict(os.environ, env, clear=False)` with key="" effectively disables that var (falsy after `.strip()`)
 - For legacy mode, `use_isolated_dirs=False` → `camera_suffix = Path()` → paths stay flat (no camera_id appended)
 - Single-camera JSON or CSV also gets `use_isolated_dirs=False` (only triggered when `len > 1`)
+
+== [ralph] iteration: testes automatizados ==
+Task: Testes automatizados cobrindo Parser, Fan-out, Isolamento de diretórios, Worker multi-camera
+Status: PASSED
+
+What worked:
+- Parser: covered by test_multi_camera_settings.py (2 tests) + test_legacy_compatibility.py (11 tests)
+- Fan-out: covered by test_trigger_fanout.py (4 tests)
+- Isolamento de diretórios: covered by test_no_file_collisions.py (4 tests)
+- Worker multi-camera: NEW test_worker_multi_camera.py (6 tests)
+- Class-level @patch decorators apply to all test methods cleanly
+- All 37 tests pass
+
+Learnings:
+- Mock `GravaNoisAPIClient` at `src.workers.processing_worker.GravaNoisAPIClient`
+- Mock `ffprobe_metadata` at `src.workers.processing_worker.ffprobe_metadata`
+- No-API path (is_configured=False, not is_dev): file moves to failed_clips/<cam>/upload_failed/
+- DEV=true path: file deleted from queue after processing
+- `_scan_once()` is the unit to test; no need to start the background thread
