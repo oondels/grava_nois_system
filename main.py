@@ -141,20 +141,25 @@ def main() -> int:
     primary_runtime = runtimes[0]
     primary_cfg = primary_runtime.cfg
 
-    # inicia worker
-    worker = ProcessingWorker(
-        queue_dir=primary_cfg.queue_dir,
-        out_wm_dir=out_wm_dir,
-        failed_dir_highlight=failed_dir_highlight,
-        watermark_path=watermark_path,
-        scan_interval=1,
-        max_attempts=worker_max_attempts,
-        wm_margin=24,
-        wm_opacity=0.6,
-        wm_rel_width=0.11,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
-        light_mode=light_mode,
-    )
-    worker.start()
+    # inicia 1 worker por câmera (cada um varre apenas sua queue_dir isolada)
+    workers: list[ProcessingWorker] = []
+    for rt in runtimes:
+        cfg = rt.cfg
+        worker = ProcessingWorker(
+            queue_dir=cfg.queue_dir,
+            out_wm_dir=out_wm_dir,
+            failed_dir_highlight=cfg.failed_dir_highlight,
+            watermark_path=watermark_path,
+            scan_interval=1,
+            max_attempts=worker_max_attempts,
+            wm_margin=24,
+            wm_opacity=0.6,
+            wm_rel_width=0.11,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
+            light_mode=light_mode,
+        )
+        worker.start()
+        workers.append(worker)
+        logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
 
     # --- Disparo por ENTER ou GPIO (Raspberry Pi) ---
     trigger_q: queue.Queue[str] = queue.Queue()
@@ -319,10 +324,11 @@ def main() -> int:
             except Exception:
                 # Ignora falhas durante o desligamento.
                 pass
-        try:
-            worker.stop()
-        except Exception:
-            pass
+        for worker in workers:
+            try:
+                worker.stop()
+            except Exception:
+                pass
         try:
             trigger_executor.shutdown(wait=False)
         except Exception:
