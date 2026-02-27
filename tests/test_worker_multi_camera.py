@@ -57,7 +57,8 @@ class WorkerMultiCameraTests(unittest.TestCase):
         mp4 = _place_mp4(queue, "highlight_cam01_test.mp4")
         worker = _make_worker(queue, failed)
 
-        worker._scan_once()
+        with patch.dict(os.environ, {"DEV": ""}):
+            worker._scan_once()
 
         # File must have been consumed: either moved to upload_failed or removed
         upload_failed = failed / "upload_failed" / mp4.name
@@ -103,8 +104,9 @@ class WorkerMultiCameraTests(unittest.TestCase):
         worker_cam01 = _make_worker(queue_cam01, failed_cam01)
         worker_cam02 = _make_worker(queue_cam02, failed_cam02)
 
-        worker_cam01._scan_once()
-        worker_cam02._scan_once()
+        with patch.dict(os.environ, {"DEV": ""}):
+            worker_cam01._scan_once()
+            worker_cam02._scan_once()
 
         uf_cam01 = failed_cam01 / "upload_failed" / mp4_cam01.name
         uf_cam02 = failed_cam02 / "upload_failed" / mp4_cam02.name
@@ -118,8 +120,8 @@ class WorkerMultiCameraTests(unittest.TestCase):
             "cam02 file must be processed",
         )
 
-    def test_dev_mode_removes_file_after_processing(self, mock_api_cls, _ffprobe):
-        """In DEV mode, the mp4 is deleted from the queue after processing."""
+    def test_dev_mode_preserves_file_after_processing(self, mock_api_cls, _ffprobe):
+        """In DEV mode, the mp4 and sidecar remain locally preserved."""
         mock_api_cls.return_value.is_configured.return_value = False
 
         queue = self.base / "queue_raw" / "cam01"
@@ -132,7 +134,11 @@ class WorkerMultiCameraTests(unittest.TestCase):
         with patch.dict(os.environ, {"DEV": "true"}):
             worker._scan_once()
 
-        self.assertFalse(mp4.exists(), "DEV mode: mp4 must be deleted after processing")
+        self.assertTrue(mp4.exists(), "DEV mode: mp4 must remain in queue")
+        sidecar = queue / "highlight_cam01_dev.json"
+        self.assertTrue(sidecar.exists(), "DEV mode: sidecar must remain in queue")
+        meta = json.loads(sidecar.read_text())
+        self.assertEqual(meta.get("status"), "dev_local_preserved")
 
     def test_no_api_moves_file_to_upload_failed(self, mock_api_cls, _ffprobe):
         """Without API configured, processed file is moved to upload_failed/."""

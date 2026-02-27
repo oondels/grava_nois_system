@@ -260,6 +260,14 @@ class ProcessingWorker:
                 }
                 meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
+            # Em modo DEV, itens já preservados localmente não devem ser reprocessados.
+            try:
+                existing_meta = json.loads(meta_path.read_text())
+                if existing_meta.get("status") == "dev_local_preserved":
+                    continue
+            except Exception:
+                pass
+
             # tenta lock atômico (claim do job)
             try:
                 fd = os.open(
@@ -686,6 +694,7 @@ class ProcessingWorker:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
         # 4) pós-processamento local conforme sucesso/fracasso de upload
+        #    - Se DEV: mantém artefatos locais (sem apagar)
         #    - Se upload OK: remove o original da fila
         #    - Se upload NÃO OK (falhou, sem URL, sem API): move para pasta de pendências
         try:
@@ -702,7 +711,25 @@ class ProcessingWorker:
             and meta["remote_finalize"].get("status") == "ok"
         )
 
-        if is_dev or (uploaded_ok and finalized_ok):
+        if is_dev:
+            meta.setdefault("local_fallback", {})
+            meta["local_fallback"].update(
+                {
+                    "status": "dev_local_preserved",
+                    "reason": "DEV mode",
+                    "kept_at": datetime.now(timezone.utc).isoformat(),
+                    "dest_dir": str(self.queue_dir),
+                }
+            )
+            meta["status"] = "dev_local_preserved"
+            meta["updated_at"] = datetime.now(timezone.utc).isoformat()
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+            logger.info(
+                f"Modo DEV: artefatos locais preservados para o clipe {mp4.name}."
+            )
+            return
+
+        if uploaded_ok and finalized_ok:
             # remove artefatos da fila E o arquivo com watermark final
             logger.info(f"Limpando artefatos locais para o clipe {mp4.name}...")
             for file_to_delete in [mp4, meta_path, upload_target]:
@@ -825,4 +852,3 @@ class ProcessingWorker:
             meta["status"] = "queued_retry"
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
             time.sleep(1.0 * meta["attempts"])  # backoff linear simples
-
