@@ -250,7 +250,7 @@ def add_image_watermark(
     watermark_path: str,
     output_path: str,
     margin: int = 24,
-    opacity: float = 0.6,
+    opacity: float = 0.8,
     rel_width: float = 0.2,
     codec: str = "libx264",
     crf: int = 20,
