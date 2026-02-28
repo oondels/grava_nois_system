@@ -153,7 +153,7 @@ def main() -> int:
             scan_interval=1,
             max_attempts=worker_max_attempts,
             wm_margin=24,
-            wm_opacity=0.6,
+            wm_opacity=0.8,
             wm_rel_width=0.11,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
             light_mode=light_mode,
         )
