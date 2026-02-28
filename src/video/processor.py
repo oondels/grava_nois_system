@@ -1,0 +1,364 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from dotenv import load_dotenv
+
+from src.config.settings import CaptureConfig
+from src.utils.logger import logger
+from src.video.buffer import SegmentBuffer
+
+load_dotenv()
+
+
+def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
+    logger.info("Botão apertado! Aguardando pós-buffer...")
+
+    # Pasta para arquivos com erro de build
+    fail_build_dir = cfg.failed_dir_highlight / "build_failed"
+    fail_build_dir.mkdir(parents=True, exist_ok=True)
+
+    click_ts = time.time()
+    if cfg.post_segments is not None:
+        wait_after = cfg.post_segments * cfg.seg_time
+    else:
+        wait_after = cfg.post_seconds
+    time.sleep(max(0, wait_after) + 0.50)
+
+    # Calcula quantos segmentos de vídeo são necessários para cobrir o tempo total do highlight
+    # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo
+    # total pela duração do segmento e arredondamos para garantir cobertura completa.
+    pre_seg = (
+        cfg.pre_segments
+        if cfg.pre_segments is not None
+        else max(1, int(round(cfg.pre_seconds / cfg.seg_time)))
+    )
+    post_seg = (
+        cfg.post_segments
+        if cfg.post_segments is not None
+        else max(1, int(round(cfg.post_seconds / cfg.seg_time)))
+    )
+    need = max(1, pre_seg + post_seg)
+    logger.info(f"{need} segmentos são necessários para o highlight")
+
+    def _segnum_from_path(s):
+        try:
+            return int(Path(s).stem.replace("buffer", ""))
+        except:
+            return -1
+
+    # Ultimos videos em buffer
+    selected_videos = sorted(segbuf.snapshot_last(need), key=_segnum_from_path)
+    logger.info(f"Total de segmentos selecionados: {len(selected_videos)}")
+
+    if not selected_videos:
+        logger.warning("Nenhum segmento capturado — encerrando")
+        return None
+
+    # Cria uma pasta de staging apenas para o arquivo de manifesto (concat list)
+    timestamp = datetime.fromtimestamp(click_ts, tz=timezone.utc).strftime(
+        "%Y%m%d-%H%M%S-%fZ"
+    )
+
+    # Usamos a pasta de clipes gravados para o arquivo de lista temporário
+    concat_list_path = cfg.clips_dir / f"concat_{timestamp}.txt"
+    valid_segments = [
+        p
+        for p in (Path(s) for s in selected_videos)
+        if p.exists() and p.stat().st_size > 0
+    ]
+    if not valid_segments or len(valid_segments) < 2:
+        logger.warning("Nenhum segmento válido encontrado — encerrando")
+        return None
+
+    with open(concat_list_path, "w") as f:
+        for seg_path in valid_segments:
+            f.write(f"file '{seg_path.resolve()}'\n")
+
+    tmp_ts = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.ts"
+    out_mp4 = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.mp4"
+
+    try:
+        # concat TS -> TS (regen PTS)
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-fflags",
+                "+genpts+igndts",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_list_path),
+                "-c",
+                "copy",
+                str(tmp_ts),
+            ],
+            check=True,
+        )
+
+        # remux TS -> MP4 (copy) com PTS normalizado e base zerada
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-fflags",
+                "+genpts",
+                "-i",
+                str(tmp_ts),
+                "-c",
+                "copy",
+                "-bsf:a",
+                "aac_adtstoasc",
+                "-movflags",
+                "+faststart",
+                "-avoid_negative_ts",
+                "make_zero",
+                str(out_mp4),
+            ],
+            check=True,
+        )
+
+        logger.info(f"Highlight salvo: {out_mp4}")
+        return out_mp4
+
+    except Exception as e:
+        logger.exception(f"Falha ao construir highlight: {e}")
+
+        # Move quaisquer saídas parciais para a pasta de falha
+        try:
+            if tmp_ts.exists():
+                tmp_ts.replace(fail_build_dir / tmp_ts.name)
+        except Exception:
+            pass
+        try:
+            if out_mp4.exists():
+                out_mp4.replace(fail_build_dir / out_mp4.name)
+        except Exception:
+            pass
+
+        err_txt = fail_build_dir / f"{timestamp}.error.txt"
+        err_txt.write_text(f"build_highlight failed: {e}\n", encoding="utf-8")
+        return None
+
+    finally:
+        try:
+            concat_list_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        # Deleta o arquivo .ts intermediário do disco
+        try:
+            if "tmp_ts" in locals() and tmp_ts.exists():
+                tmp_ts.unlink(missing_ok=True)
+                logger.debug(f"Arquivo temporário removido: {tmp_ts.name}")
+        except Exception as e:
+            logger.warning(f"Não foi possível remover o arquivo temporário .ts: {e}")
+
+
+
+def ffprobe_metadata(path: Path) -> Dict[str, Any]:
+    """
+    Usa ffprobe para extrair metadados básicos.
+    Requer ffprobe no PATH.
+    """
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name,width,height,r_frame_rate:format=duration",
+        "-of",
+        "json",
+        str(path),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    info = json.loads(r.stdout)
+    stream = info.get("streams", [{}])[0]
+    fmt = info.get("format", {})
+    fps_str = stream.get("r_frame_rate", "0/1")
+    try:
+        num, den = fps_str.split("/")
+        fps = float(num) / float(den) if float(den) != 0 else 0.0
+    except Exception:
+        fps = 0.0
+    return {
+        "codec": stream.get("codec_name"),
+        "width": stream.get("width"),
+        "height": stream.get("height"),
+        "fps": fps,
+        "duration_sec": float(fmt.get("duration", 0.0)),
+    }
+
+
+def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
+    """
+    Move o arquivo para a fila (queue_dir) e salva metadados .json ao lado.
+    """
+    logger.info("Enfileirando clipe...")
+    clip_path = clip_path.resolve()
+    size_bytes = clip_path.stat().st_size
+    # Em modo leve, evitamos hash caro neste momento
+    light_mode = (os.getenv("GN_LIGHT_MODE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+    sha256 = None if light_mode else _sha256_file(clip_path)
+    meta = ffprobe_metadata(clip_path)
+    payload = {
+        "type": "highlight_raw",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "file_name": clip_path.name,
+        "size_bytes": size_bytes,
+        "sha256": sha256,
+        "meta": meta,
+        "pre_seconds": cfg.pre_seconds,
+        "post_seconds": cfg.post_seconds,
+        "seg_time": cfg.seg_time,
+        "pre_segments": cfg.pre_segments,
+        "post_segments": cfg.post_segments,
+        "status": "queued",
+    }
+
+    dst = cfg.queue_dir / clip_path.name
+    meta_path = cfg.queue_dir / (clip_path.stem + ".json")
+
+    # move para a fila e grava sidecar
+    shutil.move(str(clip_path), str(dst))
+    meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    logger.info(f"Enfileirado para tratamento: {dst}")
+    return dst
+
+
+def add_image_watermark(
+    input_path: str,
+    watermark_path: str,
+    output_path: str,
+    margin: int = 24,
+    opacity: float = 0.8,
+    rel_width: float = 0.2,
+    codec: str = "libx264",
+    crf: int = 20,
+    preset: str = "medium",
+) -> None:
+    """
+    Aplica marca d'água de imagem no central usando ffmpeg.
+
+    - Dimensiona a marca d'água para `rel_width * largura_do_vídeo`.
+    - Aplica opacidade (canal alpha) e sobrepõe com margens.
+    - Requer ffmpeg no PATH. Não requer MoviePy.
+    """
+    logger.info("Adicionando marca d'água ao vídeo...")
+    in_p = Path(input_path)
+    wm_p = Path(watermark_path)
+    if not in_p.exists():
+        raise FileNotFoundError(f"Vídeo inexistente: {input_path}")
+    if not wm_p.exists():
+        raise FileNotFoundError(f"Watermark inexistente: {watermark_path}")
+
+    meta = ffprobe_metadata(in_p)
+    vw = int(meta.get("width") or 0)
+    if vw <= 0:
+        raise RuntimeError("Não foi possível obter largura do vídeo via ffprobe.")
+
+    # Largura alvo da marca d'água (em pixels)
+    wm_w = max(1, int(vw * float(rel_width)))
+    # Filtro: escala watermark, aplica alpha e sobrepõe com margem
+    # - format=rgba garante canal alpha; colorchannelmixer ajusta opacidade
+    filt = (
+        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm];"
+        f"[0:v][wm]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(margin)}[v]"
+    )
+
+    cmd = [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(in_p),
+        "-i",
+        str(wm_p),
+        "-filter_complex",
+        filt,
+        "-map",
+        "[v]",
+        "-map",
+        "0:a?",
+        "-c:v",
+        codec,
+        "-preset",
+        preset,
+        "-crf",
+        str(int(crf)),
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        str(output_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            f"Erro crítico no FFmpeg (Watermark):\nComando: {' '.join(cmd)}\nDetalhes:\n{e.stderr}"
+        )
+        raise RuntimeError(
+            f"FFmpeg falhou ao aplicar marca d'água: {e.stderr[-200:]}"
+        ) from e
+
+
+def _sha256_file(p: Path, chunk: int = 1024 * 1024) -> str:
+    """Calcula hash SHA-256 de um arquivo."""
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        while True:
+            b = f.read(chunk)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def generate_thumbnail(
+    input_path: Path, output_path: Path, at_sec: float | None = None
+) -> None:
+    """Gera thumbnail .jpg no meio do vídeo (ou em at_sec) usando ffmpeg."""
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Vídeo inexistente: {input_path}")
+
+    meta = ffprobe_metadata(input_path)
+    dur = float(meta.get("duration_sec") or 0.0)
+    t = at_sec if at_sec is not None else (dur * 0.5 if dur > 0 else 0.0)
+
+    cmd = [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-ss",
+        f"{t:.3f}",
+        "-i",
+        str(input_path),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True)

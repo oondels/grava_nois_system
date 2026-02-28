@@ -13,7 +13,7 @@ from typing import Dict, Optional
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
 from src.utils.logger import logger
-from video_core import ffprobe_metadata, _sha256_file
+from src.video.processor import ffprobe_metadata, _sha256_file
 
 
 DEFAULT_CONTENT_TYPE = "video/mp4"

@@ -1,0 +1,100 @@
+
+== [ralph] iteration: trigger fan-out ==
+Task: 1 trigger gera highlights para todas as câmeras
+Status: PASSED
+
+What worked:
+- Added `capture_lock: threading.Lock` to `CameraRuntime` dataclass (using `field(default_factory=threading.Lock)`)
+- Extracted `_trigger_fan_out()` as module-level function for testability
+- Fan-out uses `ThreadPoolExecutor` (configurable via `GN_TRIGGER_MAX_WORKERS`)
+- Per-camera lock with `acquire(blocking=False)` skips busy cameras without blocking others
+- Lock always released in `finally` block
+- `trigger_id = uuid.uuid4().hex[:8]` logged with `camera_id` for observability
+- Replaced single-camera trigger block in `main()` with fan-out call
+- Tests: 4 fan-out tests + 2 existing settings tests all pass (6/6)
+
+Learnings:
+- Import `dotenv` may not be available in base conda env; `pip install python-dotenv` needed
+- Module-level functions (not nested in `main()`) are easier to test with `patch("main.func")`
+- `ThreadPoolExecutor` context manager in tests cleanly waits for all futures
+
+== [ralph] iteration: no file collisions ==
+Task: Nenhuma colisão de arquivos ocorre sob concorrência
+Status: PASSED
+
+What worked:
+- Changed timestamp format in build_highlight from `%Y%m%d-%H%M%SZ` to `%Y%m%d-%H%M%S-%fZ` (microsecond precision via %f)
+- Removed redundant duplicate `timestamp =` assignment (lines 86-88 were identical to lines 67-69)
+- Added `cfg.camera_id` to output filenames: `highlight_{camera_id}_{timestamp}.ts/mp4`
+- Directory isolation already ensured per-camera by `load_capture_configs` (use_isolated_dirs=True for multi-camera)
+- Tests: 4 collision tests + 6 existing tests all pass (10/10)
+
+Learnings:
+- `patch.object(proc_mod.time, "sleep")` and `patch.object(proc_mod.time, "time", ...)` works when module uses `import time` (not `from time import ...`)
+- `fake_run` for subprocess: create output file via `Path(cmd[-1]).touch()` - ffmpeg output is always the last arg
+- `build_highlight` needs `clips_dir` and `failed_dir_highlight` to exist before calling
+- `segbuf.snapshot_last` needs >= 2 non-empty existing files or build returns None early
+
+== [ralph] iteration: câmera falha não afeta as demais ==
+Task: Falha de uma câmera não afeta as demais
+Status: PASSED
+
+What worked:
+- Feature already implemented in `_trigger_fan_out` via per-camera try/except/finally inside `_process_one`
+- Exceptions from `build_highlight` are caught at camera level; other cameras continue executing
+- Lock released in `finally` block even on exception
+- `test_camera_failure_does_not_affect_others` in test_trigger_fanout.py already validates this behavior
+- All 20 tests pass (no code changes required; marked PRD task complete)
+
+Learnings:
+- pytest not installed in base conda env; `pip install pytest python-dotenv` needed
+- Run `python -m pytest tests/ -v` from project root to run all tests
+
+== [ralph] iteration: compatibilidade legado validada ==
+Task: Compatibilidade legado validada
+Status: PASSED
+
+What worked:
+- Created `tests/test_legacy_compatibility.py` with 11 tests covering the full fallback chain
+- `_patched()` helper clears all 3 config sources (GN_CAMERAS_JSON, GN_RTSP_URLS, GN_RTSP_URL) before each test
+- Tests: single-camera mode, flat paths (no camera_id subdirectory), priority chain, disabled cameras, CSV multi-URL, v4l2 default
+- All 31 tests pass (11 new + 20 existing)
+
+Learnings:
+- `patch.dict(os.environ, env, clear=False)` with key="" effectively disables that var (falsy after `.strip()`)
+- For legacy mode, `use_isolated_dirs=False` → `camera_suffix = Path()` → paths stay flat (no camera_id appended)
+- Single-camera JSON or CSV also gets `use_isolated_dirs=False` (only triggered when `len > 1`)
+
+== [ralph] iteration: testes automatizados ==
+Task: Testes automatizados cobrindo Parser, Fan-out, Isolamento de diretórios, Worker multi-camera
+Status: PASSED
+
+What worked:
+- Parser: covered by test_multi_camera_settings.py (2 tests) + test_legacy_compatibility.py (11 tests)
+- Fan-out: covered by test_trigger_fanout.py (4 tests)
+- Isolamento de diretórios: covered by test_no_file_collisions.py (4 tests)
+- Worker multi-camera: NEW test_worker_multi_camera.py (6 tests)
+- Class-level @patch decorators apply to all test methods cleanly
+- All 37 tests pass
+
+Learnings:
+- Mock `GravaNoisAPIClient` at `src.workers.processing_worker.GravaNoisAPIClient`
+- Mock `ffprobe_metadata` at `src.workers.processing_worker.ffprobe_metadata`
+- No-API path (is_configured=False, not is_dev): file moves to failed_clips/<cam>/upload_failed/
+- DEV=true path: file deleted from queue after processing
+- `_scan_once()` is the unit to test; no need to start the background thread
+
+== [ralph] iteration: logs de conexao com cada camera ==
+Task: Houver logs de conexao com cada camera
+Status: PASSED
+
+What worked:
+- Added `camera_id: str = ""` parameter to `check_rtsp_connectivity` in `src/video/capture.py`
+- Computed `prefix = f"[{camera_id}] " if camera_id else ""` and prepended it to every logger call in the function
+- Passed `cfg.camera_id` from `start_ffmpeg` to `check_rtsp_connectivity`
+- Created `tests/test_connection_logs.py` with 5 tests verifying camera_id appears in success/failure/invalid-url logs, isolation between cameras, and backward-compat with no camera_id
+- All 42 tests pass
+
+Learnings:
+- Patch `src.video.capture.socket.socket`, `src.video.capture.logger`, and `src.video.capture.time.sleep` to unit-test `check_rtsp_connectivity` without real sockets or delays
+- Default `camera_id=""` preserves backward compatibility (no prefix in logs when not set)
