@@ -316,6 +316,21 @@ GN_GPIO_DEBOUNCE_MS=300         # Debounce em ms (padrão: 300)
 GN_GPIO_COOLDOWN_SEC=120        # Cooldown entre cliques (padrão: 120s)
 ```
 
+#### Pico USB Serial
+
+```bash
+# Porta do Raspberry Pi Pico (opcional; se vazio o sistema tenta auto-detectar)
+GN_PICO_PORT=/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
+```
+
+Observações:
+- O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
+  1. `/dev/serial/by-id/*` (preferencial)
+  2. `/dev/ttyACM*`
+  3. `/dev/ttyUSB*`
+  4. fallback para `/dev/ttyACM0`
+- Se `GN_PICO_PORT` estiver definido, ele é usado diretamente.
+
 #### Processamento
 
 ```bash
@@ -408,6 +423,30 @@ python3 main.py
 - **Debounce:** 300ms (configurável)
 - **Cooldown:** 120s entre disparos válidos (evita cliques acidentais)
 - **Fallback:** Se GPIO não disponível, funciona apenas com ENTER
+
+---
+
+## 🔌 Pico via USB Serial (Docker/Linux)
+
+Para ambientes Linux (especialmente Docker), prefira mapear o device por `by-id`:
+
+```yaml
+services:
+  grava_nois_system:
+    devices:
+      - /dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00:/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
+```
+
+Exemplo de `.env`:
+
+```bash
+GN_PICO_PORT=/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
+```
+
+Por que `by-id` é melhor que `/dev/ttyACM0`:
+- `ttyACM0` pode variar entre boots/reconexões (`ttyACM1`, `ttyACM2`, ...).
+- `by-id` é estável por identificador USB do dispositivo, reduzindo falhas em produção.
+- Em container, o mapeamento explícito por `by-id` evita dependência da ordem de enumeração do host.
 
 ---
 

@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 from src.config.settings import CaptureConfig, load_capture_configs
 from src.utils.logger import logger
+from src.utils.pico import get_pico_serial_port
 from src.utils.time_utils import is_within_business_hours
 from src.video.buffer import SegmentBuffer, clear_buffer
 from src.video.capture import start_ffmpeg
@@ -168,6 +169,10 @@ def main() -> int:
     # Cooldown de botão GPIO: ignora novos disparos por 120s após um válido
     gpio_cooldown_sec = float(os.getenv("GN_GPIO_COOLDOWN_SEC", "120"))
     last_gpio_ok_ts = 0.0
+
+    # Detecta porta serial do Pico sem bloquear inicialização quando não conectado.
+    pico_serial_port = get_pico_serial_port(logger=logger)
+    logger.info(f"Porta serial Pico selecionada: {pico_serial_port}")
 
     def _stdin_listener():
         # Bloqueia em input(); cada ENTER gera um trigger.

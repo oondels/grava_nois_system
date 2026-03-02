@@ -30,5 +30,6 @@ services:
     # For GPIO or V4L2 webcam usage, uncomment the lines below:
     devices:
       - "/dev/video0:/dev/video0" # camera local notebook
+      # - "/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00:/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00" # Pico USB serial estavel (recomendado)
     privileged: true # needed to access GPIO or /dev/video*
     network_mode: host # if pigpio daemon runs on host or strict LAN access is needed
