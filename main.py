@@ -7,6 +7,7 @@ import os
 import json
 import time
 import uuid
+import select
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import threading
@@ -17,7 +18,7 @@ from dotenv import load_dotenv
 
 from src.config.settings import CaptureConfig, load_capture_configs
 from src.utils.logger import logger
-from src.utils.pico import get_pico_serial_port
+from src.utils.pico import get_pico_serial_port, resolve_trigger_source
 from src.utils.time_utils import is_within_business_hours
 from src.video.buffer import SegmentBuffer, clear_buffer
 from src.video.capture import start_ffmpeg
@@ -88,6 +89,12 @@ def _trigger_fan_out(
             fut.result()
         except Exception as e:
             logger.error(f"[{trigger_id}] unhandled error in fan-out: {e}")
+
+
+def _serial_line_is_trigger(line: str, token: str) -> bool:
+    normalized_line = line.strip().upper()
+    normalized_token = token.strip().upper()
+    return bool(normalized_line) and normalized_line == normalized_token
 
 
 def main() -> int:
@@ -162,17 +169,20 @@ def main() -> int:
         workers.append(worker)
         logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
 
-    # --- Disparo por ENTER ou GPIO (Raspberry Pi) ---
+    # --- Disparo por ENTER/GPIO/Pico ---
     trigger_q: queue.Queue[str] = queue.Queue()
     stop_evt = threading.Event()
+    trigger_source = resolve_trigger_source(logger=logger)
+    logger.info(f"Fonte de trigger físico selecionada: {trigger_source}")
 
     # Cooldown de botão GPIO: ignora novos disparos por 120s após um válido
     gpio_cooldown_sec = float(os.getenv("GN_GPIO_COOLDOWN_SEC", "120"))
     last_gpio_ok_ts = 0.0
 
-    # Detecta porta serial do Pico sem bloquear inicialização quando não conectado.
-    pico_serial_port = get_pico_serial_port(logger=logger)
-    logger.info(f"Porta serial Pico selecionada: {pico_serial_port}")
+    pico_trigger_token = (os.getenv("GN_PICO_TRIGGER_TOKEN") or "BTN_REPLAY").strip()
+    pico_serial_port: str | None = None
+    gpio_enabled = False
+    pico_enabled = False
 
     def _stdin_listener():
         # Bloqueia em input(); cada ENTER gera um trigger.
@@ -195,11 +205,11 @@ def main() -> int:
     stdin_t = threading.Thread(target=_stdin_listener, daemon=True)
     stdin_t.start()
 
-    # abilita se GN_GPIO_PIN ou GPIO_PIN estiver definido.
+    # habilita GPIO se o modo selecionado permitir.
     gpio_pin_env = os.getenv("GN_GPIO_PIN") or os.getenv("GPIO_PIN")
     pi = None
     cb = None
-    if gpio_pin_env is not None:
+    if trigger_source in {"gpio", "both"} and gpio_pin_env is not None:
         try:
             gpio_pin = int(gpio_pin_env)
         except ValueError:
@@ -254,6 +264,7 @@ def main() -> int:
 
                     # Use FALLING_EDGE para já filtrar nível
                     cb = pi.callback(gpio_pin, pigpio.FALLING_EDGE, on_edge)
+                    gpio_enabled = True
                     logger.info(
                         f"pigpio habilitado no pino BCM {gpio_pin} (debounce {int(debounce_ms)}ms)"
                     )
@@ -261,15 +272,92 @@ def main() -> int:
                 logger.warning("pigpio não encontrado; seguindo apenas com ENTER")
             except Exception as e:
                 logger.error(f"Falha ao configurar GPIO (pigpio): {e}")
+    elif trigger_source in {"gpio", "both"}:
+        logger.warning(
+            "Trigger GPIO selecionado, mas GN_GPIO_PIN/GPIO_PIN não foi definido"
+        )
+
+    should_try_pico = trigger_source in {"pico", "both"}
+    if trigger_source == "gpio" and not gpio_enabled:
+        logger.warning(
+            "Trigger em modo GPIO indisponível; tentando fallback para Pico serial"
+        )
+        should_try_pico = True
+
+    if should_try_pico:
+        pico_serial_port = get_pico_serial_port(logger=logger)
+        if pico_serial_port:
+            logger.info(f"Porta serial Pico selecionada: {pico_serial_port}")
+
+            def _pico_serial_listener() -> None:
+                try:
+                    fd = os.open(
+                        pico_serial_port,
+                        os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY,
+                    )
+                except OSError as e:
+                    logger.error(
+                        f"Falha ao abrir porta serial do Pico ({pico_serial_port}): {e}"
+                    )
+                    return
+
+                buffer = b""
+                with os.fdopen(fd, "rb", buffering=0) as serial_stream:
+                    logger.info(
+                        f"Listener Pico serial ativo em {pico_serial_port} (token={pico_trigger_token!r})"
+                    )
+                    while not stop_evt.is_set():
+                        try:
+                            ready, _, _ = select.select([serial_stream], [], [], 0.3)
+                        except Exception as e:
+                            logger.error(f"Erro no select() da serial Pico: {e}")
+                            return
+                        if not ready:
+                            continue
+
+                        try:
+                            chunk = serial_stream.read(256)
+                        except BlockingIOError:
+                            continue
+                        except OSError as e:
+                            logger.error(
+                                f"Erro lendo serial Pico ({pico_serial_port}): {e}"
+                            )
+                            return
+
+                        if not chunk:
+                            continue
+                        buffer += chunk
+
+                        while b"\n" in buffer:
+                            raw_line, buffer = buffer.split(b"\n", 1)
+                            line = raw_line.decode("utf-8", errors="ignore").strip()
+                            if not line:
+                                continue
+                            if _serial_line_is_trigger(line, pico_trigger_token):
+                                trigger_q.put("pico")
+                            else:
+                                logger.debug(f"Pico serial ignorado: {line}")
+
+            threading.Thread(target=_pico_serial_listener, daemon=True).start()
+            pico_enabled = True
+        else:
+            logger.warning("Trigger Pico selecionado, mas nenhuma porta serial foi detectada")
 
     if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:
         capture_desc = f"{primary_cfg.pre_segments} seg + {primary_cfg.post_segments} seg"
     else:
         capture_desc = f"{primary_cfg.pre_seconds}s + {primary_cfg.post_seconds}s"
 
+    trigger_hints: list[str] = []
+    if gpio_enabled and gpio_pin_env:
+        trigger_hints.append(f"botão GPIO (BCM {gpio_pin_env})")
+    if pico_enabled and pico_serial_port:
+        trigger_hints.append(f"Pico serial ({pico_serial_port})")
+
     prompt = (
         f"Gravando… pressione ENTER"
-        + (f" ou botão GPIO (BCM {gpio_pin_env})" if gpio_pin_env else "")
+        + (f" ou {' ou '.join(trigger_hints)}" if trigger_hints else "")
         + f" para capturar {capture_desc} (Ctrl+C sai)"
     )
     logger.info(prompt)
@@ -282,13 +370,13 @@ def main() -> int:
                 continue
 
             # Aplica cooldown apenas para o botão GPIO
-            if trig in ("gpio", "enter"):
+            if trig in ("gpio", "pico"):
                 now = time.time()
                 elapsed = now - last_gpio_ok_ts
                 if elapsed < gpio_cooldown_sec:
                     restante = int(gpio_cooldown_sec - elapsed)
                     logger.info(
-                        f"GPIO ignorado: cooldown ativo ({restante}s restantes)"
+                        f"Trigger físico ({trig}) ignorado: cooldown ativo ({restante}s restantes)"
                     )
                     continue
                 last_gpio_ok_ts = now

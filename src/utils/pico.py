@@ -5,13 +5,15 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.utils.device import is_raspberry_pi
+
 _PICO_HINTS = (
     "pico",
     "rp2040",
     "raspberry",
     "board in fs mode",
 )
-_FALLBACK_PORT = "/dev/ttyACM0"
+_VALID_TRIGGER_SOURCES = {"auto", "gpio", "pico", "both"}
 
 
 def _is_device_path(path: str) -> bool:
@@ -27,6 +29,34 @@ def _log_info(logger: Any | None, message: str) -> None:
 def _log_warning(logger: Any | None, message: str) -> None:
     if logger is not None:
         logger.warning(message)
+
+
+def _log_error(logger: Any | None, message: str) -> None:
+    if logger is not None:
+        logger.error(message)
+
+
+def resolve_trigger_source(logger: Any | None = None) -> str:
+    """
+    Resolve origem de trigger física.
+
+    GN_TRIGGER_SOURCE:
+    - auto (padrão): gpio no Raspberry; pico fora do Raspberry
+    - gpio
+    - pico
+    - both
+    """
+    configured = (os.getenv("GN_TRIGGER_SOURCE") or "auto").strip().lower()
+    if configured not in _VALID_TRIGGER_SOURCES:
+        _log_warning(
+            logger,
+            f"GN_TRIGGER_SOURCE inválido ({configured!r}); usando auto",
+        )
+        configured = "auto"
+
+    if configured == "auto":
+        return "gpio" if is_raspberry_pi(logger=logger) else "pico"
+    return configured
 
 
 def find_pico_serial_port(logger: Any | None = None) -> str | None:
@@ -56,16 +86,23 @@ def find_pico_serial_port(logger: Any | None = None) -> str | None:
     return None
 
 
-def get_pico_serial_port(logger: Any | None = None) -> str:
-    """Retorna porta serial configurada, detectada ou fallback padrão."""
+def get_pico_serial_port(logger: Any | None = None) -> str | None:
+    """Retorna porta serial configurada/detectada; None quando indisponível."""
     env_port = os.getenv("GN_PICO_PORT")
     if env_port:
-        _log_info(logger, f"GN_PICO_PORT definido: {env_port}")
-        return env_port
+        clean_port = env_port.strip()
+        if _is_device_path(clean_port) and Path(clean_port).exists():
+            _log_info(logger, f"GN_PICO_PORT definido: {clean_port}")
+            return clean_port
+        _log_error(
+            logger,
+            f"GN_PICO_PORT inválido ou indisponível: {env_port!r}",
+        )
+        return None
 
     detected = find_pico_serial_port(logger=logger)
     if detected:
         return detected
 
-    _log_warning(logger, f"Pico não detectado, usando fallback: {_FALLBACK_PORT}")
-    return _FALLBACK_PORT
+    _log_warning(logger, "Pico não detectado em /dev/serial/by-id, /dev/ttyACM* ou /dev/ttyUSB*")
+    return None

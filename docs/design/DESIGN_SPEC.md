@@ -11,7 +11,7 @@ O sistema Python é responsável por:
 
 * Captura contínua de vídeo (RTSP ou V4L2)
 * Manutenção de buffer circular de segmentos
-* Geração de highlight sob trigger (ENTER ou GPIO)
+* Geração de highlight sob trigger (ENTER, GPIO ou Pico serial)
 * Persistência local do clip e sidecar JSON
 * Gerenciamento de fila local
 * Upload para URL assinada fornecida pelo backend
@@ -92,6 +92,16 @@ O edge **não implementa regras de negócio do backend**, não gerencia usuário
 
   * ENTER (CLI)
   * GPIO (botão físico)
+  * Pico serial (token textual via USB)
+* Seleção de origem física por `GN_TRIGGER_SOURCE`:
+
+  * `auto` (padrão): Raspberry Pi usa GPIO; outros hosts usam Pico serial
+  * `gpio`: força apenas GPIO
+  * `pico`: força apenas Pico serial
+  * `both`: habilita GPIO e Pico serial simultaneamente
+* Se `GN_TRIGGER_SOURCE=gpio` estiver ativo sem `GN_GPIO_PIN`, o sistema tenta fallback para Pico serial
+* Pico serial só é habilitado com porta válida (`GN_PICO_PORT` existente ou auto-detecção em `/dev/serial/by-id/*`, `/dev/ttyACM*`, `/dev/ttyUSB*`)
+* Não há fallback forçado para `/dev/ttyACM0` quando nenhuma porta existe
 * Trigger dispara fan-out por câmera
 * Lock por câmera evita sobreposição de processamento
 
@@ -186,7 +196,7 @@ Headers enviados quando exigido:
 
 * Lock de processamento
 * Controle de janela operacional (horário permitido)
-* Cooldown de trigger GPIO
+* Cooldown para trigger físico (GPIO e Pico serial)
 
 ---
 
@@ -223,6 +233,13 @@ Principais variáveis:
 * GN_GPIO_PIN
 * GN_GPIO_DEBOUNCE_MS
 * GN_GPIO_COOLDOWN_SEC
+
+### Trigger físico / Pico
+
+* GN_TRIGGER_SOURCE (`auto`, `gpio`, `pico`, `both`)
+* GN_FORCE_RASPBERRY_PI (`1` ou `0`, para testes/override de plataforma)
+* GN_PICO_PORT
+* GN_PICO_TRIGGER_TOKEN
 
 ---
 

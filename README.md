@@ -316,11 +316,24 @@ GN_GPIO_DEBOUNCE_MS=300         # Debounce em ms (padrão: 300)
 GN_GPIO_COOLDOWN_SEC=120        # Cooldown entre cliques (padrão: 120s)
 ```
 
+#### Seleção da fonte de trigger
+
+```bash
+# auto (padrão): Raspberry -> GPIO; não Raspberry -> Pico serial
+GN_TRIGGER_SOURCE=auto
+
+# Opcional para forçar tipo de plataforma durante teste:
+GN_FORCE_RASPBERRY_PI=1         # 1=true, 0=false
+```
+
 #### Pico USB Serial
 
 ```bash
 # Porta do Raspberry Pi Pico (opcional; se vazio o sistema tenta auto-detectar)
 GN_PICO_PORT=/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
+
+# Token textual enviado pelo firmware do Pico
+GN_PICO_TRIGGER_TOKEN=BTN_REPLAY
 ```
 
 Observações:
@@ -328,8 +341,8 @@ Observações:
   1. `/dev/serial/by-id/*` (preferencial)
   2. `/dev/ttyACM*`
   3. `/dev/ttyUSB*`
-  4. fallback para `/dev/ttyACM0`
-- Se `GN_PICO_PORT` estiver definido, ele é usado diretamente.
+- Se nenhuma porta for detectada, o listener serial não é iniciado (não há fallback forçado para `/dev/ttyACM0`).
+- Se `GN_PICO_PORT` estiver definido, ele só é usado quando o caminho existe no host.
 
 #### Processamento
 
