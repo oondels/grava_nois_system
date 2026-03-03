@@ -14,6 +14,7 @@ sudo apt install -y docker.io docker-compose ffmpeg pigpio
 ```
 
 ---
+backup rasp_berry
 
 ## 1. Criar arquivo `.env`
 
