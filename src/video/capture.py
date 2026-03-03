@@ -91,6 +91,13 @@ def _tail_file(path: Path, max_lines: int = 20) -> str:
         return ""
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     start_num = _calc_start_number(cfg.buffer_dir)
     out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
@@ -117,6 +124,14 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             )
 
     if use_rtsp:
+        # Para RTSP, priorizamos fluidez no highlight final:
+        # padrão com recodificação CFR-like e keyframes por segmento.
+        # Compatibilidade legada via GN_RTSP_PASSTHROUGH=1 (stream copy).
+        rtsp_passthrough = _env_bool("GN_RTSP_PASSTHROUGH", False)
+        rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
+        rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
+        rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
+
         cmd = [
             "ffmpeg",
             "-nostdin",
@@ -126,17 +141,45 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "tcp",
             "-rtsp_flags",
             "prefer_tcp",
+            "-use_wallclock_as_timestamps",
+            "1",
             "-fflags",
-            "nobuffer",
-            "-flags",
-            "low_delay",
+            "+genpts+discardcorrupt",
             "-i",
             rtsp_url,
             "-map",
             "0:v:0",
-            "-c:v",
-            "copy",
             "-an",
+        ]
+
+        if rtsp_passthrough:
+            cmd += [
+                "-c:v",
+                "copy",
+            ]
+        else:
+            cmd += [
+                "-c:v",
+                "libx264",
+                "-preset",
+                rtsp_preset,
+                "-tune",
+                "zerolatency",
+                "-crf",
+                str(rtsp_crf),
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                str(rtsp_gop),
+                "-keyint_min",
+                str(rtsp_gop),
+                "-sc_threshold",
+                "0",
+                "-force_key_frames",
+                f"expr:gte(t,n_forced*{cfg.seg_time})",
+            ]
+
+        cmd += [
             "-f",
             "segment",
             "-segment_format",
@@ -146,7 +189,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "-segment_start_number",
             str(start_num),
             "-reset_timestamps",
-            "0",
+            "1",
             out_pattern,
         ]
     else:
