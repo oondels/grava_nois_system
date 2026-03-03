@@ -285,15 +285,33 @@ Todas as configurações podem ser feitas via variáveis de ambiente ou arquivo 
 # URL completa da câmera (obrigatório)
 GN_RTSP_URL=rtsp://user:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0
 
+# Múltiplas câmeras via CSV (opcional)
+# GN_RTSP_URLS=rtsp://user:pass@192.168.1.101:554/stream1,rtsp://user:pass@192.168.1.102:554/stream1
+
+# Múltiplas câmeras via JSON (opcional; tem prioridade sobre GN_RTSP_URLS)
+# GN_CAMERAS_JSON=[{"id":"cam01","name":"Quadra 1","rtsp_url":"rtsp://user:pass@192.168.1.101:554/stream1","enabled":true}]
+
 # Health check (opcional)
 GN_RTSP_MAX_RETRIES=10          # Tentativas de conexão (padrão: 10)
 GN_RTSP_TIMEOUT=5               # Timeout por tentativa em segundos (padrão: 5)
+GN_FFMPEG_STARTUP_CHECK_SEC=1.0 # Tempo para validar boot do FFmpeg (padrão: 1s)
 
 # Configuração de segmentos RTSP
 GN_SEG_TIME=1                   # Duração de cada segmento (padrão: 1s)
 GN_RTSP_PRE_SEGMENTS=6          # Segmentos antes do clique (padrão: 6)
 GN_RTSP_POST_SEGMENTS=3         # Segmentos depois do clique (padrão: 3)
+
+# Estabilidade de vídeo RTSP (anti-microcortes)
+GN_RTSP_PASSTHROUGH=0           # 0=padrão estável (reencode), 1=modo legado (copy)
+GN_RTSP_GOP=25                  # GOP para segmentação estável (quando reencode)
+GN_RTSP_PRESET=veryfast         # Preset x264 (quando reencode)
+GN_RTSP_CRF=23                  # Qualidade x264 (quando reencode)
 ```
+
+Observação:
+- Em RTSP, o modo padrão agora recodifica para reduzir problemas de `Non-monotonic DTS`.
+- Se precisar do comportamento antigo com menor uso de CPU, use `GN_RTSP_PASSTHROUGH=1`.
+- Ordem de precedência da fonte RTSP: `GN_CAMERAS_JSON` > `GN_RTSP_URLS` > `GN_RTSP_URL`.
 
 #### Backend API
 
@@ -302,10 +320,16 @@ GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 GN_CLIENT_ID=550e8400-e29b-41d4-a716-446655440000
 GN_VENUE_ID=6ba7b810-9dad-11d1-80b4-00c04fd430c8
-CLIENT_ID=550e8400-e29b-41d4-a716-446655440000  # fallback para X-Client-Id
+API_BASE_URL=https://api.gravanois.com           # fallback legado para GN_API_BASE
+API_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... # fallback legado para GN_API_TOKEN
+CLIENT_ID=550e8400-e29b-41d4-a716-446655440000   # fallback legado para GN_CLIENT_ID
+VENUE_ID=6ba7b810-9dad-11d1-80b4-00c04fd430c8    # fallback legado para GN_VENUE_ID
 DEVICE_ID=raspberrypi-001
 DEVICE_SECRET=troque_por_um_segredo_forte
-GN_HMAC_DRY_RUN=0  # 1=nao envia request; apenas monta, assina e loga
+GN_DEVICE_ID=raspberrypi-001                     # alias opcional de DEVICE_ID
+GN_DEVICE_SECRET=troque_por_um_segredo_forte     # alias opcional de DEVICE_SECRET
+GN_HMAC_DRY_RUN=0                                # 1=nao envia request; apenas monta, assina e loga
+HMAC_DRY_RUN=0                                   # fallback legado para GN_HMAC_DRY_RUN
 ```
 
 #### GPIO
@@ -349,6 +373,7 @@ Observações:
 ```bash
 GN_LIGHT_MODE=1                 # 0=normal (watermark), 1=leve (sem watermark)
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
+GN_TRIGGER_MAX_WORKERS=2        # Vazio=auto (número de câmeras); define paralelismo do trigger
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
 ```
 
@@ -356,6 +381,7 @@ GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
 
 ```bash
 DEV=true                        # Pula chamadas de rede no ProcessingWorker
+DEV_VIDEO_MODE=false            # Envia payload com "dev=true" no register de metadados
 ```
 
 Com `DEV=true`:
