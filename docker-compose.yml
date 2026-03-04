@@ -1,9 +1,10 @@
 services:
   grava_nois_system:
-    build: .
+    image: ${GRAVA_NOIS_SYSTEM_IMAGE:-oondels/gravanois-system:latest}
+    pull_policy: always
     container_name: grava_nois_system
     restart: unless-stopped
-    stdin_open: true # Matém o stdin aberto para receber input (Enter)
+    stdin_open: true # Mantém stdin aberto para trigger via Enter
     tty: true
     env_file:
       - .env
@@ -20,16 +21,19 @@ services:
 
     volumes:
       - ./.env:/usr/src/app/.env:ro
-      - ./files:/usr/src/app/files
+      - ./files:/usr/src/app/files:ro
       - ./recorded_clips:/usr/src/app/recorded_clips
       - ./queue_raw:/usr/src/app/queue_raw
+      - ./highlights_wm:/usr/src/app/highlights_wm
       - ./failed_clips:/usr/src/app/failed_clips
       - ./logs:/usr/src/app/logs  # Diretório para logs
 
-    # Network defaults to bridge, which is fine for RTSP on LAN.
-    # For GPIO or V4L2 webcam usage, uncomment the lines below:
-    devices:
-      - "/dev/video0:/dev/video0" # camera local notebook
-      # - "/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00:/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00" # Pico USB serial estavel (recomendado)
-    privileged: true # needed to access GPIO or /dev/video*
+    # Para RTSP remoto, host network costuma simplificar no edge.
     network_mode: host # if pigpio daemon runs on host or strict LAN access is needed
+
+    # Para câmera local (/dev/video0), GPIO direto ou serial USB no container:
+    # devices:
+    #   - /dev/video0:/dev/video0
+    #   - /dev/gpiomem:/dev/gpiomem
+    #   - /dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00:/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
+    # privileged: true
