@@ -15,15 +15,17 @@ from unittest.mock import patch
 from src.workers.processing_worker import ProcessingWorker
 
 
-def _make_worker(queue_dir: Path, failed_dir: Path) -> ProcessingWorker:
-    """Create a ProcessingWorker in light_mode with no retry loop."""
+def _make_worker(
+    queue_dir: Path, failed_dir: Path, *, light_mode: bool = True
+) -> ProcessingWorker:
+    """Create a ProcessingWorker with no retry loop."""
     return ProcessingWorker(
         queue_dir=queue_dir,
         out_wm_dir=queue_dir / "_wm_unused",
         failed_dir_highlight=failed_dir,
         watermark_path=Path("/dev/null"),
         scan_interval=0,
-        light_mode=True,
+        light_mode=light_mode,
         retry_failed=False,
     )
 
@@ -176,6 +178,39 @@ class WorkerMultiCameraTests(unittest.TestCase):
         self.assertTrue(sidecar_path.exists(), "Sidecar must be moved alongside mp4")
         meta = json.loads(sidecar_path.read_text())
         self.assertIn("cam03", meta["file_name"], "Sidecar file_name must include camera_id")
+
+    def test_non_light_mode_uses_atomic_copy_for_watermarked_artifact(
+        self, mock_api_cls, _ffprobe
+    ):
+        """Non-light mode must not require extra transcode in worker."""
+        mock_api_cls.return_value.is_configured.return_value = False
+
+        queue = self.base / "queue_raw" / "cam04"
+        failed = self.base / "failed_clips" / "cam04"
+        queue.mkdir(parents=True, exist_ok=True)
+
+        mp4 = _place_mp4(queue, "highlight_cam04_nowm.mp4")
+        worker = _make_worker(queue, failed, light_mode=False)
+
+        copy_calls: list[tuple[str, str]] = []
+
+        def _copy2(src, dst):
+            copy_calls.append((str(src), str(dst)))
+            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            Path(dst).write_bytes(Path(src).read_bytes())
+            return str(dst)
+
+        with patch("src.workers.processing_worker.shutil.copy2", side_effect=_copy2):
+            with patch.dict(os.environ, {"DEV": "", "API_BASE_URL": ""}):
+                worker._scan_once()
+
+        self.assertEqual(len(copy_calls), 1, "Worker deve copiar apenas 1 vez para wm_tmp")
+        self.assertTrue(
+            copy_calls[0][1].endswith(".wm_tmp.mp4"),
+            "Artefato intermediário deve usar extensão .wm_tmp.mp4",
+        )
+        upload_failed = failed / "upload_failed" / mp4.name
+        self.assertTrue(upload_failed.exists(), "Fluxo deve continuar com o arquivo processado")
 
 
 if __name__ == "__main__":

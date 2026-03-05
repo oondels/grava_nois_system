@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -19,7 +20,21 @@ from src.video.buffer import SegmentBuffer
 load_dotenv()
 
 
-def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
+@dataclass(frozen=True)
+class WatermarkSpec:
+    path: str
+    margin_px: int
+    opacity: float
+    rel_width: float
+
+
+def build_highlight(
+    cfg: CaptureConfig,
+    segbuf: SegmentBuffer,
+    *,
+    watermark: Optional[WatermarkSpec] = None,
+    output_dir: Optional[Path] = None,
+) -> Optional[Path]:
     logger.info("Botão apertado! Aguardando pós-buffer...")
 
     # Pasta para arquivos com erro de build
@@ -69,7 +84,11 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     )
 
     # Usamos a pasta de clipes gravados para o arquivo de lista temporário
+    cfg.clips_dir.mkdir(parents=True, exist_ok=True)
     concat_list_path = cfg.clips_dir / f"concat_{timestamp}.txt"
+    target_dir = (output_dir or cfg.clips_dir).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
     valid_segments = [
         p
         for p in (Path(s) for s in selected_videos)
@@ -84,7 +103,8 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             f.write(f"file '{seg_path.resolve()}'\n")
 
     tmp_ts = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.ts"
-    out_mp4 = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.mp4"
+    out_mp4 = target_dir / f"highlight_{cfg.camera_id}_{timestamp}.mp4"
+    out_tmp_mp4 = target_dir / f"highlight_{cfg.camera_id}_{timestamp}.tmp.mp4"
 
     try:
         # concat TS -> TS (regen PTS)
@@ -107,27 +127,91 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             check=True,
         )
 
-        # remux TS -> MP4 (copy) com PTS normalizado e base zerada
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-fflags",
-                "+genpts",
-                "-i",
-                str(tmp_ts),
-                "-c",
-                "copy",
-                "-bsf:a",
-                "aac_adtstoasc",
-                "-movflags",
-                "+faststart",
-                "-avoid_negative_ts",
-                "make_zero",
-                str(out_mp4),
-            ],
-            check=True,
-        )
+        if watermark is not None:
+            wm_p = Path(watermark.path)
+            if not wm_p.exists():
+                raise FileNotFoundError(
+                    f"Watermark inexistente para build_highlight: {wm_p}"
+                )
+
+            meta = ffprobe_metadata(tmp_ts)
+            video_width = int(meta.get("width") or 0)
+            if video_width <= 0:
+                raise RuntimeError(
+                    "Não foi possível obter largura do vídeo para aplicar watermark."
+                )
+
+            wm_w = max(2, int(round(video_width * float(watermark.rel_width))))
+            filt = (
+                "[0:v]setpts=PTS-STARTPTS[base];"
+                f"[1:v]setpts=PTS-STARTPTS,format=rgba,scale={wm_w}:-1,"
+                f"colorchannelmixer=aa={float(watermark.opacity):.3f}[wm];"
+                "[base][wm]overlay="
+                f"x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(watermark.margin_px)}:"
+                "eval=init:format=auto:shortest=1[outv]"
+            )
+
+            # Gera MP4 final já com watermark no mesmo encode final do highlight.
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-fflags",
+                    "+genpts",
+                    "-i",
+                    str(tmp_ts),
+                    "-loop",
+                    "1",
+                    "-i",
+                    str(wm_p),
+                    "-filter_complex",
+                    filt,
+                    "-map",
+                    "[outv]",
+                    "-map",
+                    "0:a?",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "20",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "96k",
+                    "-movflags",
+                    "+faststart",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    str(out_tmp_mp4),
+                ],
+                check=True,
+            )
+        else:
+            # remux TS -> MP4 (copy) com PTS normalizado e base zerada
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-fflags",
+                    "+genpts",
+                    "-i",
+                    str(tmp_ts),
+                    "-c",
+                    "copy",
+                    "-bsf:a",
+                    "aac_adtstoasc",
+                    "-movflags",
+                    "+faststart",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    str(out_tmp_mp4),
+                ],
+                check=True,
+            )
+
+        out_tmp_mp4.replace(out_mp4)
 
         logger.info(f"Highlight salvo: {out_mp4}")
         return out_mp4
@@ -144,6 +228,11 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         try:
             if out_mp4.exists():
                 out_mp4.replace(fail_build_dir / out_mp4.name)
+        except Exception:
+            pass
+        try:
+            if out_tmp_mp4.exists():
+                out_tmp_mp4.replace(fail_build_dir / out_tmp_mp4.name)
         except Exception:
             pass
 
@@ -163,6 +252,11 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 logger.debug(f"Arquivo temporário removido: {tmp_ts.name}")
         except Exception as e:
             logger.warning(f"Não foi possível remover o arquivo temporário .ts: {e}")
+        try:
+            if "out_tmp_mp4" in locals() and out_tmp_mp4.exists():
+                out_tmp_mp4.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 
@@ -202,7 +296,14 @@ def ffprobe_metadata(path: Path) -> Dict[str, Any]:
     }
 
 
-def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
+def enqueue_clip(
+    cfg: CaptureConfig,
+    clip_path: Path,
+    *,
+    preserve_source: bool = False,
+    status: str = "queued",
+    wm_path: Optional[str] = None,
+) -> Path:
     """
     Move o arquivo para a fila (queue_dir) e salva metadados .json ao lado.
     """
@@ -232,14 +333,20 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
         "seg_time": cfg.seg_time,
         "pre_segments": cfg.pre_segments,
         "post_segments": cfg.post_segments,
-        "status": "queued",
+        "status": status,
     }
+    if wm_path:
+        payload["wm_path"] = wm_path
+        payload["meta_wm"] = meta
 
     dst = cfg.queue_dir / clip_path.name
     meta_path = cfg.queue_dir / (clip_path.stem + ".json")
 
-    # move para a fila e grava sidecar
-    shutil.move(str(clip_path), str(dst))
+    # move (ou copia) para a fila e grava sidecar
+    if preserve_source:
+        shutil.copy2(str(clip_path), str(dst))
+    else:
+        shutil.move(str(clip_path), str(dst))
     meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     logger.info(f"Enfileirado para tratamento: {dst}")
     return dst

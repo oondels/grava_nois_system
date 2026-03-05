@@ -22,7 +22,7 @@ from src.utils.pico import get_pico_serial_port, resolve_trigger_source
 from src.utils.time_utils import is_within_business_hours
 from src.video.buffer import SegmentBuffer, clear_buffer
 from src.video.capture import start_ffmpeg
-from src.video.processor import build_highlight, enqueue_clip
+from src.video.processor import WatermarkSpec, build_highlight, enqueue_clip
 from src.workers.processing_worker import ProcessingWorker
 
 load_dotenv()
@@ -41,6 +41,10 @@ def _trigger_fan_out(
     failed_dir_highlight: Path,
     executor: ThreadPoolExecutor,
     trigger_id: str,
+    *,
+    light_mode: bool = True,
+    out_wm_dir: Path | None = None,
+    watermark_spec: WatermarkSpec | None = None,
 ) -> None:
     """Dispatch trigger concurrently to all active cameras."""
 
@@ -51,10 +55,32 @@ def _trigger_fan_out(
             return
         try:
             logger.info(f"[{cfg.camera_id}][{trigger_id}] building highlight")
-            out = build_highlight(cfg, rt.segbuf)
+            if light_mode:
+                out = build_highlight(cfg, rt.segbuf)
+            else:
+                if watermark_spec is None:
+                    raise RuntimeError(
+                        "WatermarkSpec é obrigatório quando GN_LIGHT_MODE=0"
+                    )
+                output_dir = out_wm_dir or cfg.clips_dir
+                out = build_highlight(
+                    cfg,
+                    rt.segbuf,
+                    watermark=watermark_spec,
+                    output_dir=output_dir,
+                )
             if out:
                 try:
-                    enqueue_clip(cfg, out)
+                    if light_mode:
+                        enqueue_clip(cfg, out)
+                    else:
+                        enqueue_clip(
+                            cfg,
+                            out,
+                            preserve_source=True,
+                            status="watermarked",
+                            wm_path=str(out),
+                        )
                     logger.info(f"[{cfg.camera_id}][{trigger_id}] success: {out.name}")
                 except Exception as e:
                     logger.error(f"[{cfg.camera_id}][{trigger_id}] enqueue failed: {e}")
@@ -146,6 +172,19 @@ def main() -> int:
     failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
     watermark_path = base / "files" / "replay_grava_nois.png"
+    wm_margin = 24
+    wm_opacity = 0.8
+    wm_rel_width = 0.11
+    watermark_spec = (
+        WatermarkSpec(
+            path=str(watermark_path),
+            margin_px=wm_margin,
+            opacity=wm_opacity,
+            rel_width=wm_rel_width,
+        )
+        if not light_mode
+        else None
+    )
     primary_runtime = runtimes[0]
     primary_cfg = primary_runtime.cfg
 
@@ -160,9 +199,9 @@ def main() -> int:
             watermark_path=watermark_path,
             scan_interval=1,
             max_attempts=worker_max_attempts,
-            wm_margin=24,
-            wm_opacity=0.8,
-            wm_rel_width=0.11,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
+            wm_margin=wm_margin,
+            wm_opacity=wm_opacity,
+            wm_rel_width=wm_rel_width,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
             light_mode=light_mode,
         )
         worker.start()
@@ -386,7 +425,15 @@ def main() -> int:
                 continue
 
             trigger_id = uuid.uuid4().hex[:8]
-            _trigger_fan_out(runtimes, failed_dir_highlight, trigger_executor, trigger_id)
+            _trigger_fan_out(
+                runtimes,
+                failed_dir_highlight,
+                trigger_executor,
+                trigger_id,
+                light_mode=light_mode,
+                out_wm_dir=out_wm_dir,
+                watermark_spec=watermark_spec,
+            )
 
     except KeyboardInterrupt:
         logger.info("Encerrando...")

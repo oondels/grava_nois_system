@@ -7,6 +7,7 @@ from src.video.buffer import SegmentBuffer
 from src.video.capture import check_rtsp_connectivity, start_ffmpeg, _calc_start_number
 from src.video.processor import (
     build_highlight,
+    WatermarkSpec,
     ffprobe_metadata,
     enqueue_clip,
     add_image_watermark,
@@ -23,6 +24,7 @@ __all__ = [
     "start_ffmpeg",
     "SegmentBuffer",
     "build_highlight",
+    "WatermarkSpec",
     "ffprobe_metadata",
     "enqueue_clip",
     "add_image_watermark",

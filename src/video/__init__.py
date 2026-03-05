@@ -2,6 +2,7 @@ from .buffer import SegmentBuffer, clear_buffer
 from .capture import check_rtsp_connectivity, start_ffmpeg
 from .processor import (
     build_highlight,
+    WatermarkSpec,
     ffprobe_metadata,
     enqueue_clip,
     add_image_watermark,
@@ -15,6 +16,7 @@ __all__ = [
     "check_rtsp_connectivity",
     "start_ffmpeg",
     "build_highlight",
+    "WatermarkSpec",
     "ffprobe_metadata",
     "enqueue_clip",
     "add_image_watermark",
