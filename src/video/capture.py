@@ -131,6 +131,18 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
         rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
         rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
+        vsync_raw = (os.getenv("GN_RTSP_VSYNC", "2") or "2").strip().lower()
+        vsync_map = {
+            "passthrough": "0",
+            "0": "0",
+            "cfr": "1",
+            "1": "1",
+            "vfr": "2",
+            "2": "2",
+            "auto": "-1",
+            "-1": "-1",
+        }
+        rtsp_vsync = vsync_map.get(vsync_raw, "2")
 
         cmd = [
             "ffmpeg",
@@ -177,6 +189,8 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
                 "0",
                 "-force_key_frames",
                 f"expr:gte(t,n_forced*{cfg.seg_time})",
+                "-vsync",
+                rtsp_vsync,
             ]
 
         cmd += [

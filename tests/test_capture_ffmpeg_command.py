@@ -57,6 +57,8 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cidx = cmd.index("-c:v")
         self.assertEqual(cmd[cidx + 1], "libx264")
         self.assertIn("-force_key_frames", cmd)
+        self.assertIn("-vsync", cmd)
+        self.assertEqual(cmd[cmd.index("-vsync") + 1], "2")
         self.assertIn("+genpts+discardcorrupt", cmd)
         self.assertNotIn("nobuffer", cmd)
         self.assertNotIn("low_delay", cmd)
@@ -72,6 +74,7 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cidx + 1], "copy")
         self.assertNotIn("libx264", cmd)
         self.assertNotIn("-force_key_frames", cmd)
+        self.assertNotIn("-vsync", cmd)
 
         ridx = cmd.index("-reset_timestamps")
         self.assertEqual(cmd[ridx + 1], "1")
@@ -82,6 +85,7 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
                 "GN_RTSP_GOP": "30",
                 "GN_RTSP_CRF": "20",
                 "GN_RTSP_PRESET": "ultrafast",
+                "GN_RTSP_VSYNC": "1",
             }
         )
 
@@ -93,8 +97,9 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-g") + 1], "30")
         self.assertIn("-keyint_min", cmd)
         self.assertEqual(cmd[cmd.index("-keyint_min") + 1], "30")
+        self.assertIn("-vsync", cmd)
+        self.assertEqual(cmd[cmd.index("-vsync") + 1], "1")
 
 
 if __name__ == "__main__":
     unittest.main()
-

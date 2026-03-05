@@ -310,11 +310,13 @@ GN_RTSP_PASSTHROUGH=0           # 0=padrão estável (reencode), 1=modo legado (
 GN_RTSP_GOP=25                  # GOP para segmentação estável (quando reencode)
 GN_RTSP_PRESET=veryfast         # Preset x264 (quando reencode)
 GN_RTSP_CRF=23                  # Qualidade x264 (quando reencode)
+GN_RTSP_VSYNC=2                 # 2=vfr (menos frames duplicados), 1=cfr, 0=passthrough
 ```
 
 Observação:
 - Em RTSP, o modo padrão agora recodifica para reduzir problemas de `Non-monotonic DTS`.
 - Se precisar do comportamento antigo com menor uso de CPU, use `GN_RTSP_PASSTHROUGH=1`.
+- Se o vídeo parecer "esticado" ou com travadas longas, teste `GN_RTSP_VSYNC=2` (padrão) e `GN_RTSP_PRESET=ultrafast`.
 - Ordem de precedência da fonte RTSP: `GN_CAMERAS_JSON` > `GN_RTSP_URLS` > `GN_RTSP_URL`.
 
 #### Backend API
