@@ -28,6 +28,7 @@ class ProcessingWorker:
         out_wm_dir: Path,  # highlights_wm/
         failed_dir_highlight: Path,  # failed_clips/
         watermark_path: Path,  # assets/logo.png
+        client_watermark_path: Path | None = None,  # assets/client_logo.png
         scan_interval: float = 1,  # varredura a cada 1
         max_attempts: int = 3,
         wm_margin: int = 24,
@@ -42,6 +43,7 @@ class ProcessingWorker:
         self.out_wm_dir = out_wm_dir
         self.failed_dir_highlight = failed_dir_highlight
         self.watermark_path = watermark_path
+        self.client_watermark_path = client_watermark_path
         self.scan_interval = scan_interval
         self.max_attempts = max_attempts
         self.wm_margin = wm_margin
@@ -318,6 +320,11 @@ class ProcessingWorker:
                     input_path=str(mp4),
                     watermark_path=str(self.watermark_path),
                     output_path=str(tmp_out),
+                    secondary_watermark_path=(
+                        str(self.client_watermark_path)
+                        if self.client_watermark_path is not None
+                        else None
+                    ),
                     margin=self.wm_margin,
                     opacity=self.wm_opacity,
                     rel_width=self.wm_rel_width,

@@ -187,7 +187,7 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Aplica marca d'água (centro)
+1. Aplica 2 marcas d'água no centro (logo Grava Nois + logo do cliente)
 2. Gera thumbnail (meio do vídeo)
 3. Registra metadados no backend → recebe `upload_url`
 4. Faz upload para URL assinada (S3/Supabase)
@@ -224,6 +224,7 @@ grava_nois_system/
 ├── main.py                      # Serviço principal + worker
 ├── video_core.py                # Funções de captura e processamento
 ├── requirements.txt             # Dependências Python
+├── optimze_image.py             # Gera versões otimizadas das logos (PNG RGBA)
 ├── .env                         # Configuração (não commitado)
 │
 ├── src/
@@ -237,7 +238,10 @@ grava_nois_system/
 │       └── api_error_policy.py  # Regra de decisão para erros da API
 │
 ├── files/
-│   └── replay_grava_nois.png    # Logo para marca d'água
+│   ├── replay_grava_nois.png    # Logo principal (original)
+│   ├── client_logo.png          # Logo secundária do cliente (original)
+│   ├── replay_grava_nois_wm.png # Logo principal otimizada (fallback automático)
+│   └── client_logo_wm.png       # Logo secundária otimizada (fallback automático)
 │
 ├── logs/
 │   ├── app.log                  # Logs da aplicação (DEBUG)
@@ -375,7 +379,22 @@ GN_LIGHT_MODE=1                 # 0=normal (watermark), 1=leve (sem watermark)
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_TRIGGER_MAX_WORKERS=2        # Vazio=auto (número de câmeras); define paralelismo do trigger
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
+GN_WM_PRESET=veryfast           # Preset ffmpeg no watermark (default: veryfast)
 ```
+
+#### Otimizacao de logos (opcional, recomendado)
+
+Use o script abaixo para gerar PNGs menores em RGBA, reduzindo custo de CPU no worker:
+
+```bash
+python3 optimze_image.py
+```
+
+Por padrão ele gera:
+- `files/replay_grava_nois_wm.png`
+- `files/client_logo_wm.png`
+
+O `main.py` prioriza automaticamente esses arquivos `_wm.png` quando presentes.
 
 #### Modo Desenvolvimento
 

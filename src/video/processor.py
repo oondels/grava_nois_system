@@ -264,9 +264,11 @@ def add_image_watermark(
     input_path: str,
     watermark_path: str,
     output_path: str,
+    secondary_watermark_path: Optional[str] = None,
     margin: int = 24,
     opacity: float = 0.8,
     rel_width: float = 0.2,
+    secondary_rel_width: Optional[float] = None,
     codec: str = "libx264",
     crf: int = 20,
     preset: str = "medium",
@@ -274,31 +276,59 @@ def add_image_watermark(
     """
     Aplica marca d'água de imagem no central usando ffmpeg.
 
-    - Dimensiona a marca d'água para `rel_width * largura_do_vídeo`.
+    - Dimensiona a(s) marca(s) d'água para `rel_width * largura_do_vídeo`.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
     - Requer ffmpeg no PATH. Não requer MoviePy.
     """
     logger.info("Adicionando marca d'água ao vídeo...")
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
+    secondary_wm_p = Path(secondary_watermark_path) if secondary_watermark_path else None
     if not in_p.exists():
         raise FileNotFoundError(f"Vídeo inexistente: {input_path}")
     if not wm_p.exists():
         raise FileNotFoundError(f"Watermark inexistente: {watermark_path}")
+    if secondary_wm_p is not None and not secondary_wm_p.exists():
+        raise FileNotFoundError(
+            f"Watermark secundária inexistente: {secondary_watermark_path}"
+        )
 
     meta = ffprobe_metadata(in_p)
     vw = int(meta.get("width") or 0)
     if vw <= 0:
         raise RuntimeError("Não foi possível obter largura do vídeo via ffprobe.")
 
-    # Largura alvo da marca d'água (em pixels)
+    # Largura alvo da(s) marca(s) d'água (em pixels)
     wm_w = max(1, int(vw * float(rel_width)))
-    # Filtro: escala watermark, aplica alpha e sobrepõe com margem
-    # - format=rgba garante canal alpha; colorchannelmixer ajusta opacidade
-    filt = (
-        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm];"
-        f"[0:v][wm]overlay=x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(margin)}[v]"
-    )
+    wm2_rel = rel_width if secondary_rel_width is None else secondary_rel_width
+    wm2_w = max(1, int(vw * float(wm2_rel)))
+
+    # Filtro base: watermark principal centralizada na tela
+    filt_parts = [
+        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm1]",
+        (
+            f"[0:v][wm1]overlay="
+            f"x=(main_w-overlay_w)/2:"
+            f"y=(main_h/2)-overlay_h-{int(margin) // 2}[v1]"
+        ),
+    ]
+
+    # Watermark secundária (logo do cliente): centralizada abaixo da principal
+    final_video_label = "[v1]"
+    if secondary_wm_p is not None:
+        filt_parts.append(
+            f"[2:v]scale={wm2_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm2]"
+        )
+        filt_parts.append(
+            (
+                f"[v1][wm2]overlay="
+                f"x=(main_w-overlay_w)/2:"
+                f"y=(main_h/2)+{int(margin) // 2}[v]"
+            )
+        )
+        final_video_label = "[v]"
+
+    filt = ";".join(filt_parts)
 
     cmd = [
         "ffmpeg",
@@ -308,10 +338,15 @@ def add_image_watermark(
         str(in_p),
         "-i",
         str(wm_p),
+    ]
+    if secondary_wm_p is not None:
+        cmd.extend(["-i", str(secondary_wm_p)])
+    cmd.extend(
+        [
         "-filter_complex",
         filt,
         "-map",
-        "[v]",
+        final_video_label,
         "-map",
         "0:a?",
         "-c:v",
@@ -325,7 +360,8 @@ def add_image_watermark(
         "-b:a",
         "96k",
         str(output_path),
-    ]
+        ]
+    )
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:

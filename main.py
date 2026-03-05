@@ -145,7 +145,17 @@ def main() -> int:
         out_wm_dir.mkdir(parents=True, exist_ok=True)
     failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
-    watermark_path = base / "files" / "replay_grava_nois.png"
+    default_wm_path = base / "files" / "replay_grava_nois.png"
+    optimized_wm_path = base / "files" / "replay_grava_nois_wm.png"
+    watermark_path = optimized_wm_path if optimized_wm_path.exists() else default_wm_path
+
+    default_client_wm_path = base / "files" / "client_logo.png"
+    optimized_client_wm_path = base / "files" / "client_logo_wm.png"
+    client_watermark_path = (
+        optimized_client_wm_path
+        if optimized_client_wm_path.exists()
+        else default_client_wm_path
+    )
     wm_margin = 24
     wm_opacity = 0.8
     wm_rel_width = 0.11
@@ -161,6 +171,7 @@ def main() -> int:
             out_wm_dir=out_wm_dir,
             failed_dir_highlight=cfg.failed_dir_highlight,
             watermark_path=watermark_path,
+            client_watermark_path=client_watermark_path,
             scan_interval=1,
             max_attempts=worker_max_attempts,
             wm_margin=wm_margin,

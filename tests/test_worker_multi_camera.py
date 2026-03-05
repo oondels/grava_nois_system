@@ -16,7 +16,11 @@ from src.workers.processing_worker import ProcessingWorker
 
 
 def _make_worker(
-    queue_dir: Path, failed_dir: Path, *, light_mode: bool = True
+    queue_dir: Path,
+    failed_dir: Path,
+    *,
+    light_mode: bool = True,
+    client_watermark_path: Path | None = None,
 ) -> ProcessingWorker:
     """Create a ProcessingWorker with no retry loop."""
     return ProcessingWorker(
@@ -24,6 +28,7 @@ def _make_worker(
         out_wm_dir=queue_dir / "_wm_unused",
         failed_dir_highlight=failed_dir,
         watermark_path=Path("/dev/null"),
+        client_watermark_path=client_watermark_path,
         scan_interval=0,
         light_mode=light_mode,
         retry_failed=False,
@@ -188,9 +193,17 @@ class WorkerMultiCameraTests(unittest.TestCase):
         queue = self.base / "queue_raw" / "cam04"
         failed = self.base / "failed_clips" / "cam04"
         queue.mkdir(parents=True, exist_ok=True)
+        client_logo = self.base / "files" / "client_logo.png"
+        client_logo.parent.mkdir(parents=True, exist_ok=True)
+        client_logo.write_bytes(b"png")
 
         mp4 = _place_mp4(queue, "highlight_cam04_nowm.mp4")
-        worker = _make_worker(queue, failed, light_mode=False)
+        worker = _make_worker(
+            queue,
+            failed,
+            light_mode=False,
+            client_watermark_path=client_logo,
+        )
 
         wm_calls: list[dict] = []
 
@@ -207,6 +220,11 @@ class WorkerMultiCameraTests(unittest.TestCase):
         self.assertEqual(len(wm_calls), 1, "Worker deve aplicar watermark no modo completo")
         self.assertEqual(wm_calls[0]["preset"], "veryfast")
         self.assertTrue(str(wm_calls[0]["output_path"]).endswith(".wm_tmp.mp4"))
+        self.assertEqual(
+            wm_calls[0]["secondary_watermark_path"],
+            str(client_logo),
+            "Worker deve repassar a logo secundária do cliente",
+        )
         upload_failed = failed / "upload_failed" / mp4.name
         self.assertTrue(upload_failed.exists(), "Fluxo deve continuar com o arquivo processado")
 
