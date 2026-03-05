@@ -16,6 +16,7 @@ from src.services.api_error_policy import extract_api_error_from_exception
 from src.utils.logger import logger
 from src.video.processor import (
     _sha256_file,
+    add_image_watermark,
     ffprobe_metadata,
 )
 
@@ -298,25 +299,46 @@ class ProcessingWorker:
         out_mp4 = None
 
         if not self.light_mode:
-            # O highlight já deve chegar watermarked da etapa de build.
+            # Marca d'água é aplicada no worker (assíncrono) para não aumentar latência do trigger.
             out_mp4 = self.out_wm_dir / mp4.name
-            if not out_mp4.exists():
-                # Mantém escrita atômica do artefato watermarked sem nova transcodificação.
+            if out_mp4.exists():
+                meta.update(
+                    {
+                        "status": "watermarked",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "wm_path": str(out_mp4),
+                    }
+                )
+                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+                upload_target = out_mp4
+            else:
+                wm_preset = (os.getenv("GN_WM_PRESET") or "veryfast").strip() or "veryfast"
                 tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
-                shutil.copy2(mp4, tmp_out)
+                add_image_watermark(
+                    input_path=str(mp4),
+                    watermark_path=str(self.watermark_path),
+                    output_path=str(tmp_out),
+                    margin=self.wm_margin,
+                    opacity=self.wm_opacity,
+                    rel_width=self.wm_rel_width,
+                    codec="libx264",
+                    crf=20,
+                    preset=wm_preset,
+                )
                 tmp_out.replace(out_mp4)
 
-            meta.update(
-                {
-                    "status": "watermarked",
-                    "attempts": attempts,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "wm_path": str(out_mp4),
-                    "meta_wm": ffprobe_metadata(out_mp4),
-                }
-            )
-            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-            upload_target = out_mp4
+                meta.update(
+                    {
+                        "status": "watermarked",
+                        "attempts": attempts,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "wm_path": str(out_mp4),
+                        "meta_wm": ffprobe_metadata(out_mp4),
+                        "wm_encode": {"preset": wm_preset, "crf": 20},
+                    }
+                )
+                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+                upload_target = out_mp4
         else:
             # Modo leve: sem watermark/thumbnail — upload do arquivo da fila
             meta.update(
