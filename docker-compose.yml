@@ -1,6 +1,6 @@
 services:
   grava_nois_system:
-    image: ${GRAVA_NOIS_SYSTEM_IMAGE:-oondels/gravanois-system:1.1}
+    image: ${GRAVA_NOIS_SYSTEM_IMAGE:-oondels/gravanois-system:latest}
     pull_policy: always
     container_name: grava_nois_system
     restart: unless-stopped
