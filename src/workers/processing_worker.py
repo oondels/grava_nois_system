@@ -66,7 +66,7 @@ class ProcessingWorker:
         # futuramente incluir outros diretorios:
         # retry_dirs += [ self.failed_dir / "enqueue_failed", self.failed_dir / "build_failed" ]
 
-        api_base = os.getenv("API_BASE_URL")
+        api_base = os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL") or "";
 
         now = time.time()
         for rdir in retry_dirs:
