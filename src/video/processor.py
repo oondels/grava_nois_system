@@ -266,7 +266,7 @@ def add_image_watermark(
     output_path: str,
     secondary_watermark_path: Optional[str] = None,
     margin: int = 24,
-    opacity: float = 0.8,
+    opacity: float = 0.9,
     rel_width: float = 0.2,
     secondary_rel_width: Optional[float] = None,
     codec: str = "libx264",
@@ -303,30 +303,38 @@ def add_image_watermark(
     wm2_rel = rel_width if secondary_rel_width is None else secondary_rel_width
     wm2_w = max(1, int(vw * float(wm2_rel)))
 
-    # Filtro base: watermark principal centralizada na tela
+    # Filtro base: watermark principal centralizada no rodapé
     filt_parts = [
         f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm1]",
-        (
-            f"[0:v][wm1]overlay="
-            f"x=(main_w-overlay_w)/2:"
-            f"y=(main_h/2)-overlay_h-{int(margin) // 2}[v1]"
-        ),
     ]
 
-    # Watermark secundária (logo do cliente): centralizada abaixo da principal
-    final_video_label = "[v1]"
+    # Se houver watermark secundária: logos lado a lado no centro inferior
+    final_video_label = "[v]"
     if secondary_wm_p is not None:
+        pair_gap = max(8, int(margin) // 2)
+        pair_total_w = int(wm_w) + int(wm2_w) + int(pair_gap)
         filt_parts.append(
             f"[2:v]scale={wm2_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm2]"
         )
         filt_parts.append(
             (
-                f"[v1][wm2]overlay="
-                f"x=(main_w-overlay_w)/2:"
-                f"y=(main_h/2)+{int(margin) // 2}[v]"
+                f"[0:v][wm1]overlay="
+                f"x=(main_w-{pair_total_w})/2:"
+                f"y=main_h-overlay_h-{int(margin)}[v1]"
             )
         )
-        final_video_label = "[v]"
+        filt_parts.append(
+            (
+                f"[v1][wm2]overlay="
+                f"x=(main_w-{pair_total_w})/2+{int(wm_w) + int(pair_gap)}:"
+                f"y=main_h-overlay_h-{int(margin)}[v]"
+            )
+        )
+    else:
+        filt_parts.append(
+            f"[0:v][wm1]overlay="
+            f"x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(margin)}[v]"
+        )
 
     filt = ";".join(filt_parts)
 

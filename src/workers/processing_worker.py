@@ -32,7 +32,7 @@ class ProcessingWorker:
         scan_interval: float = 1,  # varredura a cada 1
         max_attempts: int = 3,
         wm_margin: int = 24,
-        wm_opacity: float = 0.8,
+        wm_opacity: float = 0.9,
         wm_rel_width: float = 0.1,
         light_mode: bool = True,  # Ativa o Light Mode (MVP)
         retry_failed: bool = True,
