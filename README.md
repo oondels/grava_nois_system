@@ -1,4 +1,4 @@
-# Grava Nóis — Sistema de Captura de Vídeos
+# Grava Nóis System — Sistema de Captura de Vídeos
 
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, processar com marca d'água/thumbnail e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
