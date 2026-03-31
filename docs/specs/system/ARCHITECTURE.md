@@ -74,16 +74,18 @@ Bootstrap em [`main.py`](../../../main.py):
 
 `CameraRuntime` em `main.py` encapsula:
 
-- `cfg`
+- `cfg` (`CaptureConfig`, inclui `pico_trigger_token`)
 - processo FFmpeg
 - `SegmentBuffer`
-- `capture_lock`
+- `capture_lock` — evita sobreposição de build para a mesma câmera
+- `_cooldown_until: float` — timestamp até o qual novos triggers físicos são ignorados para esta câmera (cooldown por câmera)
 
 Consequência:
 
 - cada câmera tem pipeline isolado;
-- o trigger é disparado em fan-out concorrente;
-- o lock evita sobreposição de build para a mesma câmera.
+- o trigger global (ENTER/GPIO/token Pico global) faz fan-out para câmeras sem token dedicado;
+- câmeras com `pico_trigger_token` só disparam quando o token dedicado é recebido;
+- o lock evita sobreposição de build; o cooldown evita cliques acidentais em sequência.
 
 ## Queue and filesystem model
 
@@ -120,7 +122,9 @@ O sistema usa o filesystem como fila, lock e trilha de auditoria local.
 
 ## Architectural constraints
 
-- trigger válido pode gerar highlight para múltiplas câmeras simultaneamente;
+- trigger global pode gerar highlight para múltiplas câmeras simultaneamente (fan-out concorrente);
+- câmeras com `pico_trigger_token` dedicado só disparam no token correspondente, não no fan-out global;
+- o cooldown por câmera (`_cooldown_until`) é independente entre câmeras;
 - a fila é baseada em polling com arquivos `.lock`;
 - o edge depende de FFmpeg/ffprobe no ambiente;
 - integrações com backend devem respeitar assinatura HMAC nas rotas protegidas;

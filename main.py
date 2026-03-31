@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 import select
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import threading
@@ -34,6 +35,7 @@ class CameraRuntime:
     proc: object
     segbuf: SegmentBuffer
     capture_lock: threading.Lock = field(default_factory=threading.Lock)
+    _cooldown_until: float = field(default=0.0)
 
 
 def _trigger_fan_out(
@@ -89,6 +91,35 @@ def _trigger_fan_out(
             fut.result()
         except Exception as e:
             logger.error(f"[{trigger_id}] unhandled error in fan-out: {e}")
+
+
+def _trigger_single_camera(
+    rt: CameraRuntime,
+    failed_dir_highlight: Path,
+    executor: ThreadPoolExecutor,
+    trigger_id: str,
+    cooldown_sec: float,
+) -> None:
+    """Trigger a single camera respecting its per-camera cooldown."""
+    now = time.time()
+    if now < rt._cooldown_until:
+        remaining = int(rt._cooldown_until - now)
+        logger.info(
+            f"[{rt.cfg.camera_id}][{trigger_id}] cooldown ativo ({remaining}s restantes) – ignorado"
+        )
+        return
+    rt._cooldown_until = now + cooldown_sec
+    _trigger_fan_out([rt], failed_dir_highlight, executor, trigger_id)
+
+
+def _get_fanout_targets(runtimes: list[CameraRuntime]) -> list[CameraRuntime]:
+    """Returns cameras without a dedicated pico token for global fan-out.
+
+    Falls back to all cameras if every camera has a dedicated token,
+    so ENTER/GPIO always triggers at least something.
+    """
+    targets = [rt for rt in runtimes if rt.cfg.pico_trigger_token is None]
+    return targets if targets else list(runtimes)
 
 
 def _serial_line_is_trigger(line: str, token: str) -> bool:
@@ -189,14 +220,35 @@ def main() -> int:
     trigger_source = resolve_trigger_source(logger=logger)
     logger.info(f"Fonte de trigger físico selecionada: {trigger_source}")
 
-    # Cooldown de botão GPIO: ignora novos disparos por 120s após um válido
+    # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
     gpio_cooldown_sec = float(os.getenv("GN_GPIO_COOLDOWN_SEC", "120"))
-    last_gpio_ok_ts = 0.0
+
+    # Câmeras que participam do fan-out global (sem token Pico dedicado).
+    # Se todas tiverem token dedicado, o fan-out global ainda dispara todas (fallback de debug).
+    _fanout_runtimes = _get_fanout_targets(runtimes)
 
     pico_trigger_token = (os.getenv("GN_PICO_TRIGGER_TOKEN") or "BTN_REPLAY").strip()
     pico_serial_port: str | None = None
     gpio_enabled = False
     pico_enabled = False
+
+    # Mapa de roteamento: token Pico dedicado → handler de câmera específica.
+    # Câmeras sem pico_trigger_token participam apenas do fan-out global.
+    token_map: dict[str, Callable[[], None]] = {}
+    for _rt in runtimes:
+        _token = _rt.cfg.pico_trigger_token
+        if _token:
+            def _make_handler(rt: CameraRuntime) -> Callable[[], None]:
+                def _handler() -> None:
+                    tid = uuid.uuid4().hex[:8]
+                    logger.info(
+                        f"[Pico] Token '{rt.cfg.pico_trigger_token}' → câmera '{rt.cfg.camera_id}' (dedicado)"
+                    )
+                    _trigger_single_camera(
+                        rt, failed_dir_highlight, trigger_executor, tid, gpio_cooldown_sec
+                    )
+                return _handler
+            token_map[_token.strip().upper()] = _make_handler(_rt)
 
     def _stdin_listener():
         # Bloqueia em input(); cada ENTER gera um trigger.
@@ -348,10 +400,20 @@ def main() -> int:
                             line = raw_line.decode("utf-8", errors="ignore").strip()
                             if not line:
                                 continue
-                            if _serial_line_is_trigger(line, pico_trigger_token):
+                            line_upper = line.upper()
+                            if line_upper in token_map:
+                                # Token dedicado a uma câmera: roteia diretamente.
+                                token_map[line_upper]()
+                            elif _serial_line_is_trigger(line, pico_trigger_token):
+                                # Token global: enfileira fan-out.
+                                logger.info(
+                                    f"[Pico] Token '{line_upper}' → fan-out global"
+                                )
                                 trigger_q.put("pico")
                             else:
-                                logger.debug(f"Pico serial ignorado: {line}")
+                                logger.warning(
+                                    f"[Pico] Token desconhecido: {line_upper!r}"
+                                )
 
             threading.Thread(target=_pico_serial_listener, daemon=True).start()
             pico_enabled = True
@@ -383,24 +445,32 @@ def main() -> int:
             except queue.Empty:
                 continue
 
-            # Aplica cooldown apenas para o botão GPIO
+            # Cooldown por câmera para triggers físicos (gpio/pico global).
             if trig in ("gpio", "pico"):
                 now = time.time()
-                elapsed = now - last_gpio_ok_ts
-                if elapsed < gpio_cooldown_sec:
-                    restante = int(gpio_cooldown_sec - elapsed)
-                    logger.info(
-                        f"Trigger físico ({trig}) ignorado: cooldown ativo ({restante}s restantes)"
-                    )
+                _ready: list[CameraRuntime] = []
+                for rt in _fanout_runtimes:
+                    if now < rt._cooldown_until:
+                        remaining = int(rt._cooldown_until - now)
+                        logger.info(
+                            f"Trigger físico ({trig}) ignorado para {rt.cfg.camera_id}: "
+                            f"cooldown ativo ({remaining}s restantes)"
+                        )
+                    else:
+                        rt._cooldown_until = now + gpio_cooldown_sec
+                        _ready.append(rt)
+                if not _ready:
                     continue
-                last_gpio_ok_ts = now
+                fanout_targets = _ready
+            else:
+                fanout_targets = _fanout_runtimes
 
             if not is_within_business_hours():
                 logger.warning("Fora do horário de funcionamento")
                 continue
 
             trigger_id = uuid.uuid4().hex[:8]
-            _trigger_fan_out(runtimes, failed_dir_highlight, trigger_executor, trigger_id)
+            _trigger_fan_out(fanout_targets, failed_dir_highlight, trigger_executor, trigger_id)
 
     except KeyboardInterrupt:
         logger.info("Encerrando...")
