@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grava Nóis — Configurar WiFi</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --gn-orange: #FF6B00;
+      --gn-dark:   #1A1A1A;
+      --gn-gray:   #2C2C2C;
+      --gn-light:  #F5F5F5;
+      --gn-white:  #FFFFFF;
+      --gn-green:  #22C55E;
+      --gn-red:    #EF4444;
+      --gn-border: #3A3A3A;
+      --radius:    12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gn-dark);
+      color: var(--gn-light);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .logo-wrap { margin-bottom: 16px; }
+    .logo-icon {
+      width: 64px; height: 64px;
+      background: var(--gn-orange);
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+    .header h1 { font-size: 22px; font-weight: 700; color: var(--gn-white); }
+    .header p  { font-size: 14px; color: #888; margin-top: 6px; }
+
+    /* ── Card ───────────────────────────────────────────────── */
+    .card {
+      background: var(--gn-gray);
+      border: 1px solid var(--gn-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      width: 100%;
+      max-width: 440px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 16px;
+    }
+
+    /* ── Rede item ──────────────────────────────────────────── */
+    .network-list { display: flex; flex-direction: column; gap: 8px; }
+    .network-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--gn-dark);
+      border: 2px solid transparent;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .network-item:hover  { background: #222; }
+    .network-item.active {
+      border-color: var(--gn-orange);
+      background: rgba(255,107,0,0.08);
+    }
+    .network-icon { font-size: 20px; flex-shrink: 0; }
+    .network-name { font-size: 16px; font-weight: 500; flex: 1; }
+    .network-sec  { font-size: 11px; color: #666; }
+
+    /* ── Skeleton / empty ───────────────────────────────────── */
+    .skeleton {
+      height: 50px;
+      background: linear-gradient(90deg, #333 25%, #3a3a3a 50%, #333 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 10px;
+    }
+    @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+    .empty { color: #666; font-size: 14px; text-align: center; padding: 16px 0; }
+
+    /* ── Input senha ────────────────────────────────────────── */
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-wrap input {
+      width: 100%;
+      padding: 14px 48px 14px 16px;
+      background: var(--gn-dark);
+      border: 2px solid var(--gn-border);
+      border-radius: 10px;
+      color: var(--gn-white);
+      font-size: 16px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input-wrap input:focus { border-color: var(--gn-orange); }
+    .toggle-pw {
+      position: absolute;
+      right: 14px;
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 20px;
+      padding: 4px;
+      line-height: 1;
+    }
+    .selected-ssid {
+      font-size: 13px;
+      color: #aaa;
+      margin-bottom: 12px;
+    }
+    .selected-ssid strong { color: var(--gn-orange); }
+
+    /* ── Botão principal ────────────────────────────────────── */
+    .btn-primary {
+      width: 100%;
+      padding: 16px;
+      margin-top: 16px;
+      background: var(--gn-orange);
+      border: none;
+      border-radius: 10px;
+      color: var(--gn-white);
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary:not(:disabled):hover { opacity: 0.9; }
+
+    /* ── Spinner ────────────────────────────────────────────── */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: var(--gn-white);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Feedback / status ──────────────────────────────────── */
+    .feedback {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      border-radius: var(--radius);
+      font-size: 15px;
+      line-height: 1.4;
+    }
+    .feedback.show   { display: flex; }
+    .feedback.ok     { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: var(--gn-green); }
+    .feedback.err    { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.3);  color: var(--gn-red); }
+    .feedback.info   { background: rgba(255,107,0,0.10);  border: 1px solid rgba(255,107,0,0.3);  color: var(--gn-orange); }
+    .feedback-icon   { font-size: 22px; flex-shrink: 0; }
+    .feedback p      { margin: 0; }
+
+    /* ── Rodapé ─────────────────────────────────────────────── */
+    .footer { margin-top: 24px; font-size: 12px; color: #555; text-align: center; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo-wrap">
+    <div class="logo-icon">📹</div>
+  </div>
+  <h1>Grava Nóis</h1>
+  <p>Configuração de rede WiFi do dispositivo</p>
+</div>
+
+<!-- Redes disponíveis -->
+<div class="card" id="card-scan">
+  <div class="card-title">Redes disponíveis</div>
+  <div class="network-list" id="network-list">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </div>
+  <button class="btn-primary" id="btn-rescan" style="margin-top:16px;background:#333;font-size:14px;padding:12px;" onclick="loadNetworks()">
+    ↻ Atualizar lista
+  </button>
+</div>
+
+<!-- Senha -->
+<div class="card" id="card-password" style="display:none;">
+  <div class="card-title">Senha da rede</div>
+  <p class="selected-ssid">Rede selecionada: <strong id="ssid-label">—</strong></p>
+  <div class="input-wrap">
+    <input type="password" id="password-input" placeholder="Digite a senha (deixe vazio se aberta)" autocomplete="off" />
+    <button class="toggle-pw" id="toggle-pw" type="button" onclick="togglePassword()" aria-label="Mostrar/ocultar senha">👁</button>
+  </div>
+  <button class="btn-primary" id="btn-connect" onclick="doConnect()">Conectar</button>
+</div>
+
+<!-- Feedback -->
+<div class="feedback" id="feedback">
+  <span class="feedback-icon" id="feedback-icon"></span>
+  <p id="feedback-text"></p>
+</div>
+
+<div class="footer">Grava Nóis · Provisionamento local · Sem internet necessária</div>
+
+<script>
+  'use strict';
+
+  let selectedSSID = '';
+  let polling = null;
+
+  // ── Carregar redes ────────────────────────────────────────────
+  async function loadNetworks() {
+    const list = document.getElementById('network-list');
+    list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+
+    try {
+      const res = await fetch('/scan');
+      const data = await res.json();
+
+      if (!data.ok || !data.networks || data.networks.length === 0) {
+        list.innerHTML = '<p class="empty">Nenhuma rede encontrada. Aguarde e atualize.</p>';
+        return;
+      }
+
+      list.innerHTML = '';
+      data.networks.forEach(function(net) {
+        const el = document.createElement('div');
+        el.className = 'network-item';
+        el.dataset.ssid = net.ssid;
+        el.innerHTML = [
+          '<span class="network-icon">' + signalIcon(net.signal) + '</span>',
+          '<span class="network-name">' + escHtml(net.ssid) + '</span>',
+          '<span class="network-sec">' + escHtml(net.security || '') + '</span>',
+        ].join('');
+        el.addEventListener('click', function() { selectNetwork(net.ssid); });
+        list.appendChild(el);
+      });
+    } catch (e) {
+      list.innerHTML = '<p class="empty">Erro ao buscar redes. Tente novamente.</p>';
+    }
+  }
+
+  function signalIcon(signal) {
+    if (signal >= -55) return '📶';
+    if (signal >= -70) return '🔋';
+    return '📡';
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // ── Selecionar rede ───────────────────────────────────────────
+  function selectNetwork(ssid) {
+    selectedSSID = ssid;
+
+    document.querySelectorAll('.network-item').forEach(function(el) {
+      el.classList.toggle('active', el.dataset.ssid === ssid);
+    });
+
+    document.getElementById('ssid-label').textContent = ssid;
+    document.getElementById('card-password').style.display = 'block';
+    document.getElementById('password-input').focus();
+    hideFeedback();
+  }
+
+  // ── Toggle senha ──────────────────────────────────────────────
+  function togglePassword() {
+    const inp = document.getElementById('password-input');
+    const btn = document.getElementById('toggle-pw');
+    if (inp.type === 'password') {
+      inp.type = 'text';
+      btn.textContent = '🙈';
+    } else {
+      inp.type = 'password';
+      btn.textContent = '👁';
+    }
+  }
+
+  // ── Conectar ──────────────────────────────────────────────────
+  async function doConnect() {
+    if (!selectedSSID) {
+      showFeedback('err', '⚠️', 'Selecione uma rede primeiro.');
+      return;
+    }
+
+    const password = document.getElementById('password-input').value;
+    const btn = document.getElementById('btn-connect');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Conectando...';
+    showFeedback('info', '<span class="spinner"></span>', 'Testando conexão. Aguarde...');
+
+    try {
+      const res = await fetch('/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ssid: selectedSSID, password: password }),
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        showFeedback('err', '❌', data.error || 'Erro desconhecido.');
+        resetBtn();
+        return;
+      }
+
+      startPolling();
+    } catch (e) {
+      showFeedback('err', '❌', 'Erro de comunicação com o dispositivo.');
+      resetBtn();
+    }
+  }
+
+  // ── Polling de status ─────────────────────────────────────────
+  function startPolling() {
+    if (polling) clearInterval(polling);
+    polling = setInterval(checkStatus, 2000);
+  }
+
+  async function checkStatus() {
+    try {
+      const res = await fetch('/status');
+      const data = await res.json();
+
+      if (data.state === 'connected') {
+        clearInterval(polling);
+        showFeedback('ok', '✅',
+          'Conectado! O dispositivo está online. ' +
+          'Você pode fechar esta página.');
+        resetBtn();
+      } else if (data.state === 'failed') {
+        clearInterval(polling);
+        showFeedback('err', '❌',
+          (data.error || 'Senha incorreta ou rede indisponível.') +
+          ' Tente novamente.');
+        resetBtn();
+      }
+      // connecting: mantém feedback atual
+    } catch (e) {
+      // rede pode cair durante transição — ignorar silenciosamente
+    }
+  }
+
+  // ── Utilitários de UI ─────────────────────────────────────────
+  function showFeedback(type, icon, text) {
+    const el   = document.getElementById('feedback');
+    const ico  = document.getElementById('feedback-icon');
+    const txt  = document.getElementById('feedback-text');
+    el.className = 'feedback show ' + type;
+    ico.innerHTML = icon;
+    txt.textContent = text;
+  }
+
+  function hideFeedback() {
+    document.getElementById('feedback').className = 'feedback';
+  }
+
+  function resetBtn() {
+    const btn = document.getElementById('btn-connect');
+    btn.disabled = false;
+    btn.textContent = 'Conectar';
+  }
+
+  // ── Init ──────────────────────────────────────────────────────
+  loadNetworks();
+</script>
+</body>
+</html>
