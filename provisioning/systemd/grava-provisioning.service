@@ -1,0 +1,39 @@
+[Unit]
+Description=Grava Nois — WiFi Provisioning (hotspot local)
+Documentation=https://github.com/oondels/grava_nois_system
+# Rodar antes do Docker para garantir WiFi antes dos containers
+Before=docker.service
+# Rodar após a rede básica estar disponível (mas não depender de conectividade)
+After=network.target
+DefaultDependencies=no
+
+[Service]
+Type=simple
+
+# Substituídos por install_provisioning.sh durante a instalação:
+User={{SYSTEM_USER}}
+WorkingDirectory={{PROVISIONING_DIR}}
+
+# Variáveis de ambiente
+Environment=LOG_FILE=/var/log/grava-provisioning/service.log
+Environment=WIFI_CHECK_WAIT=30
+Environment=PROVISIONING_PORT=80
+
+# Script orquestrador:
+#   1. Executa wifi_check.sh
+#   2. Se sem WiFi: sobe hotspot_up.sh + provisioning_server.py (bloqueante)
+#   3. Se com WiFi: encerra silenciosamente (código 0)
+ExecStart=/usr/bin/env bash {{PROVISIONING_DIR}}/provisioning_start.sh
+
+# Reiniciar apenas em falha real (não quando encerrar com 0 = WiFi ok)
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=180
+StartLimitBurst=3
+
+# Saída para log dedicado
+StandardOutput=append:/var/log/grava-provisioning/service.log
+StandardError=append:/var/log/grava-provisioning/service.log
+
+[Install]
+WantedBy=multi-user.target

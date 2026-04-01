@@ -18,6 +18,7 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 - [Fluxo de Funcionamento](#fluxo-de-funcionamento)
 - [Estrutura de Diretórios](#estrutura-de-diretórios)
 - [Configuração](#configuração)
+- [Provisionamento WiFi (Hotspot)](#provisionamento-wifi-hotspot)
 - [GPIO (Botão Físico)](#gpio-botão-físico)
 - [Modo Leve (Light Mode)](#modo-leve-light-mode)
 - [Troubleshooting](#troubleshooting)
@@ -490,6 +491,87 @@ GN_VIDEO_SIZE=1280x720
 ```
 
 O código usará `/dev/video0` automaticamente.
+
+---
+
+## 📶 Provisionamento WiFi (Hotspot)
+
+Quando o dispositivo chega ao cliente sem credenciais WiFi configuradas, o sistema sobe automaticamente um hotspot temporário para provisionamento local — sem necessidade de internet, aplicativo ou intervenção da equipe Grava Nóis.
+
+### Como funciona
+
+```
+Dispositivo liga sem WiFi configurado
+       ↓
+Serviço grava-provisioning.service detecta ausência de rede
+       ↓
+Sobe hotspot "GravaNois-XXXX" (aberto, SSID único por MAC)
+       ↓
+Cliente conecta o celular no hotspot
+       ↓
+Abre http://192.168.4.1 (captive portal automático)
+       ↓
+Seleciona a rede WiFi do local e digita a senha
+       ↓
+Dispositivo testa, salva no Netplan e derruba o hotspot
+       ↓
+Docker e containers sobem normalmente com WiFi ativo
+```
+
+### Guia para o cliente (instalação inicial)
+
+1. Ligue o dispositivo Grava Nóis.
+2. Aguarde ~30 segundos até o hotspot aparecer nas redes WiFi do seu celular.
+3. Conecte ao hotspot **GravaNois-XXXX** (sem senha).
+4. A página de configuração abre automaticamente. Se não abrir, acesse `http://192.168.4.1`.
+5. Selecione a rede WiFi do local na lista e informe a senha.
+6. Aguarde a confirmação "Conectado!" — o hotspot desaparecerá automaticamente.
+7. A partir deste ponto, o dispositivo se conectará automaticamente a essa rede em todo boot.
+
+> **Senha incorreta:** a página exibe erro e o hotspot permanece ativo para nova tentativa.
+> **Troca de WiFi futura:** será feita via painel web → Configurações do dispositivo → Alterar WiFi (funcionalidade separada).
+
+### Componentes
+
+| Arquivo | Responsabilidade |
+|---------|-----------------|
+| `provisioning/wifi_check.sh` | Detecta se há WiFi ativo no boot |
+| `provisioning/hotspot_up.sh` | Sobe hostapd + dnsmasq |
+| `provisioning/hotspot_down.sh` | Derruba hotspot e reconecta ao WiFi salvo |
+| `provisioning/provisioning_server.py` | Servidor Flask local (porta 80) |
+| `provisioning/netplan_writer.py` | Persiste credenciais no Netplan |
+| `provisioning/templates/provisioning.html` | Página HTML offline (mobile-first) |
+| `systemd/grava-provisioning.service` | Orquestra o fluxo no boot |
+| `provisioning/install_provisioning.sh` | Instala dependências e registra serviço |
+
+### Detalhes técnicos
+
+- **SSID:** `GravaNois-XXXX` — últimos 4 chars do MAC address da interface WiFi
+- **IP do dispositivo no hotspot:** `192.168.4.1`
+- **DHCP para clientes:** `192.168.4.10` a `192.168.4.50`
+- **DNS captive portal:** todo tráfego DNS aponta para `192.168.4.1`
+- **Rede:** modo `g` (2.4 GHz, máxima compatibilidade com celulares)
+- **Segurança:** hotspot aberto, mas isolado — sem internet exposta; senha do cliente nunca é logada nem enviada à API
+
+### Dependências de sistema
+
+Instaladas via `provisioning/install_provisioning.sh`:
+
+```bash
+hostapd        # Criação do ponto de acesso WiFi
+dnsmasq        # DHCP + DNS captive portal
+python3-flask  # Servidor web de provisionamento
+wireless-tools # iwlist para scan de redes
+```
+
+### Instalação
+
+A instalação é feita automaticamente pelo script de setup do sistema (ver `grava_nois_config/.setup_ubuntu_server.sh` com `ENABLE_PROVISIONING=1`). Para instalar manualmente:
+
+```bash
+cd grava_nois_system
+sudo bash provisioning/install_provisioning.sh
+```
 
 ---
 

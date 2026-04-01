@@ -110,6 +110,29 @@ Canonical string:
 - cada câmera em `GN_CAMERAS_JSON` pode declarar `pico_trigger_token` próprio — quando recebido, dispara apenas aquela câmera sem acionar as demais;
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
+## WiFi Provisioning (hotspot local)
+
+Dependências de sistema instaladas via `provisioning/install_provisioning.sh`:
+
+| Pacote | Uso |
+|--------|-----|
+| `hostapd` | Criação do ponto de acesso WiFi (AP mode) |
+| `dnsmasq` | DHCP para clientes do hotspot + DNS captive portal |
+| `python3-flask` | Servidor web local de provisionamento (porta 80) |
+| `wireless-tools` | `iwlist` para scan de redes WiFi disponíveis |
+| `netplan.io` | Já presente no Ubuntu Server; usado para persistir credenciais |
+
+Interfaces de integração:
+
+- **`hostapd`**: configuração gerada dinamicamente em `/tmp/hostapd.conf`; SSID derivado do MAC da interface WiFi detectada (`iw dev`).
+- **`dnsmasq`**: configuração gerada em `/tmp/dnsmasq-hotspot.conf`; DHCP `192.168.4.10–50`, DNS aponta tudo para `192.168.4.1`.
+- **Flask** (`provisioning/provisioning_server.py`): endpoints `GET /`, `GET /scan`, `POST /configure`, `GET /status`; roda somente durante o modo hotspot.
+- **Netplan** (`provisioning/netplan_writer.py`): lê, faz backup e reescreve `/etc/netplan/50-cloud-init.yaml`; executa `sudo netplan apply`; nunca loga a senha em texto claro.
+- **sudoers** (`/etc/sudoers.d/gravanois-provisioning`): permite execução sem senha de `netplan apply`, `hostapd`, `dnsmasq` e `ip` pelo usuário do sistema.
+- **systemd** (`systemd/grava-provisioning.service`): orquestra `wifi_check.sh → hotspot_up.sh → provisioning_server.py`; configurado para rodar **antes** do `docker.service`.
+
+PIDs de `hostapd` e `dnsmasq` são salvos em `/tmp/hotspot.pid` para derrubada controlada via `hotspot_down.sh`.
+
 ## Local filesystem
 
 Integrações locais relevantes:
