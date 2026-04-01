@@ -106,7 +106,9 @@ Canonical string:
 ### Pico serial
 
 - descoberta automática por `/dev/serial/by-id`, `/dev/ttyACM*`, `/dev/ttyUSB*`;
-- token textual configurável por `GN_PICO_TRIGGER_TOKEN`.
+- token global configurável por `GN_PICO_TRIGGER_TOKEN` (fan-out para câmeras sem token dedicado);
+- cada câmera em `GN_CAMERAS_JSON` pode declarar `pico_trigger_token` próprio — quando recebido, dispara apenas aquela câmera sem acionar as demais;
+- token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
 ## Local filesystem
 
@@ -129,4 +131,28 @@ Consequências:
 
 - diretórios podem ser isolados por `camera_id`;
 - há um worker por câmera;
-- o trigger local faz fan-out para todas as câmeras ativas.
+- trigger global faz fan-out para câmeras sem `pico_trigger_token` dedicado;
+- `pico_trigger_token` por câmera em `GN_CAMERAS_JSON` habilita roteamento direto de botão → câmera.
+
+Exemplo com token dedicado por câmera:
+
+```json
+[
+  {
+    "id": "cam_quadra1",
+    "name": "Quadra 1",
+    "rtsp_url": "rtsp://user:pass@192.168.1.101:554/stream",
+    "enabled": true,
+    "pico_trigger_token": "BTN_Q1"
+  },
+  {
+    "id": "cam_quadra2",
+    "name": "Quadra 2",
+    "rtsp_url": "rtsp://user:pass@192.168.1.102:554/stream",
+    "enabled": true,
+    "pico_trigger_token": "BTN_Q2"
+  }
+]
+```
+
+Câmeras sem `pico_trigger_token` participam do fan-out global (`GN_PICO_TRIGGER_TOKEN`, ENTER, GPIO).

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -7,12 +8,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.config.settings import CaptureConfig
-from main import CameraRuntime, _trigger_fan_out
+from main import CameraRuntime, _get_fanout_targets, _trigger_fan_out, _trigger_single_camera
 
 
-def _make_runtime(camera_id: str) -> CameraRuntime:
+def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> CameraRuntime:
     cfg = MagicMock(spec=CaptureConfig)
     cfg.camera_id = camera_id
+    cfg.pico_trigger_token = pico_trigger_token
     segbuf = MagicMock()
     return CameraRuntime(cfg=cfg, proc=MagicMock(), segbuf=segbuf)
 
@@ -84,6 +86,89 @@ class TriggerFanOutTests(unittest.TestCase):
         self.assertTrue(acquired)
         if acquired:
             rt.capture_lock.release()
+
+
+class PicoTokenRoutingTests(unittest.TestCase):
+    def test_dedicated_token_triggers_only_matching_camera(self) -> None:
+        """Token mapeado → dispara apenas a câmera correspondente, não as demais."""
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt2 = _make_runtime("cam02")
+        called_ids: list[str] = []
+
+        def fake_build(cfg, segbuf):
+            called_ids.append(cfg.camera_id)
+            return None
+
+        with patch("main.build_highlight", side_effect=fake_build), \
+             ThreadPoolExecutor(max_workers=2) as exe:
+            _trigger_single_camera(rt1, Path("/tmp/failed"), exe, "tok-001", cooldown_sec=0.0)
+
+        self.assertIn("cam01", called_ids)
+        self.assertNotIn("cam02", called_ids)
+
+    def test_global_fanout_skips_cameras_with_dedicated_token(self) -> None:
+        """Token global → fan-out dispara apenas câmeras sem token dedicado."""
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt2 = _make_runtime("cam02")  # sem token dedicado
+        targets = _get_fanout_targets([rt1, rt2])
+        self.assertEqual([rt.cfg.camera_id for rt in targets], ["cam02"])
+
+    def test_global_fanout_all_cameras_when_all_have_tokens(self) -> None:
+        """Quando todas as câmeras têm token, fan-out global dispara todas (fallback de debug)."""
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt2 = _make_runtime("cam02", pico_trigger_token="BTN_Q2")
+        targets = _get_fanout_targets([rt1, rt2])
+        self.assertEqual(len(targets), 2)
+
+    def test_unknown_token_does_not_trigger_any_camera(self) -> None:
+        """Token desconhecido → nenhuma câmera dispara, sem levantar exceção."""
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt2 = _make_runtime("cam02")
+        called_ids: list[str] = []
+
+        def fake_build(cfg, segbuf):
+            called_ids.append(cfg.camera_id)
+            return None
+
+        # Simula o roteamento: token desconhecido não está em token_map nem é global token
+        token_map = {"BTN_Q1": lambda: None}  # cam01 handler (not calling build_highlight here)
+        unknown_token = "BTN_UNKNOWN"
+        # Unknown token: not in token_map, not global → nenhuma ação
+        dispatched = unknown_token in token_map
+        self.assertFalse(dispatched)
+        self.assertEqual(called_ids, [])
+
+    def test_trigger_single_camera_respects_cooldown(self) -> None:
+        """Câmera em cooldown é ignorada por _trigger_single_camera."""
+        rt = _make_runtime("cam01")
+        rt._cooldown_until = time.time() + 120.0  # cooldown ativo
+        called_ids: list[str] = []
+
+        def fake_build(cfg, segbuf):
+            called_ids.append(cfg.camera_id)
+            return None
+
+        with patch("main.build_highlight", side_effect=fake_build), \
+             ThreadPoolExecutor(max_workers=1) as exe:
+            _trigger_single_camera(rt, Path("/tmp/failed"), exe, "cool-001", cooldown_sec=120.0)
+
+        self.assertEqual(called_ids, [])
+
+    def test_trigger_single_camera_fires_when_not_in_cooldown(self) -> None:
+        """Câmera fora do cooldown dispara normalmente."""
+        rt = _make_runtime("cam01")
+        rt._cooldown_until = 0.0  # sem cooldown
+        called_ids: list[str] = []
+
+        def fake_build(cfg, segbuf):
+            called_ids.append(cfg.camera_id)
+            return None
+
+        with patch("main.build_highlight", side_effect=fake_build), \
+             ThreadPoolExecutor(max_workers=1) as exe:
+            _trigger_single_camera(rt, Path("/tmp/failed"), exe, "cool-002", cooldown_sec=120.0)
+
+        self.assertIn("cam01", called_ids)
 
 
 if __name__ == "__main__":

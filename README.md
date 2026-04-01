@@ -29,8 +29,10 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 
 ### Arquivos Principais
 
-- **`main.py`**: Serviço principal + worker de processamento
-- **`video_core.py`**: Núcleo de captura e manipulação de vídeos
+- **`main.py`**: Bootstrap, orquestração de câmeras, listeners de trigger e fan-out
+- **`src/config/settings.py`**: Parsing de `CaptureConfig` e fontes de câmera
+- **`src/video/`**: Captura FFmpeg, buffer circular e montagem de highlight
+- **`src/workers/processing_worker.py`**: Worker de processamento, watermark, upload e retry
 - **`src/utils/logger.py`**: Sistema de logging centralizado
 - **`src/services/api_client.py`**: Cliente HTTP para comunicação com backend
 
@@ -50,11 +52,13 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
        ↓
 [ SegmentBuffer - Mantém buffer circular ]
        ↓
-[ ENTER/GPIO → build_highlight() ]
+[ ENTER / GPIO / Pico serial → build_highlight() ]
+   ├─ token dedicado → câmera específica
+   └─ token global / ENTER / GPIO → fan-out (câmeras sem token dedicado)
        ↓
 [ Enqueue → queue_raw/ ]
        ↓
-[ ProcessingWorker ]
+[ ProcessingWorker (1 por câmera) ]
    ├─ Watermark (opcional)
    ├─ Thumbnail (opcional)
    └─ Upload via API
@@ -130,7 +134,7 @@ source .venv/bin/activate
 python3 main.py
 ```
 
-**Gerar highlight:** Pressione `ENTER` no terminal ou o botão físico conectado ao GPIO.
+**Gerar highlight:** Pressione `ENTER` no terminal, o botão físico conectado ao GPIO ou o botão Pico serial.
 
 ---
 
@@ -151,9 +155,9 @@ buffer000002.ts
 
 O `SegmentBuffer` mantém apenas os últimos ~40 segundos de vídeo, apagando segmentos antigos automaticamente.
 
-### 3. Trigger (ENTER ou GPIO)
+### 3. Trigger (ENTER, GPIO ou Pico serial)
 
-Ao pressionar ENTER ou botão físico:
+Ao pressionar ENTER, botão físico (GPIO) ou botão Pico serial:
 
 1. Sistema valida se o horário atual está dentro da janela `GN_START_TIME` → `GN_END_TIME` no fuso `GN_TIME_ZONE`
 2. Se estiver fora da janela, o trigger é ignorado e o `build_highlight()` não é executado
@@ -223,21 +227,32 @@ O `ProcessingWorker` varre a fila periodicamente:
 
 ```
 grava_nois_system/
-├── main.py                      # Serviço principal + worker
-├── video_core.py                # Funções de captura e processamento
+├── main.py                      # Bootstrap, listeners de trigger e fan-out
 ├── requirements.txt             # Dependências Python
 ├── optimze_image.py             # Gera versões otimizadas das logos (PNG RGBA)
 ├── .env                         # Configuração (não commitado)
 │
 ├── src/
+│   ├── config/
+│   │   └── settings.py          # CaptureConfig e parsing de fontes de câmera
+│   ├── video/
+│   │   ├── capture.py           # Comando FFmpeg por câmera
+│   │   ├── buffer.py            # Buffer circular e indexação de segmentos
+│   │   └── processor.py        # Concat highlight, ffprobe, watermark, enqueue
+│   ├── workers/
+│   │   └── processing_worker.py # Worker de processamento, upload e retry
 │   ├── utils/
-│   │   └── logger.py            # Sistema de logging centralizado
+│   │   ├── logger.py            # Sistema de logging centralizado
+│   │   ├── pico.py              # Detecção de porta serial do Pico
+│   │   ├── device.py            # Detecção de Raspberry Pi
+│   │   └── time_utils.py        # Validação de janela horária
 │   ├── security/
 │   │   ├── hmac.py              # Hash/HMAC/nonce/timestamp
 │   │   └── request_signer.py    # Canonical string + headers HMAC
 │   └── services/
 │       ├── api_client.py        # Cliente HTTP para backend
-│       └── api_error_policy.py  # Regra de decisão para erros da API
+│       ├── api_error_policy.py  # Regra de decisão para erros da API
+│       └── retry_upload.py      # Lógica de retry de upload
 │
 ├── files/
 │   ├── replay_grava_nois.png    # Logo principal (original)
@@ -247,24 +262,35 @@ grava_nois_system/
 │
 ├── logs/
 │   ├── app.log                  # Logs da aplicação (DEBUG)
-│   └── ffmpeg.log               # Logs do FFmpeg
+│   └── ffmpeg_<camera_id>.log   # Logs do FFmpeg por câmera
 │
 ├── recorded_clips/              # Highlights após concat
-├── queue_raw/                   # Fila de processamento
+├── queue_raw/                   # Fila de processamento (isolada por câmera em multi-cam)
 ├── highlights_wm/               # Vídeos com marca d'água (modo normal)
 ├── failed_clips/                # Vídeos que falharam
 │   ├── upload_failed/           # Falhas de upload (retry automático)
 │   ├── build_failed/            # Falhas na construção
 │   └── enqueue_failed/          # Falhas ao enfileirar
 │
-├── tests/
-│   ├── test_security_signing.py # Testes de assinatura HMAC
-│   └── test_api_error_policy.py # Testes de política de erros da API
+├── tests/                       # Testes unitários e de integração
+│   ├── test_trigger_fanout.py   # Fan-out, roteamento Pico e cooldown por câmera
+│   ├── test_trigger_sources.py  # Parsing de token serial
+│   ├── test_multi_camera_settings.py  # CaptureConfig multi-câmera
+│   ├── test_security_signing.py # Assinatura HMAC
+│   ├── test_api_error_policy.py # Política de erros da API
+│   └── ...                      # Demais testes
 │
 └── docs/
-    ├── README.md                # Documentação original
     ├── fluxo-funcional.md       # Diagrama detalhado
-    └── grava_nois_fluxo.png     # Diagrama visual
+    ├── grava_nois_fluxo.png     # Diagrama visual
+    └── specs/                   # Especificações técnicas (lookup principal)
+        ├── DESIGN_SPEC.md
+        └── system/
+            ├── ARCHITECTURE.md
+            ├── PIPELINE.md
+            ├── BUSINESS_RULES.md
+            ├── INTEGRATIONS.md
+            └── OPERATIONS.md
 ```
 
 ### Diretórios Criados Automaticamente
@@ -295,7 +321,8 @@ GN_RTSP_URL=rtsp://user:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype
 # GN_RTSP_URLS=rtsp://user:pass@192.168.1.101:554/stream1,rtsp://user:pass@192.168.1.102:554/stream1
 
 # Múltiplas câmeras via JSON (opcional; tem prioridade sobre GN_RTSP_URLS)
-# GN_CAMERAS_JSON=[{"id":"cam01","name":"Quadra 1","rtsp_url":"rtsp://user:pass@192.168.1.101:554/stream1","enabled":true}]
+# Cada câmera pode declarar pico_trigger_token para roteamento direto de botão → câmera
+# GN_CAMERAS_JSON=[{"id":"cam01","name":"Quadra 1","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q1"},{"id":"cam02","name":"Quadra 2","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q2"}]
 
 # Health check (opcional)
 GN_RTSP_MAX_RETRIES=10          # Tentativas de conexão (padrão: 10)
@@ -364,9 +391,24 @@ GN_FORCE_RASPBERRY_PI=1         # 1=true, 0=false
 # Porta do Raspberry Pi Pico (opcional; se vazio o sistema tenta auto-detectar)
 GN_PICO_PORT=/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
 
-# Token textual enviado pelo firmware do Pico
+# Token global enviado pelo firmware do Pico (fan-out para câmeras sem token dedicado)
 GN_PICO_TRIGGER_TOKEN=BTN_REPLAY
 ```
+
+**Roteamento multi-botão (por câmera):** Ao usar `GN_CAMERAS_JSON`, cada câmera pode declarar um `pico_trigger_token` próprio. Quando o Pico envia esse token, apenas a câmera correspondente dispara — as demais não são acionadas.
+
+```bash
+GN_CAMERAS_JSON='[
+  {"id":"cam_quadra1","name":"Quadra 1","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q1"},
+  {"id":"cam_quadra2","name":"Quadra 2","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q2"}
+]'
+GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado)
+```
+
+Lógica de roteamento ao receber um token pela serial:
+1. Token está no mapa dedicado → dispara só a câmera correspondente
+2. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
+3. Token desconhecido → `warning` no log, listener continua sem interrupção
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
@@ -375,6 +417,7 @@ Observações:
   3. `/dev/ttyUSB*`
 - Se nenhuma porta for detectada, o listener serial não é iniciado (não há fallback forçado para `/dev/ttyACM0`).
 - Se `GN_PICO_PORT` estiver definido, ele só é usado quando o caminho existe no host.
+- Instalações sem `pico_trigger_token` nas câmeras continuam funcionando com o token global.
 
 #### Processamento
 
@@ -834,7 +877,10 @@ api_client.finalize_clip_uploaded(
 ### Implementado ✅
 
 - ✅ Captura contínua com buffer circular
-- ✅ Highlights sob demanda (ENTER/GPIO)
+- ✅ Highlights sob demanda (ENTER/GPIO/Pico serial)
+- ✅ Multi-câmera (worker e pipeline isolado por câmera)
+- ✅ Pico serial com roteamento multi-botão por câmera (`pico_trigger_token`)
+- ✅ Cooldown por câmera (triggers físicos independentes entre câmeras)
 - ✅ Worker de processamento com retry
 - ✅ Marca d'água e thumbnail (modo normal)
 - ✅ Upload via URL assinada
@@ -843,25 +889,25 @@ api_client.finalize_clip_uploaded(
 - ✅ Sistema de logging estruturado
 - ✅ Cliente de API centralizado
 - ✅ Reprocessamento automático de falhas
+- ✅ Assinatura HMAC por device nas rotas protegidas
 
 ### Próximos Passos 🚧
 
 - [ ] Logs estruturados em JSON
 - [ ] Watchdog com inotify (substituir varredura)
 - [ ] Métricas Prometheus/Grafana
-- [ ] Testes unitários e de integração
 - [ ] Dashboard web para monitoramento
 - [ ] Compressão de vídeos antigos
 - [ ] Upload paralelo (múltiplos vídeos)
 - [ ] Detecção de movimento (trigger automático)
+- [ ] Suporte a `gpio_pin` por câmera (análogo ao `pico_trigger_token`)
 
 ---
 
 ## 📖 Documentação Adicional
 
+- **[Specs técnicas](docs/specs/DESIGN_SPEC.md)** — Índice de lookup das specs especializadas
 - **[Fluxo Funcional Detalhado](docs/fluxo-funcional.md)** — Diagrama completo do sistema
-- **[Documentação Original](docs/README.md)** — Referência técnica completa
-- **[Resumo da Refatoração](REFACTORING_SUMMARY.md)** — Mudanças recentes na arquitetura
 
 ---
 
@@ -892,5 +938,5 @@ Em caso de problemas:
 
 ---
 
-**Última atualização:** 2026-02-13
-**Versão:** 2.3.1 (fallback dinâmico de logs na raiz do projeto)
+**Última atualização:** 2026-03-31
+**Versão:** 2.4.0 (multi-botão Pico por câmera + cooldown por câmera)

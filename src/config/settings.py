@@ -25,6 +25,7 @@ class CaptureConfig:
     max_buffer_seconds: int = 40
     pre_segments: Optional[int] = None
     post_segments: Optional[int] = None
+    pico_trigger_token: Optional[str] = None
 
     @property
     def max_segments(self) -> int:
@@ -70,6 +71,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
         url: str,
         camera_name: Optional[str],
         use_isolated_dirs: bool,
+        pico_trigger_token: Optional[str] = None,
     ) -> CaptureConfig:
         camera_suffix = Path(camera_id) if use_isolated_dirs else Path()
         return CaptureConfig(
@@ -89,6 +91,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
             max_buffer_seconds=40,
             pre_segments=pre_seg_cfg,
             post_segments=post_seg_cfg,
+            pico_trigger_token=pico_trigger_token,
         )
 
     if cameras_json:
@@ -104,12 +107,15 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                 continue
             camera_id = str(camera.get("id") or f"cam{idx:02d}").strip() or f"cam{idx:02d}"
             camera_name = camera.get("name")
+            raw_token = camera.get("pico_trigger_token")
+            pico_token = str(raw_token).strip() if raw_token else None
             configs.append(
                 _build_rtsp_cfg(
                     camera_id=camera_id,
                     url=rtsp_url,
                     camera_name=str(camera_name) if camera_name is not None else None,
                     use_isolated_dirs=use_isolated_dirs,
+                    pico_trigger_token=pico_token,
                 )
             )
         if configs:

@@ -16,9 +16,11 @@
 
 ## Concurrency rules
 
-- trigger faz fan-out para todas as câmeras ativas;
-- cada câmera possui `capture_lock` próprio;
-- um highlight novo não deve sobrepor outro em construção da mesma câmera.
+- trigger global (ENTER, GPIO, token Pico global) faz fan-out para câmeras sem `pico_trigger_token` dedicado;
+- se todas as câmeras tiverem token dedicado, o fan-out global continua disparando todas (modo de debug/fallback);
+- token Pico dedicado dispara apenas a câmera correspondente, não as demais;
+- cada câmera possui `capture_lock` próprio — um highlight novo não sobrepõe outro em construção da mesma câmera;
+- cooldown de trigger físico (GPIO/Pico) é por câmera via `_cooldown_until`; câmeras em cooldown são ignoradas individualmente sem bloquear as demais.
 
 ## Queue and retry rules
 
