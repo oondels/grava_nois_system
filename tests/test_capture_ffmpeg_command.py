@@ -109,6 +109,25 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertIn("-keyint_min", cmd)
         self.assertEqual(cmd[cmd.index("-keyint_min") + 1], "30")
 
+    def test_rtsp_fps_filter_when_configured(self) -> None:
+        """GN_RTSP_FPS applies -vf fps=N filter (leve, não re-encode pesado)."""
+        cmd = self._run_start(
+            env={
+                "GN_RTSP_REENCODE": "1",
+                "GN_RTSP_FPS": "15",
+            }
+        )
+
+        self.assertIn("-vf", cmd)
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "fps=15")
+        # fps filter must come before codec options
+        self.assertLess(cmd.index("-vf"), cmd.index("-c:v"))
+
+    def test_rtsp_fps_filter_not_when_empty(self) -> None:
+        """When GN_RTSP_FPS empty/unset, no fps filter."""
+        cmd = self._run_start(env={"GN_RTSP_REENCODE": "1"})
+        self.assertNotIn("-vf", cmd)
+
     def test_rtsp_no_wallclock_timestamps(self) -> None:
         """Wallclock timestamps cause jitter — must never be present."""
         for env in ({}, {"GN_RTSP_REENCODE": "1"}):

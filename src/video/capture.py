@@ -137,6 +137,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
         rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
         rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
+        rtsp_fps = os.getenv("GN_RTSP_FPS", "").strip()
 
         cmd = [
             "ffmpeg",
@@ -164,6 +165,11 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         ]
 
         if rtsp_reencode:
+            # Se GN_RTSP_FPS definido, aplica filtro fps leve antes do encoding.
+            # Exemplo: -vf fps=15 limita a 15fps sem re-encode pesado.
+            if rtsp_fps:
+                cmd += ["-vf", f"fps={rtsp_fps}"]
+
             cmd += [
                 "-c:v",
                 "libx264",
