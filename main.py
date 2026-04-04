@@ -99,16 +99,18 @@ def _trigger_single_camera(
     executor: ThreadPoolExecutor,
     trigger_id: str,
     cooldown_sec: float,
+    skip_cooldown: bool = False,
 ) -> None:
-    """Trigger a single camera respecting its per-camera cooldown."""
-    now = time.time()
-    if now < rt._cooldown_until:
-        remaining = int(rt._cooldown_until - now)
-        logger.info(
-            f"[{rt.cfg.camera_id}][{trigger_id}] cooldown ativo ({remaining}s restantes) – ignorado"
-        )
-        return
-    rt._cooldown_until = now + cooldown_sec
+    """Trigger a single camera respecting its per-camera cooldown (unless skip_cooldown=True)."""
+    if not skip_cooldown:
+        now = time.time()
+        if now < rt._cooldown_until:
+            remaining = int(rt._cooldown_until - now)
+            logger.info(
+                f"[{rt.cfg.camera_id}][{trigger_id}] cooldown ativo ({remaining}s restantes) – ignorado"
+            )
+            return
+        rt._cooldown_until = now + cooldown_sec
     _trigger_fan_out([rt], failed_dir_highlight, executor, trigger_id)
 
 
@@ -139,6 +141,7 @@ def main() -> int:
         return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
     light_mode = _env_bool("GN_LIGHT_MODE", False)
+    dev_mode = _env_bool("DEV", False)
 
     # Permite configurar seg_time via env GN_SEG_TIME
     def _env_int(name: str, default: int) -> int:
@@ -151,7 +154,10 @@ def main() -> int:
             return default
 
     seg_time_env = _env_int("GN_SEG_TIME", 1)
-    logger.info(f"Segmento de {seg_time_env}s, modo leve: {light_mode}")
+    mode_desc = f"modo leve: {light_mode}"
+    if dev_mode:
+        mode_desc += ", DEV=true (cooldown desativado)"
+    logger.info(f"Segmento de {seg_time_env}s, {mode_desc}")
 
     worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
     camera_cfgs = load_capture_configs(base=base, seg_time=seg_time_env)
@@ -245,7 +251,8 @@ def main() -> int:
                         f"[Pico] Token '{rt.cfg.pico_trigger_token}' → câmera '{rt.cfg.camera_id}' (dedicado)"
                     )
                     _trigger_single_camera(
-                        rt, failed_dir_highlight, trigger_executor, tid, gpio_cooldown_sec
+                        rt, failed_dir_highlight, trigger_executor, tid, gpio_cooldown_sec,
+                        skip_cooldown=dev_mode
                     )
                 return _handler
             token_map[_token.strip().upper()] = _make_handler(_rt)
@@ -446,22 +453,26 @@ def main() -> int:
                 continue
 
             # Cooldown por câmera para triggers físicos (gpio/pico global).
+            # Em DEV mode, ignora cooldown para acelerar testes.
             if trig in ("gpio", "pico"):
-                now = time.time()
-                _ready: list[CameraRuntime] = []
-                for rt in _fanout_runtimes:
-                    if now < rt._cooldown_until:
-                        remaining = int(rt._cooldown_until - now)
-                        logger.info(
-                            f"Trigger físico ({trig}) ignorado para {rt.cfg.camera_id}: "
-                            f"cooldown ativo ({remaining}s restantes)"
-                        )
-                    else:
-                        rt._cooldown_until = now + gpio_cooldown_sec
-                        _ready.append(rt)
-                if not _ready:
-                    continue
-                fanout_targets = _ready
+                if dev_mode:
+                    fanout_targets = _fanout_runtimes
+                else:
+                    now = time.time()
+                    _ready: list[CameraRuntime] = []
+                    for rt in _fanout_runtimes:
+                        if now < rt._cooldown_until:
+                            remaining = int(rt._cooldown_until - now)
+                            logger.info(
+                                f"Trigger físico ({trig}) ignorado para {rt.cfg.camera_id}: "
+                                f"cooldown ativo ({remaining}s restantes)"
+                            )
+                        else:
+                            rt._cooldown_until = now + gpio_cooldown_sec
+                            _ready.append(rt)
+                    if not _ready:
+                        continue
+                    fanout_targets = _ready
             else:
                 fanout_targets = _fanout_runtimes
 
