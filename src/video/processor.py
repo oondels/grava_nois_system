@@ -250,17 +250,21 @@ def add_image_watermark(
     crf: int = 20,
     preset: str = "medium",
     mobile_format: bool = True,
+    vertical_format: bool = False,
 ) -> None:
     """
-    Aplica marca d'água de imagem no central usando ffmpeg.
+    Aplica marca d'água de imagem no centro inferior usando ffmpeg.
 
     - Dimensiona a(s) marca(s) d'água para `rel_width * largura_do_vídeo`.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
-    - Se `mobile_format=True`: redimensiona vídeo para máx 720p (otimizado para celular).
+    - Se `mobile_format=True`: redimensiona para máx 720p horizontal ou 1280p vertical.
+    - Se `vertical_format=True`: recorta o centro do vídeo 16:9 para formato 9:16.
+    - Ambas as flags podem ser combinadas: resultado é 720×1280 (9:16 mobile).
     - Requer ffmpeg no PATH. Não requer MoviePy.
     """
     logger.info(
-        f"Adicionando marca d'água ao vídeo (mobile_format={mobile_format})..."
+        f"Adicionando marca d'água ao vídeo "
+        f"(mobile_format={mobile_format}, vertical_format={vertical_format})..."
     )
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
@@ -280,31 +284,60 @@ def add_image_watermark(
     if vw <= 0:
         raise RuntimeError("Não foi possível obter largura do vídeo via ffprobe.")
 
-    # Redimensiona para móvel se ativado (máx 720p)
-    input_video_label = "[0:v]"
-    scale_filter = None
-    if mobile_format and vh > 720:
-        logger.info(
-            f"Mobile format ativo: redimensionando {vw}x{vh} → máx 720p"
-        )
-        # Scale filter: manter aspect ratio, altura máx 720
-        input_video_label = "[v_scaled]"
-        scale_filter = f"[0:v]scale=-2:720[v_scaled]"
+    # Constrói cadeia de filtros de transformação de vídeo (crop e/ou scale).
+    # A ordem importa: crop sempre antes de scale.
+    video_filters: list[str] = []
 
-    # Largura alvo da(s) marca(s) d'água (em pixels)
-    # Se houver scale, usa a nova altura (720p) para calcular watermark
-    wm_w = max(1, int(vw * float(rel_width)))
-    if mobile_format and vh > 720:
-        # Recalcula para nova escala (720/vh = razão de escala)
-        scale_ratio = 720.0 / vh
-        wm_w = max(1, int(wm_w * scale_ratio))
+    if vertical_format:
+        # Recorta o centro do vídeo para proporção 9:16.
+        # crop=largura_alvo:altura:(x_offset):0
+        # largura_alvo = altura * 9/16 (mantém altura, corta laterais)
+        video_filters.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
+        logger.info(f"Vertical format ativo: crop 9:16 — {vw}x{vh}")
+
+    if mobile_format:
+        # Vertical + mobile → 720×1280 (9:16); só mobile → ≤720p horizontal.
+        target_h = 1280 if vertical_format else 720
+        # Aplica scale se a altura ainda estiver acima do alvo.
+        # Após crop 9:16, a "altura" do vídeo continua sendo vh; scale finaliza.
+        needs_scale = vertical_format or vh > target_h
+        if needs_scale:
+            video_filters.append(f"scale=-2:{target_h}")
+            logger.info(
+                f"Mobile format ativo: scale para altura ≤{target_h}p"
+            )
+
+    if video_filters:
+        transform = ",".join(video_filters)
+        input_video_label = "[v_transformed]"
+        transform_filter = f"[0:v]{transform}[v_transformed]"
+    else:
+        input_video_label = "[0:v]"
+        transform_filter = None
+
+    # Calcula largura efetiva do vídeo após as transformações,
+    # pois a watermark é dimensionada em relação à largura final.
+    if vertical_format and mobile_format:
+        # 720×1280 fixo (9:16 mobile)
+        vw_final = 720
+    elif vertical_format:
+        # Crop 9:16 sem scale: largura = altura * 9/16
+        vw_final = max(1, int(vh * 9 / 16))
+    elif mobile_format and vh > 720:
+        # Scale horizontal: mantém aspect ratio, altura = 720
+        vw_final = max(1, int(vw * 720 / vh))
+    else:
+        vw_final = vw
+
+    # Largura alvo da(s) marca(s) d'água baseada na largura final do vídeo
+    wm_w = max(1, int(vw_final * float(rel_width)))
     wm2_rel = rel_width if secondary_rel_width is None else secondary_rel_width
-    wm2_w = max(1, int(wm_w * float(wm2_rel)))
+    wm2_w = max(1, int(vw_final * float(wm2_rel)))
 
     # Filtro base: watermark principal centralizada no rodapé
     filt_parts = []
-    if scale_filter:
-        filt_parts.append(scale_filter)
+    if transform_filter:
+        filt_parts.append(transform_filter)
     filt_parts.append(
         f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm1]"
     )

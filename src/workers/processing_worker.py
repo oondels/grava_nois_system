@@ -316,9 +316,10 @@ class ProcessingWorker:
                 upload_target = out_mp4
             else:
                 wm_preset = (os.getenv("GN_WM_PRESET") or "veryfast").strip() or "veryfast"
-                # Mobile format: padrão ativo (True), reduz resolução para ≤720p
                 mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
                 mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
+                vertical_format_env = os.getenv("VERTICAL_FORMAT", "0").strip().lower()
+                vertical_format = vertical_format_env in {"1", "true", "yes", "y", "on"}
                 tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
                 add_image_watermark(
                     input_path=str(mp4),
@@ -336,6 +337,7 @@ class ProcessingWorker:
                     crf=20,
                     preset=wm_preset,
                     mobile_format=mobile_format,
+                    vertical_format=vertical_format,
                 )
                 tmp_out.replace(out_mp4)
 
@@ -350,6 +352,7 @@ class ProcessingWorker:
                             "preset": wm_preset,
                             "crf": 20,
                             "mobile_format": mobile_format,
+                            "vertical_format": vertical_format,
                         },
                     }
                 )
@@ -357,62 +360,72 @@ class ProcessingWorker:
                 upload_target = out_mp4
         else:
             # Modo leve: sem watermark/thumbnail.
-            # Aplica MOBILE_FORMAT (redimensionamento) se ativo, pois mesmo em
-            # modo leve o arquivo precisa chegar no tamanho certo para o celular.
+            # Aplica MOBILE_FORMAT e/ou VERTICAL_FORMAT se ativos.
             mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
             mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
+            vertical_format_env = os.getenv("VERTICAL_FORMAT", "0").strip().lower()
+            vertical_format = vertical_format_env in {"1", "true", "yes", "y", "on"}
             clip_meta = meta.get("meta") or ffprobe_metadata(mp4)
-            if mobile_format and int(clip_meta.get("height") or 0) > 720:
+            src_h = int(clip_meta.get("height") or 0)
+
+            # Monta a cadeia de filtros -vf (mesma lógica do modo completo)
+            vf_parts: list[str] = []
+            if vertical_format:
+                vf_parts.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
+            if mobile_format:
+                target_h = 1280 if vertical_format else 720
+                if vertical_format or src_h > target_h:
+                    vf_parts.append(f"scale=-2:{target_h}")
+
+            if vf_parts:
+                vf_str = ",".join(vf_parts)
+                labels = []
+                if vertical_format:
+                    labels.append("vertical")
+                if mobile_format:
+                    labels.append("mobile")
                 logger.info(
-                    f"[light] Mobile format ativo: redimensionando para 720p — {mp4.name}"
+                    f"[light] {'+'.join(labels)} format: aplicando '{vf_str}' — {mp4.name}"
                 )
-                scaled_mp4 = self.out_wm_dir / mp4.name
                 self.out_wm_dir.mkdir(parents=True, exist_ok=True)
-                tmp_scaled = self.out_wm_dir / f"{mp4.stem}.scaled_tmp.mp4"
+                out_transformed = self.out_wm_dir / mp4.name
+                tmp_transformed = self.out_wm_dir / f"{mp4.stem}.transform_tmp.mp4"
                 try:
                     subprocess.run(
                         [
                             "ffmpeg", "-nostdin", "-y",
                             "-i", str(mp4),
-                            "-vf", "scale=-2:720",
+                            "-vf", vf_str,
                             "-c:v", "libx264",
                             "-preset", "veryfast",
                             "-crf", "20",
                             "-c:a", "aac",
                             "-movflags", "+faststart",
-                            str(tmp_scaled),
+                            str(tmp_transformed),
                         ],
                         check=True,
                         capture_output=True,
                     )
-                    tmp_scaled.replace(scaled_mp4)
-                    upload_target = scaled_mp4
-                    logger.info(f"[light] Redimensionamento concluído: {scaled_mp4.name}")
+                    tmp_transformed.replace(out_transformed)
+                    upload_target = out_transformed
+                    logger.info(f"[light] Transformação concluída: {out_transformed.name}")
                 except Exception as exc:
                     logger.warning(
-                        f"[light] Falha ao redimensionar para mobile ({exc}); usando original"
+                        f"[light] Falha na transformação de vídeo ({exc}); usando original"
                     )
-                    if tmp_scaled.exists():
-                        tmp_scaled.unlink(missing_ok=True)
-                meta.update(
-                    {
-                        "status": "ready_for_upload",
-                        "attempts": attempts,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "meta_raw": clip_meta,
-                        "mobile_format": mobile_format,
-                    }
-                )
-            else:
-                meta.update(
-                    {
-                        "status": "ready_for_upload",
-                        "attempts": attempts,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "meta_raw": clip_meta,
-                        "mobile_format": mobile_format,
-                    }
-                )
+                    if tmp_transformed.exists():
+                        tmp_transformed.unlink(missing_ok=True)
+
+            meta.update(
+                {
+                    "status": "ready_for_upload",
+                    "attempts": attempts,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "meta_raw": clip_meta,
+                    "mobile_format": mobile_format,
+                    "vertical_format": vertical_format,
+                }
+            )
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
         # Faz verificação se esta em ambiente de desenvolvimento
