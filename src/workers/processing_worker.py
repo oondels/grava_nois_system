@@ -33,8 +33,8 @@ class ProcessingWorker:
         scan_interval: float = 1,  # varredura a cada 1
         max_attempts: int = 3,
         wm_margin: int = 24,
-        wm_opacity: float = 0.9,
-        wm_rel_width: float = 0.1,
+        wm_opacity: float = 0.8,
+        wm_rel_width: float = 0.18,
         light_mode: bool = True,  # Ativa o Light Mode (MVP)
         retry_failed: bool = True,
         retry_min_age_sec: float = 120.0,  # idade mínima do arquivo/sidecar p/ tentar de novo
@@ -318,7 +318,7 @@ class ProcessingWorker:
                 wm_preset = (os.getenv("GN_WM_PRESET") or "veryfast").strip() or "veryfast"
                 mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
                 mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
-                vertical_format_env = os.getenv("VERTICAL_FORMAT", "0").strip().lower()
+                vertical_format_env = os.getenv("VERTICAL_FORMAT", "1").strip().lower()
                 vertical_format = vertical_format_env in {"1", "true", "yes", "y", "on"}
                 tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
                 add_image_watermark(
@@ -363,7 +363,7 @@ class ProcessingWorker:
             # Aplica MOBILE_FORMAT e/ou VERTICAL_FORMAT se ativos.
             mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
             mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
-            vertical_format_env = os.getenv("VERTICAL_FORMAT", "0").strip().lower()
+            vertical_format_env = os.getenv("VERTICAL_FORMAT", "1").strip().lower()
             vertical_format = vertical_format_env in {"1", "true", "yes", "y", "on"}
             clip_meta = meta.get("meta") or ffprobe_metadata(mp4)
             src_h = int(clip_meta.get("height") or 0)
@@ -372,9 +372,10 @@ class ProcessingWorker:
             vf_parts: list[str] = []
             if vertical_format:
                 vf_parts.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
-            if mobile_format:
-                target_h = 1280 if vertical_format else 720
-                if vertical_format or src_h > target_h:
+                vf_parts.append("scale=1080:1920")
+            elif mobile_format:
+                target_h = 720
+                if src_h > target_h:
                     vf_parts.append(f"scale=-2:{target_h}")
 
             if vf_parts:
@@ -399,6 +400,7 @@ class ProcessingWorker:
                             "-c:v", "libx264",
                             "-preset", "veryfast",
                             "-crf", "20",
+                            "-pix_fmt", "yuv420p",
                             "-c:a", "aac",
                             "-movflags", "+faststart",
                             str(tmp_transformed),

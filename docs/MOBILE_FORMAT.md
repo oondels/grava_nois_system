@@ -2,7 +2,7 @@
 
 ## O que é
 
-`MOBILE_FORMAT` é uma flag que otimiza o formato do vídeo final para visualização em dispositivos móveis. Quando ativada, o vídeo é redimensionado para máximo de **720p** de altura, reduzindo significativamente o tamanho do arquivo sem comprometer a qualidade visual em celulares.
+`MOBILE_FORMAT` é uma flag que otimiza o formato do vídeo final para visualização em dispositivos móveis. No fluxo horizontal, ela limita a saída a **720p** de altura. No fluxo vertical (`VERTICAL_FORMAT=1`), o pipeline faz `crop 9:16` primeiro e entrega **1080x1920**, que é o formato-alvo para Reels/TikTok.
 
 ## Status Padrão
 
@@ -39,16 +39,19 @@ Qualquer outro valor (ou ausência) desativa:
 
 1. **Detecção de Resolução**
    - Lê metadados do vídeo capturado
-   - Se altura > 720p: redimensiona para 720p
+   - Se `VERTICAL_FORMAT=1`: recorta no centro para `9:16` e escala para `1080x1920`
+   - Caso contrário, se altura > 720p: redimensiona para 720p
    - Se altura ≤ 720p: mantém original
 
 2. **Redimensionamento**
-   - Escala: `scale=-2:720` (altura máx 720p, largura proporcional)
+   - Horizontal: `scale=-2:720` (altura máx 720p, largura proporcional)
+   - Vertical: `crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920`
    - Preserva aspect ratio
    - Aplica interpolação de qualidade
 
 3. **Resultado**
    - Exemplo: 1920x1080 → 1280x720 (~44% menor arquivo)
+   - Exemplo com `VERTICAL_FORMAT=1`: 1920x1080 → 1080x1920
    - Exemplo: 4K (3840x2160) → 1280x720 (~90% menor arquivo)
    - Qualidade visual preservada em telas de celular
 

@@ -194,8 +194,8 @@ def main() -> int:
         else default_client_wm_path
     )
     wm_margin = 24
-    wm_opacity = 0.9
-    wm_rel_width = 0.11
+    wm_opacity = 0.8
+    wm_rel_width = 0.18
     primary_runtime = runtimes[0]
     primary_cfg = primary_runtime.cfg
 

@@ -243,7 +243,7 @@ def add_image_watermark(
     output_path: str,
     secondary_watermark_path: Optional[str] = None,
     margin: int = 24,
-    opacity: float = 0.9,
+    opacity: float = 0.8,
     rel_width: float = 0.2,
     secondary_rel_width: Optional[float] = None,
     codec: str = "libx264",
@@ -253,13 +253,13 @@ def add_image_watermark(
     vertical_format: bool = False,
 ) -> None:
     """
-    Aplica marca d'água de imagem no centro inferior usando ffmpeg.
+    Aplica marca d'água de imagem usando ffmpeg.
 
     - Dimensiona a(s) marca(s) d'água para `rel_width * largura_do_vídeo`.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
-    - Se `mobile_format=True`: redimensiona para máx 720p horizontal ou 1280p vertical.
-    - Se `vertical_format=True`: recorta o centro do vídeo 16:9 para formato 9:16.
-    - Ambas as flags podem ser combinadas: resultado é 720×1280 (9:16 mobile).
+    - Se `mobile_format=True`: redimensiona para máx 720p horizontal.
+    - Se `vertical_format=True`: recorta o centro do vídeo para 9:16 e entrega 1080x1920.
+    - Em `vertical_format`, a marca d'água é posicionada no topo central dentro da safe zone.
     - Requer ffmpeg no PATH. Não requer MoviePy.
     """
     logger.info(
@@ -295,17 +295,14 @@ def add_image_watermark(
         video_filters.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
         logger.info(f"Vertical format ativo: crop 9:16 — {vw}x{vh}")
 
-    if mobile_format:
-        # Vertical + mobile → 720×1280 (9:16); só mobile → ≤720p horizontal.
-        target_h = 1280 if vertical_format else 720
-        # Aplica scale se a altura ainda estiver acima do alvo.
-        # Após crop 9:16, a "altura" do vídeo continua sendo vh; scale finaliza.
-        needs_scale = vertical_format or vh > target_h
-        if needs_scale:
+    if vertical_format:
+        video_filters.append("scale=1080:1920")
+        logger.info("Vertical format ativo: scale final para 1080x1920")
+    elif mobile_format:
+        target_h = 720
+        if vh > target_h:
             video_filters.append(f"scale=-2:{target_h}")
-            logger.info(
-                f"Mobile format ativo: scale para altura ≤{target_h}p"
-            )
+            logger.info(f"Mobile format ativo: scale para altura ≤{target_h}p")
 
     if video_filters:
         transform = ",".join(video_filters)
@@ -317,57 +314,64 @@ def add_image_watermark(
 
     # Calcula largura efetiva do vídeo após as transformações,
     # pois a watermark é dimensionada em relação à largura final.
-    if vertical_format and mobile_format:
-        # 720×1280 fixo (9:16 mobile)
-        vw_final = 720
-    elif vertical_format:
-        # Crop 9:16 sem scale: largura = altura * 9/16
-        vw_final = max(1, int(vh * 9 / 16))
+    if vertical_format:
+        vw_final = 1080
+        vh_final = 1920
     elif mobile_format and vh > 720:
         # Scale horizontal: mantém aspect ratio, altura = 720
         vw_final = max(1, int(vw * 720 / vh))
+        vh_final = 720
     else:
         vw_final = vw
+        vh_final = vh
 
     # Largura alvo da(s) marca(s) d'água baseada na largura final do vídeo
-    wm_w = max(1, int(vw_final * float(rel_width)))
-    wm2_rel = rel_width if secondary_rel_width is None else secondary_rel_width
-    wm2_w = max(1, int(vw_final * float(wm2_rel)))
+    primary_rel_width = min(0.2, float(rel_width))
+    secondary_base_rel = rel_width if secondary_rel_width is None else secondary_rel_width
+    secondary_rel = min(0.2, float(secondary_base_rel))
+    alpha = min(0.85, max(0.7, float(opacity)))
+    wm_w = max(1, int(vw_final * primary_rel_width))
+    wm2_w = max(1, int(vw_final * secondary_rel))
+    overlay_y = (
+        str(max(int(margin), int(vh_final * 0.08)))
+        if vertical_format
+        else f"main_h-overlay_h-{int(margin)}"
+    )
 
-    # Filtro base: watermark principal centralizada no rodapé
+    # Filtro base: watermark principal no topo central (vertical) ou rodapé (horizontal)
     filt_parts = []
     if transform_filter:
         filt_parts.append(transform_filter)
     filt_parts.append(
-        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm1]"
+        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm1]"
     )
 
-    # Se houver watermark secundária: logos lado a lado no centro inferior
+    # Se houver watermark secundária: logos lado a lado no mesmo eixo vertical
     final_video_label = "[v]"
     if secondary_wm_p is not None:
         pair_gap = max(8, int(margin) // 2)
         pair_total_w = int(wm_w) + int(wm2_w) + int(pair_gap)
         filt_parts.append(
-            f"[2:v]scale={wm2_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm2]"
+            f"[2:v]scale={wm2_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm2]"
         )
         filt_parts.append(
             (
                 f"{input_video_label}[wm1]overlay="
                 f"x=(main_w-{pair_total_w})/2:"
-                f"y=main_h-overlay_h-{int(margin)}[v1]"
+                f"y={overlay_y}[v1]"
             )
         )
         filt_parts.append(
             (
                 f"[v1][wm2]overlay="
                 f"x=(main_w-{pair_total_w})/2+{int(wm_w) + int(pair_gap)}:"
-                f"y=main_h-overlay_h-{int(margin)}[v]"
+                f"y={overlay_y}[v]"
             )
         )
     else:
         filt_parts.append(
             f"{input_video_label}[wm1]overlay="
-            f"x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(margin)}[v]"
+            f"x=(main_w-overlay_w)/2:y={overlay_y}[v]"
         )
 
     filt = ";".join(filt_parts)
@@ -397,10 +401,14 @@ def add_image_watermark(
         preset,
         "-crf",
         str(int(crf)),
+        "-pix_fmt",
+        "yuv420p",
         "-c:a",
         "aac",
         "-b:a",
         "96k",
+        "-movflags",
+        "+faststart",
         str(output_path),
         ]
     )

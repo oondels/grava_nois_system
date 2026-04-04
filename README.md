@@ -195,18 +195,20 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Aplica 2 marcas d'água no centro (logo Grava Nois + logo do cliente)
-2. Gera thumbnail (meio do vídeo)
-3. Registra metadados no backend → recebe `upload_url`
-4. Faz upload para URL assinada (S3/Supabase)
-5. Notifica backend sobre conclusão
-6. Remove arquivo da fila
+1. Recorta o clipe para `9:16` priorizando a zona central da ação e escala para `1080x1920`
+2. Aplica as marcas d'água depois do crop, no topo central dentro da safe zone
+3. Gera thumbnail (meio do vídeo)
+4. Registra metadados no backend → recebe `upload_url`
+5. Faz upload para URL assinada (S3/Supabase)
+6. Notifica backend sobre conclusão
+7. Remove arquivo da fila
 
 **Modo Leve (`GN_LIGHT_MODE=1`):**
-1. Registra metadados no backend → recebe `upload_url`
-2. Faz upload direto (sem marca d'água)
-3. Notifica backend sobre conclusão
-4. Remove arquivo da fila
+1. Recorta o clipe para `9:16` priorizando a zona central da ação e escala para `1080x1920`
+2. Registra metadados no backend → recebe `upload_url`
+3. Faz upload do arquivo transformado
+4. Notifica backend sobre conclusão
+5. Remove arquivo da fila
 
 **Modo DEV (`DEV=true`):**
 1. Executa processamento local normalmente (watermark no modo normal, ou fluxo leve)
@@ -423,11 +425,12 @@ Observações:
 #### Processamento
 
 ```bash
-GN_LIGHT_MODE=1                 # 0=normal (watermark), 1=leve (sem watermark)
+GN_LIGHT_MODE=1                 # 0=normal (com identidade visual), 1=leve (mantém crop 9:16 e pula watermark)
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_TRIGGER_MAX_WORKERS=2        # Vazio=auto (número de câmeras); define paralelismo do trigger
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
 GN_WM_PRESET=veryfast           # Preset ffmpeg no watermark (default: veryfast)
+VERTICAL_FORMAT=1               # Padrão: crop central 9:16 + saída 1080x1920
 ```
 
 #### Otimizacao de logos (opcional, recomendado)
