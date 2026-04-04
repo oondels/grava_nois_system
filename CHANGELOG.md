@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-04-04
+
+### Added
+- Variavel `GN_WM_REL_WIDTH` para ajustar o tamanho relativo das logos no watermark sem editar codigo.
+- Novo teste `tests/test_camera_watermark_integration.py` para validar captura real, highlight, crop vertical e geracao do mp4 final com watermark em modo `DEV`.
+
+### Changed
+- Fluxo vertical consolidado em `1080x1920`, com crop `9:16` antes do branding.
+- Testes de mobile/vertical atualizados para refletir a nova saida final do pipeline.
+- README e specs do edge atualizados com os novos controles de watermark e o fluxo de integracao real com camera.
+- Teste de integracao com camera passou a gravar artefatos em pasta persistente configuravel por `GN_CAMERA_INTEGRATION_OUTPUT_DIR`.
+
 ## 2026-03-05
 
 ### Added

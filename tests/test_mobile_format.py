@@ -204,21 +204,21 @@ class VerticalFormatTests(unittest.TestCase):
         cmd_str = self._run_watermark(vertical_format=False, mobile_format=False, meta=meta)
         self.assertNotIn("crop=ih*9/16", cmd_str)
 
-    def test_vertical_and_mobile_produce_720x1280(self) -> None:
-        """Vertical + mobile → scale=-2:1280 (720×1280 final)."""
+    def test_vertical_and_mobile_produce_1080x1920(self) -> None:
+        """Vertical + mobile -> crop central + scale=1080:1920."""
         meta = {"codec": "h264", "width": 1920, "height": 1080, "fps": 30.0, "duration_sec": 10.0}
         cmd_str = self._run_watermark(vertical_format=True, mobile_format=True, meta=meta)
         self.assertIn("crop=ih*9/16:ih:(iw-ih*9/16)/2:0", cmd_str)
-        self.assertIn("scale=-2:1280", cmd_str)
+        self.assertIn("scale=1080:1920", cmd_str)
         # crop deve vir antes do scale no filtro
-        self.assertLess(cmd_str.index("crop"), cmd_str.index("scale=-2:1280"))
+        self.assertLess(cmd_str.index("crop"), cmd_str.index("scale=1080:1920"))
 
-    def test_vertical_only_no_scale(self) -> None:
-        """Vertical sem mobile não adiciona scale."""
+    def test_vertical_only_still_scales_to_1080x1920(self) -> None:
+        """Vertical sempre finaliza em 1080x1920 antes do watermark."""
         meta = {"codec": "h264", "width": 1920, "height": 1080, "fps": 30.0, "duration_sec": 10.0}
         cmd_str = self._run_watermark(vertical_format=True, mobile_format=False, meta=meta)
         self.assertIn("crop=ih*9/16", cmd_str)
-        self.assertNotIn("scale=-2:1280", cmd_str)
+        self.assertIn("scale=1080:1920", cmd_str)
         self.assertNotIn("scale=-2:720", cmd_str)
 
     def test_mobile_only_no_crop(self) -> None:
@@ -272,7 +272,7 @@ class LightModeMobileFormatTests(unittest.TestCase):
             worker = self._make_worker(base)
             mp4 = self._place_mp4_with_sidecar(worker.queue_dir, "highlight_cam01_test.mp4", height=1080)
 
-            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "1"}):
+            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "1", "VERTICAL_FORMAT": "0"}):
                 worker._scan_once()
 
         # subprocess.run deve ter sido chamado com scale=-2:720
@@ -293,7 +293,7 @@ class LightModeMobileFormatTests(unittest.TestCase):
             worker = self._make_worker(base)
             mp4 = self._place_mp4_with_sidecar(worker.queue_dir, "highlight_cam01_test.mp4", height=1080)
 
-            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "0"}):
+            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "0", "VERTICAL_FORMAT": "0"}):
                 worker._scan_once()
 
         # ffmpeg NÃO deve ter sido chamado (sem scale)
@@ -311,7 +311,7 @@ class LightModeMobileFormatTests(unittest.TestCase):
             worker = self._make_worker(base)
             mp4 = self._place_mp4_with_sidecar(worker.queue_dir, "highlight_cam01_test.mp4", height=720)
 
-            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "1"}):
+            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "1", "VERTICAL_FORMAT": "0"}):
                 worker._scan_once()
 
         # ffmpeg NÃO deve ter sido chamado (vídeo já é 720p)
@@ -342,7 +342,7 @@ class LightModeMobileFormatTests(unittest.TestCase):
     @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 10.0})
     @patch("src.workers.processing_worker.subprocess.run")
     def test_light_mode_vertical_and_mobile_produce_crop_and_scale(self, mock_run, _ffprobe, mock_api_cls):
-        """Modo leve + VERTICAL_FORMAT=1 + MOBILE_FORMAT=1: crop + scale=-2:1280."""
+        """Modo leve + VERTICAL_FORMAT=1 + MOBILE_FORMAT=1: crop + scale=1080:1920."""
         mock_api_cls.return_value.is_configured.return_value = False
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -359,7 +359,7 @@ class LightModeMobileFormatTests(unittest.TestCase):
         vf_idx = cmd.index("-vf")
         vf_value = cmd[vf_idx + 1]
         self.assertIn("crop=ih*9/16", vf_value)
-        self.assertIn("scale=-2:1280", vf_value)
+        self.assertIn("scale=1080:1920", vf_value)
         # crop deve vir antes de scale
         self.assertLess(vf_value.index("crop"), vf_value.index("scale"))
 

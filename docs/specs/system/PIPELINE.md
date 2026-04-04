@@ -103,27 +103,29 @@ Campos típicos do sidecar:
 
 ### Normal mode
 
-1. gera watermark em `highlights_wm/`;
-2. atualiza sidecar com `meta_wm` e `wm_path`;
-3. registra metadados no backend;
-4. recebe `upload_url`;
-5. faz `PUT` do arquivo final;
-6. chama finalize;
-7. remove raw local da fila no sucesso.
+1. recorta o highlight para `9:16` no centro da ação e escala para `1080x1920`;
+2. aplica watermark em `highlights_wm/` após o crop;
+3. atualiza sidecar com `meta_wm` e `wm_path`;
+4. registra metadados no backend;
+5. recebe `upload_url`;
+6. faz `PUT` do arquivo final;
+7. chama finalize;
+8. remove raw local da fila no sucesso.
 
 ### Light mode
 
-1. marca sidecar como `ready_for_upload`;
-2. registra no backend;
-3. faz upload do arquivo original da fila;
-4. chama finalize.
+1. transforma o clipe para `9:16` e `1080x1920` quando `VERTICAL_FORMAT=1`;
+2. marca sidecar como `ready_for_upload`;
+3. registra no backend;
+4. faz upload do arquivo transformado da fila;
+5. chama finalize.
 
 ### DEV mode
 
 1. não chama backend;
 2. marca `remote_registration` como `skipped`;
-3. limpa fila local;
-4. preserva artefatos locais úteis.
+3. preserva artefatos locais úteis para inspeção;
+4. interrompe antes da limpeza final de fila/upload.
 
 ## 8. Retry and failed paths
 

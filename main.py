@@ -153,6 +153,15 @@ def main() -> int:
         except Exception:
             return default
 
+    def _env_float(name: str, default: float) -> float:
+        v = os.getenv(name)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except Exception:
+            return default
+
     seg_time_env = _env_int("GN_SEG_TIME", 1)
     mode_desc = f"modo leve: {light_mode}"
     if dev_mode:
@@ -193,9 +202,9 @@ def main() -> int:
         if optimized_client_wm_path.exists()
         else default_client_wm_path
     )
-    wm_margin = 24
-    wm_opacity = 0.8
-    wm_rel_width = 0.18
+    wm_margin = _env_int("GN_WM_MARGIN", 24)
+    wm_opacity = _env_float("GN_WM_OPACITY", 0.8)
+    wm_rel_width = _env_float("GN_WM_REL_WIDTH", 0.18)
     primary_runtime = runtimes[0]
     primary_cfg = primary_runtime.cfg
 

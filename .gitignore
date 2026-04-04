@@ -21,3 +21,4 @@ queue_raw/
 recorded_clips/
 highlights_wm/
 failed_clips/
+.pytest_cache/

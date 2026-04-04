@@ -104,14 +104,16 @@ O sistema usa o filesystem como fila, lock e trilha de auditoria local.
 
 ### Normal mode
 
-- watermark;
+- crop `9:16` e escala `1080x1920`;
+- watermark com safe zone e tamanho relativo configuravel por `GN_WM_REL_WIDTH`;
 - thumbnail;
 - register/upload/finalize.
 
 ### Light mode
 
 - sem watermark e sem thumbnail;
-- upload direto do raw highlight.
+- transforma para vertical quando `VERTICAL_FORMAT=1`;
+- upload direto do highlight transformado.
 
 ### DEV mode
 

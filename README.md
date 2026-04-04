@@ -430,8 +430,29 @@ GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_TRIGGER_MAX_WORKERS=2        # Vazio=auto (número de câmeras); define paralelismo do trigger
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
 GN_WM_PRESET=veryfast           # Preset ffmpeg no watermark (default: veryfast)
+GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
+GN_WM_OPACITY=0.8               # Opacidade alvo da logo (limitada internamente a 70-85%)
+GN_WM_MARGIN=24                 # Margem vertical da safe zone
 VERTICAL_FORMAT=1               # Padrão: crop central 9:16 + saída 1080x1920
+GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
+GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
+
+#### Teste real sem Docker
+
+Para gerar um `.mp4` final local usando a(s) camera(s) do `.env`, sem subir o projeto inteiro:
+
+```bash
+GN_RUN_CAMERA_INTEGRATION=1 \
+GN_WM_REL_WIDTH=0.19 \
+GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test \
+PYTHONPATH=. python -m unittest tests.test_camera_watermark_integration
+```
+
+Saida gerada:
+- `./artifacts/camera_watermark_test/highlights_wm/*.mp4`
+- `./artifacts/camera_watermark_test/queue_raw/`
+- `./artifacts/camera_watermark_test/recorded_clips/`
 
 #### Otimizacao de logos (opcional, recomendado)
 

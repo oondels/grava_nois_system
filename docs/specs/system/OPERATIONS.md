@@ -39,6 +39,8 @@ Testes visíveis:
 - `test_connection_logs.py`
 - `test_device_utils.py`
 - `test_dual_watermark_command.py`
+- `test_mobile_format.py`
+- `test_camera_watermark_integration.py`
 - `test_legacy_compatibility.py`
 - `test_multi_camera_settings.py`
 - `test_no_file_collisions.py`
@@ -55,7 +57,9 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - multi-camera;
 - montagem de comando FFmpeg;
 - fan-out e colisão de arquivos;
-- política de erro da API.
+- política de erro da API;
+- geracao real de mp4 final a partir da camera configurada, sem Docker, quando `GN_RUN_CAMERA_INTEGRATION=1`.
+- composição mobile/vertical do FFmpeg.
 
 ## Known operational caveats
 
@@ -87,3 +91,4 @@ Antes de alterar fluxos centrais do edge, valide:
 4. a política de erro da API continua distinguindo retry vs delete;
 5. o comportamento de multi-camera continua isolado por câmera;
 6. a spec especializada correspondente foi atualizada.
+7. `README.md` e `CHANGELOG.md` foram atualizados quando houve mudança de comportamento.
