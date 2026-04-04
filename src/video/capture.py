@@ -138,6 +138,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
         rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
         rtsp_fps = os.getenv("GN_RTSP_FPS", "").strip()
+        rtsp_use_wallclock = _env_bool("GN_RTSP_USE_WALLCLOCK", False)
 
         cmd = [
             "ffmpeg",
@@ -148,6 +149,18 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "tcp",
             "-rtsp_flags",
             "prefer_tcp",
+        ]
+
+        # Wallclock timestamps: ativa se GN_RTSP_USE_WALLCLOCK=1
+        # Útil para câmeras que geram timestamps não-monotônicos.
+        # Use com cuidado: pode causar jitter em redes instáveis.
+        if rtsp_use_wallclock:
+            cmd += [
+                "-use_wallclock_as_timestamps",
+                "1",
+            ]
+
+        cmd += [
             # +genpts: regenera PTS para frames sem timestamp.
             "-fflags",
             "+genpts",

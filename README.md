@@ -18,6 +18,7 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 - [Fluxo de Funcionamento](#fluxo-de-funcionamento)
 - [Estrutura de Diretórios](#estrutura-de-diretórios)
 - [Configuração](#configuração)
+- [Otimização de Captura RTSP](#otimização-de-captura-rtsp)
 - [Provisionamento WiFi (Hotspot)](#provisionamento-wifi-hotspot)
 - [GPIO (Botão Físico)](#gpio-botão-físico)
 - [Modo Leve (Light Mode)](#modo-leve-light-mode)
@@ -490,6 +491,31 @@ GN_VIDEO_SIZE=1280x720
 ```
 
 O código usará `/dev/video0` automaticamente.
+
+---
+
+## 🎬 Otimização de Captura RTSP
+
+Para câmeras RTSP, especialmente em redes WiFi instáveis, existem várias opções de tuning disponíveis. Consulte o guia completo em [`docs/RTSP_TUNING.md`](docs/RTSP_TUNING.md) para:
+
+- **Configuração de Re-encoding vs Passthrough** (`GN_RTSP_REENCODE`)
+- **Timestamps com Wallclock** (`GN_RTSP_USE_WALLCLOCK`) — útil para câmeras com DTS não-monotônicos
+- **Qualidade de Compressão** (`GN_RTSP_CRF`, `GN_RTSP_PRESET`)
+- **Limitação de Taxa de Frames** (`GN_RTSP_FPS`)
+- **Script de Teste Automático** (`./test_wallclock_quality.sh`)
+
+**Início rápido para câmeras problemáticas:**
+
+```bash
+# Tenta wallclock para resolver stutter em câmeras WiFi
+GN_RTSP_USE_WALLCLOCK=1 python main.py
+
+# Ou reduz taxa de frames para menos CPU
+GN_RTSP_FPS=15 python main.py
+
+# Ou combina ambas
+GN_RTSP_USE_WALLCLOCK=1 GN_RTSP_FPS=20 GN_RTSP_PRESET=ultrafast python main.py
+```
 
 ---
 

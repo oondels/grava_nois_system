@@ -32,7 +32,7 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
     # Vars controladas pelos testes — removidas do ambiente antes de aplicar env.
     _CONTROLLED_VARS = {
         "GN_RTSP_REENCODE", "GN_RTSP_FPS", "GN_RTSP_GOP",
-        "GN_RTSP_PRESET", "GN_RTSP_CRF", "GN_RTSP_VSYNC",
+        "GN_RTSP_PRESET", "GN_RTSP_CRF", "GN_RTSP_VSYNC", "GN_RTSP_USE_WALLCLOCK",
     }
 
     def _run_start(self, env: dict[str, str]) -> list[str]:
@@ -128,11 +128,19 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cmd = self._run_start(env={"GN_RTSP_REENCODE": "1"})
         self.assertNotIn("-vf", cmd)
 
-    def test_rtsp_no_wallclock_timestamps(self) -> None:
-        """Wallclock timestamps cause jitter — must never be present."""
+    def test_rtsp_no_wallclock_timestamps_by_default(self) -> None:
+        """Wallclock timestamps disabled by default — may cause jitter on unstable networks."""
         for env in ({}, {"GN_RTSP_REENCODE": "1"}):
             cmd = self._run_start(env=env)
             self.assertNotIn("-use_wallclock_as_timestamps", cmd)
+
+    def test_rtsp_wallclock_timestamps_when_enabled(self) -> None:
+        """GN_RTSP_USE_WALLCLOCK=1 enables wallclock timestamps for non-monotonic camera streams."""
+        cmd = self._run_start(env={"GN_RTSP_USE_WALLCLOCK": "1"})
+        self.assertIn("-use_wallclock_as_timestamps", cmd)
+        self.assertEqual(cmd[cmd.index("-use_wallclock_as_timestamps") + 1], "1")
+        # Must come before -i (input option)
+        self.assertLess(cmd.index("-use_wallclock_as_timestamps"), cmd.index("-i"))
 
     def test_rtsp_err_detect_ignore_err(self) -> None:
         """err_detect ignore_err forces decoder to reconstruct corrupt frames via error concealment."""
