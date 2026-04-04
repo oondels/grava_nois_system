@@ -31,9 +31,5 @@ services:
     # Para RTSP remoto, host network costuma simplificar no edge.
     network_mode: host # if pigpio daemon runs on host or strict LAN access is needed
 
-    # Para câmera local (/dev/video0), GPIO direto ou serial USB no container:
-    # devices:
-    #   - /dev/video0:/dev/video0
-    #   - /dev/gpiomem:/dev/gpiomem
-    #   - /dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00:/dev/serial/by-id/usb-Raspberry_Pi_Pico_XXXXXXXXXXXXXXXX-if00
-    # privileged: true
+    # Acesso privilegiado necessário para múltiplos dispositivos seriais (Pico/botões)
+    privileged: true
