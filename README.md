@@ -335,18 +335,17 @@ GN_SEG_TIME=1                   # Duração de cada segmento (padrão: 1s)
 GN_RTSP_PRE_SEGMENTS=6          # Segmentos antes do clique (padrão: 6)
 GN_RTSP_POST_SEGMENTS=3         # Segmentos depois do clique (padrão: 3)
 
-# Estabilidade de vídeo RTSP (anti-microcortes)
-GN_RTSP_PASSTHROUGH=0           # 0=padrão estável (reencode), 1=modo legado (copy)
-GN_RTSP_GOP=25                  # GOP para segmentação estável (quando reencode)
-GN_RTSP_PRESET=veryfast         # Preset x264 (quando reencode)
-GN_RTSP_CRF=23                  # Qualidade x264 (quando reencode)
-GN_RTSP_VSYNC=2                 # 2=vfr (menos frames duplicados), 1=cfr, 0=passthrough
+# Encoder RTSP
+GN_RTSP_REENCODE=0              # 0=passthrough/copy (padrão, menor CPU), 1=recodifica para CFR
+GN_RTSP_FPS=25                  # FPS da câmera (apenas com GN_RTSP_REENCODE=1)
+GN_RTSP_GOP=25                  # GOP para segmentação estável (apenas com GN_RTSP_REENCODE=1)
+GN_RTSP_PRESET=veryfast         # Preset x264 (apenas com GN_RTSP_REENCODE=1)
+GN_RTSP_CRF=23                  # Qualidade x264 (apenas com GN_RTSP_REENCODE=1)
 ```
 
 Observação:
-- Em RTSP, o modo padrão agora recodifica para reduzir problemas de `Non-monotonic DTS`.
-- Se precisar do comportamento antigo com menor uso de CPU, use `GN_RTSP_PASSTHROUGH=1`.
-- Se o vídeo parecer "esticado" ou com travadas longas, teste `GN_RTSP_VSYNC=2` (padrão) e `GN_RTSP_PRESET=ultrafast`.
+- O modo padrão é passthrough (`-c:v copy`), que preserva timestamps originais da câmera e evita stutter causado por jitter de rede.
+- Use `GN_RTSP_REENCODE=1` apenas se a câmera tiver timestamps instáveis ou precisar de GOP forçado.
 - Ordem de precedência da fonte RTSP: `GN_CAMERAS_JSON` > `GN_RTSP_URLS` > `GN_RTSP_URL`.
 
 #### Backend API

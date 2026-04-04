@@ -85,18 +85,17 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         for seg_path in valid_segments:
             f.write(f"file '{seg_path.resolve()}'\n")
 
-    tmp_ts = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.ts"
     out_mp4 = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.mp4"
     out_tmp_mp4 = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.tmp.mp4"
 
     try:
-        # concat TS -> TS (regen PTS)
+        # concat TS -> MP4 direto (preserva DTS para timing correto)
         subprocess.run(
             [
                 "ffmpeg",
                 "-nostdin",
                 "-fflags",
-                "+genpts+igndts",
+                "+genpts",
                 "-f",
                 "concat",
                 "-safe",
@@ -105,28 +104,12 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 str(concat_list_path),
                 "-c",
                 "copy",
-                str(tmp_ts),
-            ],
-            check=True,
-        )
-
-        # remux TS -> MP4 (copy) com PTS normalizado e base zerada
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-fflags",
-                "+genpts",
-                "-i",
-                str(tmp_ts),
-                "-c",
-                "copy",
-                "-bsf:a",
-                "aac_adtstoasc",
                 "-movflags",
                 "+faststart",
                 "-avoid_negative_ts",
                 "make_zero",
+                "-video_track_timescale",
+                "25000",
                 str(out_tmp_mp4),
             ],
             check=True,
@@ -141,11 +124,6 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         logger.exception(f"Falha ao construir highlight: {e}")
 
         # Move quaisquer saídas parciais para a pasta de falha
-        try:
-            if tmp_ts.exists():
-                tmp_ts.replace(fail_build_dir / tmp_ts.name)
-        except Exception:
-            pass
         try:
             if out_mp4.exists():
                 out_mp4.replace(fail_build_dir / out_mp4.name)
@@ -166,13 +144,6 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
             concat_list_path.unlink(missing_ok=True)
         except Exception:
             pass
-        # Deleta o arquivo .ts intermediário do disco
-        try:
-            if "tmp_ts" in locals() and tmp_ts.exists():
-                tmp_ts.unlink(missing_ok=True)
-                logger.debug(f"Arquivo temporário removido: {tmp_ts.name}")
-        except Exception as e:
-            logger.warning(f"Não foi possível remover o arquivo temporário .ts: {e}")
         try:
             if "out_tmp_mp4" in locals() and out_tmp_mp4.exists():
                 out_tmp_mp4.unlink(missing_ok=True)

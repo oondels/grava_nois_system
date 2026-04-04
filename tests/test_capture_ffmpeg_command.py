@@ -50,24 +50,8 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cmd = mock_popen.call_args.args[0]
         return list(cmd)
 
-    def test_rtsp_defaults_to_stable_reencode_mode(self) -> None:
+    def test_rtsp_defaults_to_passthrough_copy(self) -> None:
         cmd = self._run_start(env={})
-
-        self.assertIn("-c:v", cmd)
-        cidx = cmd.index("-c:v")
-        self.assertEqual(cmd[cidx + 1], "libx264")
-        self.assertIn("-force_key_frames", cmd)
-        self.assertIn("-vsync", cmd)
-        self.assertEqual(cmd[cmd.index("-vsync") + 1], "2")
-        self.assertIn("+genpts+discardcorrupt", cmd)
-        self.assertNotIn("nobuffer", cmd)
-        self.assertNotIn("low_delay", cmd)
-
-        ridx = cmd.index("-reset_timestamps")
-        self.assertEqual(cmd[ridx + 1], "1")
-
-    def test_rtsp_can_use_legacy_passthrough_mode(self) -> None:
-        cmd = self._run_start(env={"GN_RTSP_PASSTHROUGH": "1"})
 
         self.assertIn("-c:v", cmd)
         cidx = cmd.index("-c:v")
@@ -75,6 +59,23 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertNotIn("libx264", cmd)
         self.assertNotIn("-force_key_frames", cmd)
         self.assertNotIn("-vsync", cmd)
+        self.assertIn("+genpts+discardcorrupt", cmd)
+        self.assertIn("-break_non_keyframes", cmd)
+
+        ridx = cmd.index("-reset_timestamps")
+        self.assertEqual(cmd[ridx + 1], "1")
+
+    def test_rtsp_reencode_mode(self) -> None:
+        cmd = self._run_start(env={"GN_RTSP_REENCODE": "1"})
+
+        self.assertIn("-c:v", cmd)
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "libx264")
+        self.assertIn("-force_key_frames", cmd)
+        self.assertIn("-vsync", cmd)
+        self.assertEqual(cmd[cmd.index("-vsync") + 1], "cfr")
+        self.assertIn("-r", cmd)
+        self.assertEqual(cmd[cmd.index("-r") + 1], "25")
 
         ridx = cmd.index("-reset_timestamps")
         self.assertEqual(cmd[ridx + 1], "1")
@@ -82,10 +83,11 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
     def test_rtsp_reencode_respects_tuning_envs(self) -> None:
         cmd = self._run_start(
             env={
+                "GN_RTSP_REENCODE": "1",
                 "GN_RTSP_GOP": "30",
                 "GN_RTSP_CRF": "20",
                 "GN_RTSP_PRESET": "ultrafast",
-                "GN_RTSP_VSYNC": "1",
+                "GN_RTSP_FPS": "30",
             }
         )
 
@@ -97,8 +99,14 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-g") + 1], "30")
         self.assertIn("-keyint_min", cmd)
         self.assertEqual(cmd[cmd.index("-keyint_min") + 1], "30")
-        self.assertIn("-vsync", cmd)
-        self.assertEqual(cmd[cmd.index("-vsync") + 1], "1")
+        self.assertIn("-r", cmd)
+        self.assertEqual(cmd[cmd.index("-r") + 1], "30")
+
+    def test_rtsp_no_wallclock_timestamps(self) -> None:
+        """Wallclock timestamps cause jitter — must never be present."""
+        for env in ({}, {"GN_RTSP_REENCODE": "1"}):
+            cmd = self._run_start(env=env)
+            self.assertNotIn("-use_wallclock_as_timestamps", cmd)
 
 
 if __name__ == "__main__":

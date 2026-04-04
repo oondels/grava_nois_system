@@ -124,25 +124,16 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             )
 
     if use_rtsp:
-        # Para RTSP, priorizamos fluidez no highlight final:
-        # padrão com recodificação CFR-like e keyframes por segmento.
-        # Compatibilidade legada via GN_RTSP_PASSTHROUGH=1 (stream copy).
-        rtsp_passthrough = _env_bool("GN_RTSP_PASSTHROUGH", False)
+        # Modo padrão: passthrough (copy) — preserva timestamps originais da
+        # câmera, evita jitter de rede e é mais leve. A maioria das câmeras IP
+        # (inclusive Tapo C500) já entrega H.264 sem B-frames com PTS válidos.
+        # Fallback: GN_RTSP_REENCODE=1 recodifica para CFR (útil quando a
+        # câmera tem timestamps instáveis ou precisa de GOP forçado).
+        rtsp_reencode = _env_bool("GN_RTSP_REENCODE", False)
         rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
         rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
         rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
-        vsync_raw = (os.getenv("GN_RTSP_VSYNC", "2") or "2").strip().lower()
-        vsync_map = {
-            "passthrough": "0",
-            "0": "0",
-            "cfr": "1",
-            "1": "1",
-            "vfr": "2",
-            "2": "2",
-            "auto": "-1",
-            "-1": "-1",
-        }
-        rtsp_vsync = vsync_map.get(vsync_raw, "2")
+        rtsp_fps = os.getenv("GN_RTSP_FPS", "25").strip()
 
         cmd = [
             "ffmpeg",
@@ -153,10 +144,16 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "tcp",
             "-rtsp_flags",
             "prefer_tcp",
-            "-use_wallclock_as_timestamps",
-            "1",
             "-fflags",
             "+genpts+discardcorrupt",
+            "-analyzeduration",
+            "2000000",
+            "-probesize",
+            "2000000",
+            "-buffer_size",
+            "2097152",
+            "-max_delay",
+            "500000",
             "-i",
             rtsp_url,
             "-map",
@@ -164,19 +161,12 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "-an",
         ]
 
-        if rtsp_passthrough:
-            cmd += [
-                "-c:v",
-                "copy",
-            ]
-        else:
+        if rtsp_reencode:
             cmd += [
                 "-c:v",
                 "libx264",
                 "-preset",
                 rtsp_preset,
-                "-tune",
-                "zerolatency",
                 "-crf",
                 str(rtsp_crf),
                 "-pix_fmt",
@@ -190,7 +180,14 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
                 "-force_key_frames",
                 f"expr:gte(t,n_forced*{cfg.seg_time})",
                 "-vsync",
-                rtsp_vsync,
+                "cfr",
+                "-r",
+                rtsp_fps,
+            ]
+        else:
+            cmd += [
+                "-c:v",
+                "copy",
             ]
 
         cmd += [
@@ -200,6 +197,8 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "mpegts",
             "-segment_time",
             str(cfg.seg_time),
+            "-break_non_keyframes",
+            "1",
             "-segment_start_number",
             str(start_num),
             "-reset_timestamps",
