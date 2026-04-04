@@ -249,15 +249,19 @@ def add_image_watermark(
     codec: str = "libx264",
     crf: int = 20,
     preset: str = "medium",
+    mobile_format: bool = True,
 ) -> None:
     """
     Aplica marca d'água de imagem no central usando ffmpeg.
 
     - Dimensiona a(s) marca(s) d'água para `rel_width * largura_do_vídeo`.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
+    - Se `mobile_format=True`: redimensiona vídeo para máx 720p (otimizado para celular).
     - Requer ffmpeg no PATH. Não requer MoviePy.
     """
-    logger.info("Adicionando marca d'água ao vídeo...")
+    logger.info(
+        f"Adicionando marca d'água ao vídeo (mobile_format={mobile_format})..."
+    )
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
     secondary_wm_p = Path(secondary_watermark_path) if secondary_watermark_path else None
@@ -272,18 +276,38 @@ def add_image_watermark(
 
     meta = ffprobe_metadata(in_p)
     vw = int(meta.get("width") or 0)
+    vh = int(meta.get("height") or 0)
     if vw <= 0:
         raise RuntimeError("Não foi possível obter largura do vídeo via ffprobe.")
 
+    # Redimensiona para móvel se ativado (máx 720p)
+    input_video_label = "[0:v]"
+    scale_filter = None
+    if mobile_format and vh > 720:
+        logger.info(
+            f"Mobile format ativo: redimensionando {vw}x{vh} → máx 720p"
+        )
+        # Scale filter: manter aspect ratio, altura máx 720
+        input_video_label = "[v_scaled]"
+        scale_filter = f"[0:v]scale=-2:720[v_scaled]"
+
     # Largura alvo da(s) marca(s) d'água (em pixels)
+    # Se houver scale, usa a nova altura (720p) para calcular watermark
     wm_w = max(1, int(vw * float(rel_width)))
+    if mobile_format and vh > 720:
+        # Recalcula para nova escala (720/vh = razão de escala)
+        scale_ratio = 720.0 / vh
+        wm_w = max(1, int(wm_w * scale_ratio))
     wm2_rel = rel_width if secondary_rel_width is None else secondary_rel_width
-    wm2_w = max(1, int(vw * float(wm2_rel)))
+    wm2_w = max(1, int(wm_w * float(wm2_rel)))
 
     # Filtro base: watermark principal centralizada no rodapé
-    filt_parts = [
-        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm1]",
-    ]
+    filt_parts = []
+    if scale_filter:
+        filt_parts.append(scale_filter)
+    filt_parts.append(
+        f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={float(opacity):.3f}[wm1]"
+    )
 
     # Se houver watermark secundária: logos lado a lado no centro inferior
     final_video_label = "[v]"
@@ -295,7 +319,7 @@ def add_image_watermark(
         )
         filt_parts.append(
             (
-                f"[0:v][wm1]overlay="
+                f"{input_video_label}[wm1]overlay="
                 f"x=(main_w-{pair_total_w})/2:"
                 f"y=main_h-overlay_h-{int(margin)}[v1]"
             )
@@ -309,7 +333,7 @@ def add_image_watermark(
         )
     else:
         filt_parts.append(
-            f"[0:v][wm1]overlay="
+            f"{input_video_label}[wm1]overlay="
             f"x=(main_w-overlay_w)/2:y=main_h-overlay_h-{int(margin)}[v]"
         )
 

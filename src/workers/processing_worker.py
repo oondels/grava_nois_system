@@ -315,6 +315,9 @@ class ProcessingWorker:
                 upload_target = out_mp4
             else:
                 wm_preset = (os.getenv("GN_WM_PRESET") or "veryfast").strip() or "veryfast"
+                # Mobile format: padrão ativo (True), reduz resolução para ≤720p
+                mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
+                mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
                 tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
                 add_image_watermark(
                     input_path=str(mp4),
@@ -331,6 +334,7 @@ class ProcessingWorker:
                     codec="libx264",
                     crf=20,
                     preset=wm_preset,
+                    mobile_format=mobile_format,
                 )
                 tmp_out.replace(out_mp4)
 
@@ -341,7 +345,11 @@ class ProcessingWorker:
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "wm_path": str(out_mp4),
                         "meta_wm": ffprobe_metadata(out_mp4),
-                        "wm_encode": {"preset": wm_preset, "crf": 20},
+                        "wm_encode": {
+                            "preset": wm_preset,
+                            "crf": 20,
+                            "mobile_format": mobile_format,
+                        },
                     }
                 )
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
