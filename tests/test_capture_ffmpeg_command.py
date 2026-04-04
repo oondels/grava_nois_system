@@ -29,6 +29,12 @@ def _make_rtsp_cfg(base: Path) -> CaptureConfig:
 
 
 class CaptureFfmpegCommandTests(unittest.TestCase):
+    # Vars controladas pelos testes — removidas do ambiente antes de aplicar env.
+    _CONTROLLED_VARS = {
+        "GN_RTSP_REENCODE", "GN_RTSP_FPS", "GN_RTSP_GOP",
+        "GN_RTSP_PRESET", "GN_RTSP_CRF", "GN_RTSP_VSYNC",
+    }
+
     def _run_start(self, env: dict[str, str]) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -37,10 +43,14 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
             fake_proc = MagicMock()
             fake_proc.poll.return_value = None
 
-            effective_env = {"GN_LOG_DIR": str(base / "logs"), "GN_FFMPEG_STARTUP_CHECK_SEC": "0.1"}
-            effective_env.update(env)
+            # Remove vars controladas do ambiente base para que apenas
+            # o que for passado em env (ou os defaults do código) seja usado.
+            clean_env = {k: v for k, v in os.environ.items() if k not in self._CONTROLLED_VARS}
+            clean_env["GN_LOG_DIR"] = str(base / "logs")
+            clean_env["GN_FFMPEG_STARTUP_CHECK_SEC"] = "0.1"
+            clean_env.update(env)
 
-            with patch.dict(os.environ, effective_env, clear=False), \
+            with patch.dict(os.environ, clean_env, clear=True), \
                  patch("src.video.capture.check_rtsp_connectivity", return_value=True), \
                  patch("src.video.capture.time.sleep"), \
                  patch("src.video.capture.subprocess.Popen", return_value=fake_proc) as mock_popen:
@@ -50,8 +60,22 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cmd = mock_popen.call_args.args[0]
         return list(cmd)
 
-    def test_rtsp_defaults_to_passthrough_copy(self) -> None:
+    def test_rtsp_defaults_to_reencode_cfr(self) -> None:
         cmd = self._run_start(env={})
+
+        self.assertIn("-c:v", cmd)
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "libx264")
+        self.assertIn("-force_key_frames", cmd)
+        self.assertIn("-vsync", cmd)
+        self.assertEqual(cmd[cmd.index("-vsync") + 1], "cfr")
+        self.assertIn("+genpts+discardcorrupt", cmd)
+
+        ridx = cmd.index("-reset_timestamps")
+        self.assertEqual(cmd[ridx + 1], "1")
+
+    def test_rtsp_passthrough_copy_when_reencode_disabled(self) -> None:
+        cmd = self._run_start(env={"GN_RTSP_REENCODE": "0"})
 
         self.assertIn("-c:v", cmd)
         cidx = cmd.index("-c:v")
@@ -59,7 +83,6 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertNotIn("libx264", cmd)
         self.assertNotIn("-force_key_frames", cmd)
         self.assertNotIn("-vsync", cmd)
-        self.assertIn("+genpts+discardcorrupt", cmd)
         self.assertIn("-break_non_keyframes", cmd)
 
         ridx = cmd.index("-reset_timestamps")

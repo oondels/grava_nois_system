@@ -336,7 +336,7 @@ GN_RTSP_PRE_SEGMENTS=6          # Segmentos antes do clique (padrão: 6)
 GN_RTSP_POST_SEGMENTS=3         # Segmentos depois do clique (padrão: 3)
 
 # Encoder RTSP
-GN_RTSP_REENCODE=0              # 0=passthrough/copy (padrão, menor CPU), 1=recodifica para CFR
+GN_RTSP_REENCODE=1              # 1=recodifica para CFR (padrão, necessário para DTS não-monotônico), 0=passthrough/copy
 GN_RTSP_FPS=25                  # FPS da câmera (apenas com GN_RTSP_REENCODE=1)
 GN_RTSP_GOP=25                  # GOP para segmentação estável (apenas com GN_RTSP_REENCODE=1)
 GN_RTSP_PRESET=veryfast         # Preset x264 (apenas com GN_RTSP_REENCODE=1)
@@ -344,8 +344,8 @@ GN_RTSP_CRF=23                  # Qualidade x264 (apenas com GN_RTSP_REENCODE=1)
 ```
 
 Observação:
-- O modo padrão é passthrough (`-c:v copy`), que preserva timestamps originais da câmera e evita stutter causado por jitter de rede.
-- Use `GN_RTSP_REENCODE=1` apenas se a câmera tiver timestamps instáveis ou precisar de GOP forçado.
+- O modo padrão é re-encode CFR (`-vsync cfr`), necessário para câmeras com DTS não-monotônico (ex: Tapo C500). Garante segmentos de duração exata e concatenação sem falhas.
+- Use `GN_RTSP_REENCODE=0` apenas para câmeras com DTS estável (passthrough sem re-encode).
 - Ordem de precedência da fonte RTSP: `GN_CAMERAS_JSON` > `GN_RTSP_URLS` > `GN_RTSP_URL`.
 
 #### Backend API

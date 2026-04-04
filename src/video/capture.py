@@ -124,12 +124,12 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             )
 
     if use_rtsp:
-        # Modo padrão: passthrough (copy) — preserva timestamps originais da
-        # câmera, evita jitter de rede e é mais leve. A maioria das câmeras IP
-        # (inclusive Tapo C500) já entrega H.264 sem B-frames com PTS válidos.
-        # Fallback: GN_RTSP_REENCODE=1 recodifica para CFR (útil quando a
-        # câmera tem timestamps instáveis ou precisa de GOP forçado).
-        rtsp_reencode = _env_bool("GN_RTSP_REENCODE", False)
+        # Modo padrão: re-encode para CFR — necessário para câmeras com DTS
+        # não-monotônico (ex: Tapo C500), garantindo segmentos de duração
+        # exata e concatenação sem falhas.
+        # Alternativa: GN_RTSP_REENCODE=0 usa passthrough (copy), apenas para
+        # câmeras com DTS estável e timestamps confiáveis.
+        rtsp_reencode = _env_bool("GN_RTSP_REENCODE", True)
         rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
         rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
         rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
