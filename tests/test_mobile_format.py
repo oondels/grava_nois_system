@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from src.video.processor import add_image_watermark
+from src.workers.processing_worker import ProcessingWorker
 
 
 class MobileFormatTests(unittest.TestCase):
@@ -161,6 +163,95 @@ class MobileFormatTests(unittest.TestCase):
 
                 # NÃO deve conter scale filter (vídeo já é 720p)
                 self.assertNotIn("scale=-2:720", cmd_str)
+
+
+class LightModeMobileFormatTests(unittest.TestCase):
+    """Testa que MOBILE_FORMAT é aplicado em modo leve (GN_LIGHT_MODE=1)."""
+
+    def _make_worker(self, base: Path) -> ProcessingWorker:
+        return ProcessingWorker(
+            queue_dir=base / "queue_raw",
+            out_wm_dir=base / "highlights_wm",
+            failed_dir_highlight=base / "failed_clips",
+            watermark_path=Path("/dev/null"),
+            scan_interval=0,
+            light_mode=True,
+            retry_failed=False,
+        )
+
+    def _place_mp4_with_sidecar(self, queue: Path, name: str, height: int = 1080) -> Path:
+        queue.mkdir(parents=True, exist_ok=True)
+        mp4 = queue / name
+        mp4.write_bytes(b"\x00" * 64)
+        meta = {
+            "type": "highlight_raw",
+            "file_name": name,
+            "size_bytes": 64,
+            "sha256": None,
+            "status": "queued",
+            "attempts": 0,
+            "meta": {"width": 1920, "height": height, "fps": 30.0, "duration_sec": 10.0},
+        }
+        (queue / f"{mp4.stem}.json").write_text(json.dumps(meta))
+        return mp4
+
+    @patch("src.workers.processing_worker.GravaNoisAPIClient")
+    @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 10.0})
+    @patch("src.workers.processing_worker.subprocess.run")
+    def test_light_mode_applies_mobile_format_when_enabled(self, mock_run, _ffprobe, mock_api_cls):
+        """Em modo leve + MOBILE_FORMAT=1 + vídeo 1080p: ffmpeg scale é chamado."""
+        mock_api_cls.return_value.is_configured.return_value = False
+        mock_run.return_value = MagicMock(returncode=0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker = self._make_worker(base)
+            mp4 = self._place_mp4_with_sidecar(worker.queue_dir, "highlight_cam01_test.mp4", height=1080)
+
+            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "1"}):
+                worker._scan_once()
+
+        # subprocess.run deve ter sido chamado com scale=-2:720
+        self.assertTrue(mock_run.called, "ffmpeg deve ser chamado para redimensionar")
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("-vf", cmd)
+        self.assertIn("scale=-2:720", cmd)
+
+    @patch("src.workers.processing_worker.GravaNoisAPIClient")
+    @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 10.0})
+    @patch("src.workers.processing_worker.subprocess.run")
+    def test_light_mode_skips_mobile_format_when_disabled(self, mock_run, _ffprobe, mock_api_cls):
+        """Em modo leve + MOBILE_FORMAT=0: ffmpeg NÃO é chamado para scale."""
+        mock_api_cls.return_value.is_configured.return_value = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker = self._make_worker(base)
+            mp4 = self._place_mp4_with_sidecar(worker.queue_dir, "highlight_cam01_test.mp4", height=1080)
+
+            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "0"}):
+                worker._scan_once()
+
+        # ffmpeg NÃO deve ter sido chamado (sem scale)
+        self.assertFalse(mock_run.called, "ffmpeg não deve ser chamado quando MOBILE_FORMAT=0")
+
+    @patch("src.workers.processing_worker.GravaNoisAPIClient")
+    @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 10.0})
+    @patch("src.workers.processing_worker.subprocess.run")
+    def test_light_mode_skips_mobile_format_if_already_720p(self, mock_run, _ffprobe, mock_api_cls):
+        """Em modo leve + MOBILE_FORMAT=1 + vídeo 720p: NÃO redimensiona."""
+        mock_api_cls.return_value.is_configured.return_value = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker = self._make_worker(base)
+            mp4 = self._place_mp4_with_sidecar(worker.queue_dir, "highlight_cam01_test.mp4", height=720)
+
+            with patch.dict(os.environ, {"DEV": "true", "MOBILE_FORMAT": "1"}):
+                worker._scan_once()
+
+        # ffmpeg NÃO deve ter sido chamado (vídeo já é 720p)
+        self.assertFalse(mock_run.called, "ffmpeg não deve ser chamado quando vídeo já é 720p")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import threading
 import time
 import traceback
@@ -355,15 +356,63 @@ class ProcessingWorker:
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
                 upload_target = out_mp4
         else:
-            # Modo leve: sem watermark/thumbnail — upload do arquivo da fila
-            meta.update(
-                {
-                    "status": "ready_for_upload",
-                    "attempts": attempts,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "meta_raw": meta.get("meta") or ffprobe_metadata(mp4),
-                }
-            )
+            # Modo leve: sem watermark/thumbnail.
+            # Aplica MOBILE_FORMAT (redimensionamento) se ativo, pois mesmo em
+            # modo leve o arquivo precisa chegar no tamanho certo para o celular.
+            mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
+            mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
+            clip_meta = meta.get("meta") or ffprobe_metadata(mp4)
+            if mobile_format and int(clip_meta.get("height") or 0) > 720:
+                logger.info(
+                    f"[light] Mobile format ativo: redimensionando para 720p — {mp4.name}"
+                )
+                scaled_mp4 = self.out_wm_dir / mp4.name
+                self.out_wm_dir.mkdir(parents=True, exist_ok=True)
+                tmp_scaled = self.out_wm_dir / f"{mp4.stem}.scaled_tmp.mp4"
+                try:
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-nostdin", "-y",
+                            "-i", str(mp4),
+                            "-vf", "scale=-2:720",
+                            "-c:v", "libx264",
+                            "-preset", "veryfast",
+                            "-crf", "20",
+                            "-c:a", "aac",
+                            "-movflags", "+faststart",
+                            str(tmp_scaled),
+                        ],
+                        check=True,
+                        capture_output=True,
+                    )
+                    tmp_scaled.replace(scaled_mp4)
+                    upload_target = scaled_mp4
+                    logger.info(f"[light] Redimensionamento concluído: {scaled_mp4.name}")
+                except Exception as exc:
+                    logger.warning(
+                        f"[light] Falha ao redimensionar para mobile ({exc}); usando original"
+                    )
+                    if tmp_scaled.exists():
+                        tmp_scaled.unlink(missing_ok=True)
+                meta.update(
+                    {
+                        "status": "ready_for_upload",
+                        "attempts": attempts,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "meta_raw": clip_meta,
+                        "mobile_format": mobile_format,
+                    }
+                )
+            else:
+                meta.update(
+                    {
+                        "status": "ready_for_upload",
+                        "attempts": attempts,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "meta_raw": clip_meta,
+                        "mobile_format": mobile_format,
+                    }
+                )
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
         # Faz verificação se esta em ambiente de desenvolvimento
