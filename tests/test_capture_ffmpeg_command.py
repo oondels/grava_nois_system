@@ -60,16 +60,19 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cmd = mock_popen.call_args.args[0]
         return list(cmd)
 
-    def test_rtsp_defaults_to_reencode_cfr(self) -> None:
+    def test_rtsp_defaults_to_reencode_vfr(self) -> None:
         cmd = self._run_start(env={})
 
         self.assertIn("-c:v", cmd)
         cidx = cmd.index("-c:v")
         self.assertEqual(cmd[cidx + 1], "libx264")
         self.assertIn("-force_key_frames", cmd)
-        self.assertIn("-vsync", cmd)
-        self.assertEqual(cmd[cmd.index("-vsync") + 1], "cfr")
-        self.assertIn("+genpts+discardcorrupt", cmd)
+        self.assertIn("-fps_mode", cmd)
+        self.assertEqual(cmd[cmd.index("-fps_mode") + 1], "vfr")
+        # discardcorrupt removed — causes static video when combined with frame duplication
+        self.assertNotIn("discardcorrupt", " ".join(cmd))
+        # break_non_keyframes removed — not needed with forced keyframes on re-encode
+        self.assertNotIn("-break_non_keyframes", cmd)
 
         ridx = cmd.index("-reset_timestamps")
         self.assertEqual(cmd[ridx + 1], "1")
@@ -82,23 +85,7 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cidx + 1], "copy")
         self.assertNotIn("libx264", cmd)
         self.assertNotIn("-force_key_frames", cmd)
-        self.assertNotIn("-vsync", cmd)
-        self.assertIn("-break_non_keyframes", cmd)
-
-        ridx = cmd.index("-reset_timestamps")
-        self.assertEqual(cmd[ridx + 1], "1")
-
-    def test_rtsp_reencode_mode(self) -> None:
-        cmd = self._run_start(env={"GN_RTSP_REENCODE": "1"})
-
-        self.assertIn("-c:v", cmd)
-        cidx = cmd.index("-c:v")
-        self.assertEqual(cmd[cidx + 1], "libx264")
-        self.assertIn("-force_key_frames", cmd)
-        self.assertIn("-vsync", cmd)
-        self.assertEqual(cmd[cmd.index("-vsync") + 1], "cfr")
-        self.assertIn("-r", cmd)
-        self.assertEqual(cmd[cmd.index("-r") + 1], "25")
+        self.assertNotIn("-fps_mode", cmd)
 
         ridx = cmd.index("-reset_timestamps")
         self.assertEqual(cmd[ridx + 1], "1")
@@ -110,7 +97,6 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
                 "GN_RTSP_GOP": "30",
                 "GN_RTSP_CRF": "20",
                 "GN_RTSP_PRESET": "ultrafast",
-                "GN_RTSP_FPS": "30",
             }
         )
 
@@ -122,14 +108,20 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-g") + 1], "30")
         self.assertIn("-keyint_min", cmd)
         self.assertEqual(cmd[cmd.index("-keyint_min") + 1], "30")
-        self.assertIn("-r", cmd)
-        self.assertEqual(cmd[cmd.index("-r") + 1], "30")
 
     def test_rtsp_no_wallclock_timestamps(self) -> None:
         """Wallclock timestamps cause jitter — must never be present."""
         for env in ({}, {"GN_RTSP_REENCODE": "1"}):
             cmd = self._run_start(env=env)
             self.assertNotIn("-use_wallclock_as_timestamps", cmd)
+
+    def test_rtsp_no_frame_duplication_flags(self) -> None:
+        """discardcorrupt + CFR causes static video — neither should be present in default mode."""
+        cmd = self._run_start(env={})
+        self.assertNotIn("discardcorrupt", " ".join(cmd))
+        # CFR forcing removed; VFR used instead to avoid frame duplication
+        if "-fps_mode" in cmd:
+            self.assertNotEqual(cmd[cmd.index("-fps_mode") + 1], "cfr")
 
 
 if __name__ == "__main__":
