@@ -1,0 +1,36 @@
+services:
+  grava_nois_system:
+    build: .
+    # image: ${GRAVA_NOIS_SYSTEM_IMAGE:-oondels/gravanois-system:latest}
+    #pull_policy: always
+    container_name: grava_nois_system
+    restart: unless-stopped
+    stdin_open: true # Mantém stdin aberto para trigger via Enter
+    tty: true
+    env_file:
+      - .env
+    working_dir: /usr/src/app
+    shm_size: 512m
+
+    # Health check: verifica se FFmpeg está rodando corretamente
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f ffmpeg || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Aguarda 60s antes de começar health checks (tempo para câmera inicializar)
+
+    volumes:
+      - ./.env:/usr/src/app/.env:ro
+      - ./files:/usr/src/app/files:ro
+      - ./recorded_clips:/usr/src/app/recorded_clips
+      - ./queue_raw:/usr/src/app/queue_raw
+      - ./highlights_wm:/usr/src/app/highlights_wm
+      - ./failed_clips:/usr/src/app/failed_clips
+      - ./logs:/usr/src/app/logs  # Diretório para logs
+
+    # Para RTSP remoto, host network costuma simplificar no edge.
+    network_mode: host # if pigpio daemon runs on host or strict LAN access is needed
+
+    # Acesso privilegiado necessário para múltiplos dispositivos seriais (Pico/botões)
+    privileged: true

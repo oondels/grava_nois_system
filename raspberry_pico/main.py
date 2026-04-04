@@ -2,7 +2,7 @@ import sys
 from machine import Pin
 import time
 
-TRIGGER_TOKEN = "BTN_REPLAY"
+TRIGGER_TOKEN = "TRIGGER_DEFINIR"
 button = Pin(15, Pin.IN, Pin.PULL_UP)
 
 last_state = 1

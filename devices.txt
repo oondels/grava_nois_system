@@ -1,0 +1,10 @@
+## Liva
+- Modelo: ULTRATOP Liva Mini PC
+- OS: Ubuntu Linux (Kernel 6.8.0-101-generic)
+- CPU: Intel Celeron N2808 (x86_64, 2 Cores/2 Threads, 1.58GHz base, 2.24GHz max)
+- RAM: 2GB DDR3 (1.8Gi disponível, c/ 2GB Swap)
+- Armazenamento: 32GB eMMC (29.1G total, partições: /boot, /boot/efi, / root em LVM)
+- Rede: Wi-Fi Realtek RTL8723BE + LAN Gigabit Realtek RTL8111
+- Limitação principal: Baixo poder de processamento (CPU fraca e pouca RAM) para re-encode de vídeo.
+
+## Raspberry pi 4
