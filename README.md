@@ -521,7 +521,7 @@ Docker e containers sobem normalmente com WiFi ativo
 ### Guia para o cliente (instalação inicial)
 
 1. Ligue o dispositivo Grava Nóis.
-2. Aguarde ~30 segundos até o hotspot aparecer nas redes WiFi do seu celular.
+2. Aguarde ~60 segundos até o hotspot aparecer nas redes WiFi do seu celular.
 3. Conecte ao hotspot **GravaNois-XXXX** (sem senha).
 4. A página de configuração abre automaticamente. Se não abrir, acesse `http://192.168.4.1`.
 5. Selecione a rede WiFi do local na lista e informe a senha.
@@ -533,16 +533,20 @@ Docker e containers sobem normalmente com WiFi ativo
 
 ### Componentes
 
+Os scripts de provisionamento ficam no repositório `grava_nois_config/provisioning/`
+e são instalados em `/opt/.grn/provisioning/` (root:root, 700) durante a preparação
+do dispositivo pela equipe Grava Nóis.
+
 | Arquivo | Responsabilidade |
 |---------|-----------------|
-| `provisioning/wifi_check.sh` | Detecta se há WiFi ativo no boot |
-| `provisioning/hotspot_up.sh` | Sobe hostapd + dnsmasq |
-| `provisioning/hotspot_down.sh` | Derruba hotspot e reconecta ao WiFi salvo |
-| `provisioning/provisioning_server.py` | Servidor Flask local (porta 80) |
-| `provisioning/netplan_writer.py` | Persiste credenciais no Netplan |
-| `provisioning/templates/provisioning.html` | Página HTML offline (mobile-first) |
-| `systemd/grava-provisioning.service` | Orquestra o fluxo no boot |
-| `provisioning/install_provisioning.sh` | Instala dependências e registra serviço |
+| `wifi_check.sh` | Detecta se há WiFi ativo no boot |
+| `hotspot_up.sh` | Sobe hostapd + dnsmasq |
+| `hotspot_down.sh` | Derruba hotspot e reconecta ao WiFi salvo |
+| `provisioning_server.py` | Servidor Flask local (porta 80) |
+| `netplan_writer.py` | Persiste credenciais no Netplan |
+| `templates/provisioning.html` | Página HTML offline (mobile-first) |
+| `grava-provisioning.service` | Serviço systemd que orquestra o fluxo no boot |
+| `install_provisioning.sh` | Instala dependências e copia scripts para `/opt/.grn/provisioning/` |
 
 ### Detalhes técnicos
 
@@ -555,22 +559,14 @@ Docker e containers sobem normalmente com WiFi ativo
 
 ### Dependências de sistema
 
-Instaladas via `provisioning/install_provisioning.sh`:
-
-```bash
-hostapd        # Criação do ponto de acesso WiFi
-dnsmasq        # DHCP + DNS captive portal
-python3-flask  # Servidor web de provisionamento
-wireless-tools # iwlist para scan de redes
-```
+`hostapd`, `dnsmasq`, `python3-flask`, `wireless-tools` — instalados via `grava_nois_config/provisioning/install_provisioning.sh`.
 
 ### Instalação
 
-A instalação é feita automaticamente pelo script de setup do sistema (ver `grava_nois_config/.setup_ubuntu_server.sh` com `ENABLE_PROVISIONING=1`). Para instalar manualmente:
+Feita pela equipe via `grava_nois_config`:
 
 ```bash
-cd grava_nois_system
-sudo bash provisioning/install_provisioning.sh
+ENABLE_PROVISIONING=1 sudo bash grava_nois_config/.setup_ubuntu_server.sh
 ```
 
 ---

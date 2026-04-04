@@ -112,7 +112,8 @@ Canonical string:
 
 ## WiFi Provisioning (hotspot local)
 
-Dependências de sistema instaladas via `provisioning/install_provisioning.sh`:
+Scripts em `grava_nois_config/provisioning/`, instalados em `/opt/.grn/provisioning/` (root:root 700) durante preparação do device.
+Dependências de sistema instaladas via `grava_nois_config/provisioning/install_provisioning.sh`:
 
 | Pacote | Uso |
 |--------|-----|
