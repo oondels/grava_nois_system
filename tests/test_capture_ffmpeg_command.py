@@ -115,6 +115,14 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
             cmd = self._run_start(env=env)
             self.assertNotIn("-use_wallclock_as_timestamps", cmd)
 
+    def test_rtsp_err_detect_ignore_err(self) -> None:
+        """err_detect ignore_err forces decoder to reconstruct corrupt frames via error concealment."""
+        cmd = self._run_start(env={})
+        self.assertIn("-err_detect", cmd)
+        self.assertEqual(cmd[cmd.index("-err_detect") + 1], "ignore_err")
+        # err_detect must come before -i (input option for decoder)
+        self.assertLess(cmd.index("-err_detect"), cmd.index("-i"))
+
     def test_rtsp_no_frame_duplication_flags(self) -> None:
         """discardcorrupt + CFR causes static video — neither should be present in default mode."""
         cmd = self._run_start(env={})

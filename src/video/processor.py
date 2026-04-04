@@ -89,13 +89,21 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     out_tmp_mp4 = cfg.clips_dir / f"highlight_{cfg.camera_id}_{timestamp}.tmp.mp4"
 
     try:
-        # concat TS -> MP4 direto (preserva DTS para timing correto)
+        # Concat segmentos TS → MP4 direto com -c copy (sem re-encode).
+        # Os segmentos já foram re-encoded na captura com error concealment,
+        # então o stream H.264 está limpo. A concatenação só precisa:
+        # - genpts: regenerar PTS caso algum segmento tenha descontinuidade
+        # - ignore_err: tolerar eventuais resíduos de corrupção sem abortar
+        # - avoid_negative_ts: normalizar base temporal para MP4
+        # - faststart: moov atom no início para streaming progressivo
         subprocess.run(
             [
                 "ffmpeg",
                 "-nostdin",
                 "-fflags",
                 "+genpts",
+                "-err_detect",
+                "ignore_err",
                 "-f",
                 "concat",
                 "-safe",
@@ -108,8 +116,6 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 "+faststart",
                 "-avoid_negative_ts",
                 "make_zero",
-                "-video_track_timescale",
-                "25000",
                 str(out_tmp_mp4),
             ],
             check=True,

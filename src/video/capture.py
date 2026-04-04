@@ -124,16 +124,19 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             )
 
     if use_rtsp:
-        # Modo padrão: re-encode para CFR — necessário para câmeras com DTS
-        # não-monotônico (ex: Tapo C500), garantindo segmentos de duração
-        # exata e concatenação sem falhas.
+        # Modo padrão: re-encode — necessário para câmeras WiFi com DTS
+        # não-monotônico e perda de pacotes (ex: Tapo C500).
+        # O decoder recebe -err_detect ignore_err para reconstruir frames
+        # corrompidos via error concealment em vez de descartá-los: um frame
+        # com artefato visual menor é vastamente melhor que um frame faltando
+        # (que gera stutter na concatenação).
+        #
         # Alternativa: GN_RTSP_REENCODE=0 usa passthrough (copy), apenas para
         # câmeras com DTS estável e timestamps confiáveis.
         rtsp_reencode = _env_bool("GN_RTSP_REENCODE", True)
         rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
         rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
         rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
-        rtsp_fps = os.getenv("GN_RTSP_FPS", "25").strip()
 
         cmd = [
             "ffmpeg",
@@ -144,8 +147,15 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "tcp",
             "-rtsp_flags",
             "prefer_tcp",
+            # +genpts: regenera PTS para frames sem timestamp.
             "-fflags",
             "+genpts",
+            # ignore_err: decoder tenta reconstruir macroblocks corrompidos
+            # via error concealment em vez de descartar o frame inteiro.
+            # Sem isso, cada frame corrompido vira um "buraco" no tempo
+            # que se manifesta como stutter no highlight final.
+            "-err_detect",
+            "ignore_err",
             "-i",
             rtsp_url,
             "-map",
@@ -169,8 +179,12 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
                 str(rtsp_gop),
                 "-sc_threshold",
                 "0",
+                # Força keyframe no início de cada segmento para que
+                # a concatenação posterior nunca inicie sem um IDR.
                 "-force_key_frames",
                 f"expr:gte(t,n_forced*{cfg.seg_time})",
+                # vfr: não duplica frames quando o stream entrega menos
+                # do que o esperado; evita "congelamento" massivo.
                 "-fps_mode",
                 "vfr",
             ]
