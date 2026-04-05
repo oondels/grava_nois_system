@@ -34,6 +34,7 @@ Para tasks por assunto:
 - captura, buffer, ffmpeg, highlights: [docs/specs/system/PIPELINE.md](./system/PIPELINE.md) e [docs/specs/system/ARCHITECTURE.md](./system/ARCHITECTURE.md)
 - trigger, GPIO, Pico, janela horária: [docs/specs/system/BUSINESS_RULES.md](./system/BUSINESS_RULES.md) e [docs/specs/system/PIPELINE.md](./system/PIPELINE.md)
 - upload, HMAC, API, retry policy: [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/BUSINESS_RULES.md](./system/BUSINESS_RULES.md)
+- MQTT, presença, heartbeat e futuro command/control: [docs/specs/system/ARCHITECTURE.md](./system/ARCHITECTURE.md), [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/BUSINESS_RULES.md](./system/BUSINESS_RULES.md)
 - worker, sidecar, fila, falhas, reprocessamento: [docs/specs/system/PIPELINE.md](./system/PIPELINE.md) e [docs/specs/system/OPERATIONS.md](./system/OPERATIONS.md)
 - configuração e deploy do edge: [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/OPERATIONS.md](./system/OPERATIONS.md)
 

@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -38,6 +39,31 @@ class CaptureConfig:
         self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
 
+@dataclass(frozen=True)
+class MQTTConfig:
+    enabled: bool
+    host: str
+    port: int
+    username: Optional[str]
+    password: Optional[str]
+    client_id: str
+    keepalive: int
+    heartbeat_interval_sec: int
+    topic_prefix: str
+    qos: int
+    retain_presence: bool
+    use_tls: bool
+    agent_version: str
+
+    @property
+    def is_configured(self) -> bool:
+        return self.enabled and bool(self.host)
+
+    def topic_for(self, device_id: str, suffix: str) -> str:
+        base = self.topic_prefix.strip("/") or "grn"
+        return f"{base}/devices/{device_id}/{suffix.strip('/')}"
+
+
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None:
@@ -46,6 +72,79 @@ def _env_int(name: str, default: int) -> int:
         return max(1, int(float(value)))
     except Exception:
         return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_str(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def _parse_mqtt_host_and_port(
+    broker_url: str,
+    fallback_port: int,
+) -> tuple[str, int, bool]:
+    raw_value = broker_url.strip()
+    if not raw_value:
+        return "", fallback_port, False
+
+    if "://" not in raw_value:
+        if ":" in raw_value and raw_value.count(":") == 1:
+            host, raw_port = raw_value.split(":", 1)
+            try:
+                return host.strip(), max(1, int(raw_port)), False
+            except ValueError:
+                return host.strip(), fallback_port, False
+        return raw_value, fallback_port, False
+
+    parsed = urlparse(raw_value)
+    scheme = (parsed.scheme or "").lower()
+    host = parsed.hostname or ""
+    port = parsed.port or fallback_port
+    use_tls = scheme in {"mqtts", "ssl", "tls"}
+    return host, port, use_tls
+
+
+def load_mqtt_config() -> MQTTConfig:
+    enabled = _env_bool("GN_MQTT_ENABLED", False)
+    broker_url = _env_str("GN_MQTT_BROKER_URL") or _env_str("GN_MQTT_HOST")
+    default_port = _env_int("GN_MQTT_PORT", 1883)
+    host, port_from_url, tls_from_url = _parse_mqtt_host_and_port(
+        broker_url,
+        default_port,
+    )
+    port = _env_int("GN_MQTT_PORT", port_from_url)
+    use_tls = _env_bool("GN_MQTT_TLS", tls_from_url)
+    client_id = (
+        _env_str("GN_MQTT_CLIENT_ID")
+        or _env_str("DEVICE_ID")
+        or _env_str("GN_DEVICE_ID")
+        or "grava-nois-edge"
+    )
+
+    return MQTTConfig(
+        enabled=enabled,
+        host=host,
+        port=port,
+        username=_env_str("GN_MQTT_USERNAME") or None,
+        password=_env_str("GN_MQTT_PASSWORD") or None,
+        client_id=client_id,
+        keepalive=_env_int("GN_MQTT_KEEPALIVE", 60),
+        heartbeat_interval_sec=_env_int("GN_MQTT_HEARTBEAT_INTERVAL_SEC", 30),
+        topic_prefix=_env_str("GN_MQTT_TOPIC_PREFIX", "grn"),
+        qos=max(0, min(2, _env_int("GN_MQTT_QOS", 1))),
+        retain_presence=_env_bool("GN_MQTT_RETAIN_PRESENCE", True),
+        use_tls=use_tls,
+        agent_version=_env_str("GN_AGENT_VERSION", "local-dev"),
+    )
 
 
 def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:

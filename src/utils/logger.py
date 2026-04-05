@@ -1,10 +1,4 @@
-"""
-Módulo de logging centralizado para o sistema Grava Nois.
-
-Configura um logger que escreve:
-- Console: nível INFO
-- Arquivo rotativo: nível DEBUG (logs/app.log)
-"""
+"""Centralized logger configuration for the Grava Nois edge runtime."""
 
 import logging
 import os
@@ -12,7 +6,13 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def setup_logger(name: str = "grava_nois") -> logging.Logger:
+def setup_logger(
+    name: str = "grava_nois",
+    *,
+    file_name: str = "app.log",
+    console_level: int = logging.INFO,
+    file_level: int = logging.DEBUG,
+) -> logging.Logger:
     """
     Configura e retorna um logger com saída para console e arquivo rotativo.
 
@@ -29,6 +29,7 @@ def setup_logger(name: str = "grava_nois") -> logging.Logger:
         return logger
 
     logger.setLevel(logging.DEBUG)
+    logger.propagate = False
 
     # Formato detalhado para logs
     formatter = logging.Formatter(
@@ -38,7 +39,7 @@ def setup_logger(name: str = "grava_nois") -> logging.Logger:
 
     # Handler para console (INFO)
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(console_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
@@ -56,7 +57,7 @@ def setup_logger(name: str = "grava_nois") -> logging.Logger:
         )
         log_dir = default_log_dir
         log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "app.log"
+    log_file = log_dir / file_name
 
     # Arquivo rotativo: máximo 10MB por arquivo, mantém 5 backups
     file_handler = RotatingFileHandler(
@@ -65,11 +66,16 @@ def setup_logger(name: str = "grava_nois") -> logging.Logger:
         backupCount=5,
         encoding="utf-8"
     )
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(file_level)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    logger.info(f"Logger configurado: console (INFO) + arquivo rotativo {log_file} (DEBUG)")
+    logger.info(
+        "Logger configurado: console (%s) + arquivo rotativo %s (%s)",
+        logging.getLevelName(console_level),
+        log_file,
+        logging.getLevelName(file_level),
+    )
 
     return logger
 

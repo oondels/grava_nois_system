@@ -43,6 +43,13 @@ Este arquivo é a porta de entrada do edge system para leitura humana e lookup p
 - Source: [`src/services/api_client.py`](../../../src/services/api_client.py), [`src/security/request_signer.py`](../../../src/security/request_signer.py)
 - Related: DEVICE_ID, DEVICE_SECRET, GN_API_BASE, request signing
 
+## MQTT Device Presence
+
+- Keywords: mqtt, broker, presence, heartbeat, online, offline, command/control
+- File: [ARCHITECTURE.md](./ARCHITECTURE.md), [INTEGRATIONS.md](./INTEGRATIONS.md), [BUSINESS_RULES.md](./BUSINESS_RULES.md)
+- Source: [`src/services/mqtt/mqtt_client.py`](../../../src/services/mqtt/mqtt_client.py), [`src/services/mqtt/device_presence_service.py`](../../../src/services/mqtt/device_presence_service.py), [`src/services/mqtt/command_dispatcher.py`](../../../src/services/mqtt/command_dispatcher.py)
+- Related: GN_MQTT_ENABLED, GN_MQTT_BROKER_URL, GN_MQTT_HEARTBEAT_INTERVAL_SEC, GN_AGENT_VERSION
+
 ## API Error Policy
 
 - Keywords: request_outside_allowed_time_window, signature_mismatch, client_mismatch, delete local record
@@ -69,4 +76,5 @@ Este arquivo é a porta de entrada do edge system para leitura humana e lookup p
 - Geral: [ARCHITECTURE.md](./ARCHITECTURE.md) -> [PIPELINE.md](./PIPELINE.md)
 - Trigger e captura: [PIPELINE.md](./PIPELINE.md) -> [BUSINESS_RULES.md](./BUSINESS_RULES.md)
 - API/HMAC: [INTEGRATIONS.md](./INTEGRATIONS.md) -> [BUSINESS_RULES.md](./BUSINESS_RULES.md)
+- MQTT/presença: [ARCHITECTURE.md](./ARCHITECTURE.md) -> [INTEGRATIONS.md](./INTEGRATIONS.md) -> [BUSINESS_RULES.md](./BUSINESS_RULES.md)
 - Operação e falhas: [OPERATIONS.md](./OPERATIONS.md)

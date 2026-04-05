@@ -17,7 +17,13 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-from src.config.settings import CaptureConfig, load_capture_configs
+from src.config.settings import CaptureConfig, load_capture_configs, load_mqtt_config
+from src.services.mqtt.command_dispatcher import CommandDispatcher
+from src.services.mqtt.device_presence_service import (
+    DevicePresenceService,
+    build_runtime_snapshot,
+)
+from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
 from src.utils.logger import logger
 from src.utils.pico import get_pico_serial_port, resolve_trigger_source
 from src.utils.time_utils import is_within_business_hours
@@ -229,6 +235,11 @@ def main() -> int:
         workers.append(worker)
         logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
 
+    mqtt_config = load_mqtt_config()
+    mqtt_client = MQTTClient(mqtt_config)
+    mqtt_presence: DevicePresenceService | None = None
+    mqtt_dispatcher: CommandDispatcher | None = None
+
     # --- Disparo por ENTER/GPIO/Pico ---
     trigger_q: queue.Queue[str] = queue.Queue()
     stop_evt = threading.Event()
@@ -436,6 +447,54 @@ def main() -> int:
         else:
             logger.warning("Trigger Pico selecionado, mas nenhuma porta serial foi detectada")
 
+    device_id = (
+        (
+            os.getenv("DEVICE_ID")
+            or os.getenv("GN_DEVICE_ID")
+            or os.getenv("GN_MQTT_CLIENT_ID")
+            or ""
+        ).strip()
+    )
+    client_id = (os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID") or "").strip()
+    venue_id = (os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID") or "").strip()
+
+    if mqtt_config.enabled and not device_id:
+        mqtt_logger.warning(
+            "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID não foi configurado; presença será ignorada"
+        )
+    elif mqtt_config.enabled:
+        def _runtime_snapshot_provider() -> dict[str, object]:
+            snapshot = build_runtime_snapshot(
+                runtimes=runtimes,
+                light_mode=light_mode,
+                dev_mode=dev_mode,
+                trigger_source=trigger_source,
+            )
+            snapshot["health"]["gpio_enabled"] = gpio_enabled
+            snapshot["health"]["pico_enabled"] = pico_enabled
+            return snapshot
+
+        mqtt_presence = DevicePresenceService(
+            mqtt_client,
+            mqtt_config,
+            device_id=device_id,
+            client_id=client_id,
+            venue_id=venue_id,
+            runtime_snapshot_provider=_runtime_snapshot_provider,
+        )
+        mqtt_dispatcher = CommandDispatcher(
+            mqtt_client,
+            device_id=device_id,
+            command_in_topic=mqtt_config.topic_for(device_id, "commands/in"),
+            command_out_topic=mqtt_config.topic_for(device_id, "commands/out"),
+        )
+        if mqtt_presence.start():
+            mqtt_dispatcher.start()
+        elif mqtt_config.enabled:
+            mqtt_logger.warning(
+                "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
+            )
+
     if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:
         capture_desc = f"{primary_cfg.pre_segments} seg + {primary_cfg.post_segments} seg"
     else:
@@ -497,6 +556,16 @@ def main() -> int:
     finally:
         # Sinaliza para todos os loops/threads que devem encerrar.
         stop_evt.set()
+        if mqtt_dispatcher is not None:
+            try:
+                mqtt_dispatcher.stop()
+            except Exception:
+                pass
+        if mqtt_presence is not None:
+            try:
+                mqtt_presence.stop()
+            except Exception:
+                pass
         try:
             if cb is not None:
                 # Cancela o callback do GPIO (para de receber eventos do botão).
