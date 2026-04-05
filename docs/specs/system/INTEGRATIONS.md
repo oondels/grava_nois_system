@@ -118,6 +118,26 @@ Observações:
 - o edge continua operando sem broker;
 - a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.
 
+Exemplos rápidos por tópico:
+
+- `presence`
+  - tópico: `grn/devices/edge-test-01/presence`
+  - payload típico: `status=online|offline`, `last_seen`, `queue_size`, `health`
+- `heartbeat`
+  - tópico: `grn/devices/edge-test-01/heartbeat`
+  - payload típico: mesmo envelope base de presença com `status=online`
+- `state`
+  - tópico: `grn/devices/edge-test-01/state`
+  - payload típico: envelope expandido com `cameras[]` e `runtime`
+- `events`
+  - tópico reservado para eventos operacionais futuros; fase 1 não publica nele
+- `alerts`
+  - tópico reservado para alertas futuros; fase 1 não publica nele
+- `commands/in`
+  - aceita mensagens de comando para evolução futura, mas a fase 1 não executa nada
+- `commands/out`
+  - publica resposta de rejeição: `status=rejected`, `reason=remote commands are not enabled in phase 1`
+
 ## Request signing
 
 Implementação em [`src/security/request_signer.py`](../../../src/security/request_signer.py)

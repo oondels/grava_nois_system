@@ -574,6 +574,215 @@ Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumi
 - `grn/devices/{device_id}/commands/in`
 - `grn/devices/{device_id}/commands/out`
 
+### Exemplos por tópico
+
+#### `grn/devices/{device_id}/presence`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/presence
+```
+
+Exemplo de payload:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "online",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:10:00+00:00",
+  "last_seen": "2026-04-05T19:10:00+00:00",
+  "queue_size": 0,
+  "hostname": "raspberrypi",
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico"
+  }
+}
+```
+
+Exemplo de `offline` limpo:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "offline",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:20:00+00:00",
+  "last_seen": "2026-04-05T19:20:00+00:00",
+  "queue_size": 0,
+  "hostname": "raspberrypi",
+  "disconnect_reason": "clean_shutdown",
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico"
+  }
+}
+```
+
+#### `grn/devices/{device_id}/heartbeat`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/heartbeat
+```
+
+Exemplo de payload:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "online",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:10:30+00:00",
+  "last_seen": "2026-04-05T19:10:30+00:00",
+  "queue_size": 1,
+  "hostname": "raspberrypi",
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico"
+  }
+}
+```
+
+#### `grn/devices/{device_id}/state`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/state
+```
+
+Exemplo de payload:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "online",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:10:30+00:00",
+  "last_seen": "2026-04-05T19:10:30+00:00",
+  "queue_size": 1,
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico",
+    "gpio_enabled": false,
+    "pico_enabled": true
+  },
+  "cameras": [
+    {
+      "camera_id": "cam01",
+      "camera_name": "Quadra 1",
+      "source_type": "rtsp",
+      "queue_size": 1,
+      "capture_busy": false,
+      "ffmpeg_alive": true
+    },
+    {
+      "camera_id": "cam02",
+      "camera_name": "Quadra 2",
+      "source_type": "rtsp",
+      "queue_size": 0,
+      "capture_busy": false,
+      "ffmpeg_alive": true
+    }
+  ],
+  "runtime": {
+    "light_mode": false,
+    "dev_mode": true,
+    "mqtt_enabled": "1"
+  }
+}
+```
+
+#### `grn/devices/{device_id}/events`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/events
+```
+
+Exemplo de payload futuro:
+```json
+{
+  "device_id": "edge-test-01",
+  "event": "clip_enqueued",
+  "timestamp": "2026-04-05T19:11:00+00:00",
+  "details": {
+    "camera_id": "cam01",
+    "file_name": "highlight_cam01_20260405-191100Z.mp4"
+  }
+}
+```
+
+Observação:
+- tópico reservado para evolução futura; a fase 1 não publica eventos operacionais nele.
+
+#### `grn/devices/{device_id}/alerts`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/alerts
+```
+
+Exemplo de payload futuro:
+```json
+{
+  "device_id": "edge-test-01",
+  "severity": "warning",
+  "code": "camera_offline",
+  "timestamp": "2026-04-05T19:12:00+00:00",
+  "message": "Camera cam02 sem segmentos recentes"
+}
+```
+
+Observação:
+- tópico reservado para evolução futura; a fase 1 não publica alertas dedicados nele.
+
+#### `grn/devices/{device_id}/commands/in`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/commands/in
+```
+
+Exemplo de mensagem recebida:
+```json
+{
+  "command": "restart_service",
+  "request_id": "cmd-001",
+  "issued_by": "admin-user"
+}
+```
+
+Observação:
+- a fase 1 não executa comandos remotos; qualquer mensagem recebida aqui é rejeitada.
+
+#### `grn/devices/{device_id}/commands/out`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/commands/out
+```
+
+Exemplo de resposta publicada na fase 1:
+```json
+{
+  "device_id": "edge-test-01",
+  "command": "restart_service",
+  "status": "rejected",
+  "reason": "remote commands are not enabled in phase 1",
+  "source_topic": "grn/devices/edge-test-01/commands/in"
+}
+```
+
 ### Payload mínimo publicado
 
 - `device_id`
