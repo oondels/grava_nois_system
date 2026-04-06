@@ -54,6 +54,28 @@ class MQTTSettingsTests(unittest.TestCase):
         self.assertEqual(config.port, 1884)
         self.assertEqual(config.qos, 2)
 
+    def test_topic_for_rejects_device_id_with_topic_separators_or_wildcards(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "GN_MQTT_ENABLED": "1",
+                "GN_MQTT_HOST": "broker.internal",
+                "DEVICE_ID": "edge-01",
+            },
+            clear=True,
+        ):
+            config = load_mqtt_config()
+
+        self.assertEqual(
+            config.topic_for("edge-01", "heartbeat"),
+            "grn/devices/edge-01/heartbeat",
+        )
+
+        for invalid_device_id in ("edge/01", "edge+01", "edge#01"):
+            with self.subTest(invalid_device_id=invalid_device_id):
+                with self.assertRaises(ValueError):
+                    config.topic_for(invalid_device_id, "heartbeat")
+
 
 if __name__ == "__main__":
     unittest.main()

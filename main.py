@@ -474,26 +474,35 @@ def main() -> int:
             snapshot["health"]["pico_enabled"] = pico_enabled
             return snapshot
 
-        mqtt_presence = DevicePresenceService(
-            mqtt_client,
-            mqtt_config,
-            device_id=device_id,
-            client_id=client_id,
-            venue_id=venue_id,
-            runtime_snapshot_provider=_runtime_snapshot_provider,
-        )
-        mqtt_dispatcher = CommandDispatcher(
-            mqtt_client,
-            device_id=device_id,
-            command_in_topic=mqtt_config.topic_for(device_id, "commands/in"),
-            command_out_topic=mqtt_config.topic_for(device_id, "commands/out"),
-        )
-        if mqtt_presence.start():
-            mqtt_dispatcher.start()
-        elif mqtt_config.enabled:
-            mqtt_logger.warning(
-                "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
+        try:
+            mqtt_presence = DevicePresenceService(
+                mqtt_client,
+                mqtt_config,
+                device_id=device_id,
+                client_id=client_id,
+                venue_id=venue_id,
+                runtime_snapshot_provider=_runtime_snapshot_provider,
             )
+            mqtt_dispatcher = CommandDispatcher(
+                mqtt_client,
+                device_id=device_id,
+                command_in_topic=mqtt_config.topic_for(device_id, "commands/in"),
+                command_out_topic=mqtt_config.topic_for(device_id, "commands/out"),
+            )
+        except ValueError as exc:
+            mqtt_presence = None
+            mqtt_dispatcher = None
+            mqtt_logger.warning(
+                "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID é inválido para tópico (%s); presença será ignorada",
+                exc,
+            )
+        else:
+            if mqtt_presence.start():
+                mqtt_dispatcher.start()
+            elif mqtt_config.enabled:
+                mqtt_logger.warning(
+                    "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
+                )
 
     if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:
         capture_desc = f"{primary_cfg.pre_segments} seg + {primary_cfg.post_segments} seg"

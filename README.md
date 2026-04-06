@@ -241,6 +241,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 - **Retry automático:** Até 3 tentativas com backoff
 - **Pasta de falhas:** Vídeos que falharam vão para `failed_clips/upload_failed/`
 - **Reprocessamento:** Sistema tenta reprocessar falhas periodicamente
+- **Diagnóstico seguro:** O retry registra a resposta do backend no sidecar sanitizando `upload_url`/URLs assinadas antes de persistir metadados locais.
 - **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
 - **Erros HMAC/device não-retriáveis:** Quando a API retorna erros de autenticação/integridade do device (ex.: `signature_mismatch`, `client_mismatch`, `device_revoked`), o worker remove o registro local (vídeo + sidecar) para evitar loop infinito de retry.
 
@@ -256,6 +257,9 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 6. mantém `commands/in` e `commands/out` reservados para a fase futura.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
+
+Observação de tópico:
+- `DEVICE_ID`/`GN_DEVICE_ID` usado no namespace MQTT deve ser um único nível de tópico. Valores com `/`, `+`, `#` ou byte nulo são rejeitados ao montar os tópicos para evitar wildcard/hierarquia inesperada; nesse caso a presença MQTT é ignorada sem derrubar captura/worker.
 
 ---
 
@@ -538,6 +542,7 @@ GN_LOG_DIR=/caminho/custom/logs # Diretório de logs (fallback: <raiz-do-projeto
 ```
 
 Observações:
+- `DEVICE_ID` também compõe os tópicos MQTT quando a presença está habilitada; use apenas um identificador simples sem `/`, `+`, `#` ou byte nulo.
 - Se `GN_LOG_DIR` não for definido, o sistema cria e usa `logs/` na raiz do projeto (mesma pasta de `main.py`).
 - O módulo MQTT usa `logs/mqtt.log` para isolar heartbeat/presença do `app.log`.
 - Em falhas `401/403` nas rotas assinadas, o logger registra somente `path`, `timestamp`, `nonce`, `body_sha256` e assinatura truncada.
@@ -563,6 +568,9 @@ Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumi
 - `GN_MQTT_RETAIN_PRESENCE`: mantém `presence` retido no broker
 - `GN_MQTT_TLS`: força TLS quando necessário
 - `GN_AGENT_VERSION`: versão publicada no payload do edge
+
+Observação:
+- O `device_id` dos tópicos vem de `DEVICE_ID`/`GN_DEVICE_ID` no serviço de presença e precisa ser um único nível de tópico MQTT. O sistema rejeita `/`, `+`, `#` e byte nulo para evitar wildcard ou hierarquia inesperada; se o valor for inválido, somente MQTT é ignorado.
 
 ### Tópicos da fase 1
 

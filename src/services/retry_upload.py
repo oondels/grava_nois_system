@@ -17,6 +17,21 @@ from src.video.processor import ffprobe_metadata, _sha256_file
 
 
 DEFAULT_CONTENT_TYPE = "video/mp4"
+SENSITIVE_RESPONSE_KEYS = {"upload_url", "signed_upload_url"}
+
+
+def _sanitize_backend_response(value):
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            if str(key).lower() in SENSITIVE_RESPONSE_KEYS:
+                sanitized[key] = "[redacted]"
+            else:
+                sanitized[key] = _sanitize_backend_response(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_backend_response(item) for item in value]
+    return value
 
 
 def _load_or_init_sidecar(video_path: Path, sidecar_path: Path) -> Dict:
@@ -101,7 +116,7 @@ def retry_failed_uploads(
                 {
                     "status": "registered",
                     "registered_at": datetime.now(timezone.utc).isoformat(),
-                    "response": resp,
+                    "response": _sanitize_backend_response(resp),
                 }
             )
             sidecar_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))

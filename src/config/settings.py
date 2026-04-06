@@ -60,8 +60,28 @@ class MQTTConfig:
         return self.enabled and bool(self.host)
 
     def topic_for(self, device_id: str, suffix: str) -> str:
+        normalized_device_id = _validate_mqtt_device_id(device_id)
+        normalized_suffix = _validate_mqtt_topic_suffix(suffix)
         base = self.topic_prefix.strip("/") or "grn"
-        return f"{base}/devices/{device_id}/{suffix.strip('/')}"
+        return f"{base}/devices/{normalized_device_id}/{normalized_suffix}"
+
+
+def _validate_mqtt_device_id(device_id: str) -> str:
+    normalized = str(device_id or "").strip()
+    if not normalized:
+        raise ValueError("device_id MQTT nao pode ser vazio")
+    if any(char in normalized for char in ("/", "+", "#", "\x00")):
+        raise ValueError("device_id MQTT contem caracteres invalidos para topico")
+    return normalized
+
+
+def _validate_mqtt_topic_suffix(suffix: str) -> str:
+    normalized = str(suffix or "").strip("/")
+    if not normalized:
+        raise ValueError("sufixo MQTT nao pode ser vazio")
+    if any(char in normalized for char in ("+", "#", "\x00")):
+        raise ValueError("sufixo MQTT contem caracteres invalidos para topico")
+    return normalized
 
 
 def _env_int(name: str, default: int) -> int:

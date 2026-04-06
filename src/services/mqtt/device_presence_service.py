@@ -165,7 +165,7 @@ def build_runtime_snapshot(
     total_queue_size = 0
 
     for runtime in runtimes:
-        queue_size = len(list(runtime.cfg.queue_dir.glob("*.mp4")))
+        queue_size = sum(1 for _ in runtime.cfg.queue_dir.glob("*.mp4"))
         total_queue_size += queue_size
         cameras.append(
             {

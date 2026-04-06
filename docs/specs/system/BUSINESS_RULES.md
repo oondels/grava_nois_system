@@ -90,6 +90,7 @@ Também devem excluir localmente mensagens com snippet:
 
 - logs devem truncar assinatura HMAC;
 - logs devem evitar segredos, tokens e credenciais;
+- sidecars de retry não devem persistir URLs assinadas de upload em claro;
 - erros operacionais devem preservar contexto suficiente para auditoria local.
 
 ## MQTT presence rules
@@ -100,4 +101,5 @@ Também devem excluir localmente mensagens com snippet:
 - `heartbeat` deve atualizar `last_seen` sem gerar ruído excessivo de log;
 - `mqtt.log` deve ser separado do `app.log`;
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
+- `device_id` usado em tópicos MQTT deve rejeitar separadores de nível e wildcards (`/`, `+`, `#`);
 - `commands/in` e `commands/out` podem existir, mas nenhum comando remoto pode ser executado na fase 1.

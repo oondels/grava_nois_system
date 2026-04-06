@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-04-06
+
+### Changed
+- Sanitizacao de respostas persistidas pelo retry de upload para remover URLs assinadas de upload dos sidecars locais.
+- Validacao do `device_id` usado em topicos MQTT para rejeitar separadores de nivel e wildcards sem derrubar captura/worker.
+- Contagem de fila no payload MQTT passou a usar iterador sem materializar lista de arquivos.
+
 ## 2026-04-05
 
 ### Added

@@ -28,6 +28,7 @@ Práticas:
 
 - truncar assinatura HMAC;
 - não expor `DEVICE_SECRET`;
+- sanitizar `upload_url`/URLs assinadas antes de persistir respostas de backend em sidecars de retry;
 - registrar contexto suficiente para retry e auditoria local.
 - manter `mqtt.log` separado para heartbeat/presença e evitar ruído em `app.log`.
 

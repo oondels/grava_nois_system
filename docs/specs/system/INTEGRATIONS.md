@@ -117,6 +117,7 @@ Observações:
 - `last will` marca `offline` quando a conexão cai abruptamente;
 - o edge continua operando sem broker;
 - a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.
+- o `device_id` usado no namespace `grn/devices/{device_id}/...` deve ser um único nível de tópico; valores com `/`, `+`, `#` ou byte nulo são rejeitados na montagem do tópico e fazem apenas a presença MQTT ser ignorada.
 
 Exemplos rápidos por tópico:
 
@@ -154,6 +155,10 @@ Headers assinados:
 Canonical string:
 
 - `v1:{METHOD}:{PATH}:{timestamp}:{nonce}:{bodySha256}`
+
+## Retry upload diagnostics
+
+`src/services/retry_upload.py` mantém sidecars locais para auditoria de reprocessamento, mas respostas de backend são sanitizadas antes de persistir campos sensíveis como `upload_url` e `signed_upload_url`.
 
 ## Hardware integrations
 
