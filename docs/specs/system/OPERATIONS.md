@@ -29,6 +29,7 @@ Práticas:
 - truncar assinatura HMAC;
 - não expor `DEVICE_SECRET`;
 - registrar contexto suficiente para retry e auditoria local.
+- manter `mqtt.log` separado para heartbeat/presença e evitar ruído em `app.log`.
 
 ## Test coverage present
 
@@ -49,6 +50,9 @@ Testes visíveis:
 - `test_trigger_fanout.py`
 - `test_trigger_sources.py`
 - `test_worker_multi_camera.py`
+- `test_mqtt_settings.py`
+- `test_device_presence_service.py`
+- `test_mqtt_commands.py`
 
 Esses testes cobrem os pontos mais sensíveis do edge:
 
@@ -60,6 +64,8 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - política de erro da API;
 - geracao real de mp4 final a partir da camera configurada, sem Docker, quando `GN_RUN_CAMERA_INTEGRATION=1`.
 - composição mobile/vertical do FFmpeg.
+- bootstrap e payload mínimo de presença MQTT.
+- bloqueio explícito de command/control na fase 1.
 
 ## Known operational caveats
 
@@ -69,6 +75,7 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - o worker é sensível a sidecars inconsistentes;
 - há `.pyc` em `tests/__pycache__` e `src/__pycache__` no workspace, mas não fazem parte do contrato de runtime;
 - existe `docker-compose.yml` no repositório do system com mudança local não relacionada, então commits devem ser isolados.
+- MQTT pode ficar habilitado sem broker disponível; isso deve degradar para warning/log e seguir com o pipeline principal.
 
 ## Audit cautions
 

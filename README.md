@@ -3,6 +3,8 @@
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, processar com marca d'água/thumbnail e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
+>
+> **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 
@@ -18,6 +20,7 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 - [Fluxo de Funcionamento](#fluxo-de-funcionamento)
 - [Estrutura de Diretórios](#estrutura-de-diretórios)
 - [Configuração](#configuração)
+- [Presença MQTT](#presença-mqtt)
 - [Otimização de Captura RTSP](#otimização-de-captura-rtsp)
 - [Provisionamento WiFi (Hotspot)](#provisionamento-wifi-hotspot)
 - [GPIO (Botão Físico)](#gpio-botão-físico)
@@ -37,13 +40,14 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 - **`src/workers/processing_worker.py`**: Worker de processamento, watermark, upload e retry
 - **`src/utils/logger.py`**: Sistema de logging centralizado
 - **`src/services/api_client.py`**: Cliente HTTP para comunicação com backend
+- **`src/services/mqtt/`**: Cliente MQTT, presença do device e placeholders de command/control
 
 ### Dependências
 
 - Python 3.10+
 - FFmpeg/ffprobe
 - pigpio (opcional, para GPIO)
-- requests, python-dotenv (em `requirements.txt`)
+- requests, python-dotenv e paho-mqtt (em `requirements.txt`)
 
 ### Fluxo Simplificado
 
@@ -66,6 +70,13 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
    └─ Upload via API
        ↓
 [ Backend (URL assinada) ]
+
+[ MQTT Presence Service ]
+   ├─ Presence retained
+   ├─ Heartbeat periódico
+   └─ Estado resumido do runtime
+       ↓
+[ Broker MQTT ]
 ```
 
 ---
@@ -122,6 +133,14 @@ DEV=true
 
 # Dry-run da assinatura HMAC (sem chamar backend)
 GN_HMAC_DRY_RUN=0
+
+# MQTT opcional para presença do device
+GN_MQTT_ENABLED=1
+GN_MQTT_BROKER_URL=mqtt://broker.gravanois.local:1883
+GN_MQTT_CLIENT_ID=raspberrypi-001
+GN_MQTT_HEARTBEAT_INTERVAL_SEC=30
+GN_MQTT_TOPIC_PREFIX=grn
+GN_AGENT_VERSION=1.0.0-edge
 
 # Configurações de buffer
 GN_SEG_TIME=1
@@ -225,6 +244,19 @@ O `ProcessingWorker` varre a fila periodicamente:
 - **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
 - **Erros HMAC/device não-retriáveis:** Quando a API retorna erros de autenticação/integridade do device (ex.: `signature_mismatch`, `client_mismatch`, `device_revoked`), o worker remove o registro local (vídeo + sidecar) para evitar loop infinito de retry.
 
+### 7. Presença MQTT
+
+Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipeline principal:
+
+1. conecta ao broker sem bloquear captura e worker;
+2. publica presença retida em `grn/devices/{device_id}/presence`;
+3. publica heartbeat periódico em `grn/devices/{device_id}/heartbeat`;
+4. publica estado resumido em `grn/devices/{device_id}/state`;
+5. registra `last will` para marcar `offline` em queda abrupta;
+6. mantém `commands/in` e `commands/out` reservados para a fase futura.
+
+Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
+
 ---
 
 ## 📁 Estrutura de Diretórios
@@ -256,7 +288,13 @@ grava_nois_system/
 │   └── services/
 │       ├── api_client.py        # Cliente HTTP para backend
 │       ├── api_error_policy.py  # Regra de decisão para erros da API
-│       └── retry_upload.py      # Lógica de retry de upload
+│       ├── retry_upload.py      # Lógica de retry de upload
+│       └── mqtt/
+│           ├── mqtt_client.py            # Cliente MQTT e lifecycle
+│           ├── device_presence_service.py# Presença, heartbeat e estado
+│           ├── command_dispatcher.py     # Estrutura futura de command/control
+│           ├── command_executor.py       # Placeholder sem execução real
+│           └── command_policy.py         # Política que bloqueia comandos na fase 1
 │
 ├── files/
 │   ├── replay_grava_nois.png    # Logo principal (original)
@@ -501,9 +539,268 @@ GN_LOG_DIR=/caminho/custom/logs # Diretório de logs (fallback: <raiz-do-projeto
 
 Observações:
 - Se `GN_LOG_DIR` não for definido, o sistema cria e usa `logs/` na raiz do projeto (mesma pasta de `main.py`).
+- O módulo MQTT usa `logs/mqtt.log` para isolar heartbeat/presença do `app.log`.
 - Em falhas `401/403` nas rotas assinadas, o logger registra somente `path`, `timestamp`, `nonce`, `body_sha256` e assinatura truncada.
 - `DEVICE_SECRET` nunca é escrito nos logs.
 - O fallback padrão não depende de caminho absoluto de container Docker.
+
+## 📡 Presença MQTT
+
+### Objetivo
+
+Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura.
+
+### Variáveis principais
+
+- `GN_MQTT_ENABLED`: habilita/desabilita o serviço MQTT
+- `GN_MQTT_BROKER_URL` ou `GN_MQTT_HOST` + `GN_MQTT_PORT`: broker MQTT
+- `GN_MQTT_USERNAME` e `GN_MQTT_PASSWORD`: credenciais do broker
+- `GN_MQTT_CLIENT_ID`: identificador MQTT do cliente; default em `DEVICE_ID`
+- `GN_MQTT_KEEPALIVE`: keepalive MQTT
+- `GN_MQTT_HEARTBEAT_INTERVAL_SEC`: intervalo do heartbeat
+- `GN_MQTT_TOPIC_PREFIX`: prefixo base dos tópicos, default `grn`
+- `GN_MQTT_QOS`: QoS padrão de publish/subscribe
+- `GN_MQTT_RETAIN_PRESENCE`: mantém `presence` retido no broker
+- `GN_MQTT_TLS`: força TLS quando necessário
+- `GN_AGENT_VERSION`: versão publicada no payload do edge
+
+### Tópicos da fase 1
+
+- `grn/devices/{device_id}/presence`
+- `grn/devices/{device_id}/heartbeat`
+- `grn/devices/{device_id}/state`
+- `grn/devices/{device_id}/events`
+- `grn/devices/{device_id}/alerts`
+- `grn/devices/{device_id}/commands/in`
+- `grn/devices/{device_id}/commands/out`
+
+### Exemplos por tópico
+
+#### `grn/devices/{device_id}/presence`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/presence
+```
+
+Exemplo de payload:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "online",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:10:00+00:00",
+  "last_seen": "2026-04-05T19:10:00+00:00",
+  "queue_size": 0,
+  "hostname": "raspberrypi",
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico"
+  }
+}
+```
+
+Exemplo de `offline` limpo:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "offline",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:20:00+00:00",
+  "last_seen": "2026-04-05T19:20:00+00:00",
+  "queue_size": 0,
+  "hostname": "raspberrypi",
+  "disconnect_reason": "clean_shutdown",
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico"
+  }
+}
+```
+
+#### `grn/devices/{device_id}/heartbeat`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/heartbeat
+```
+
+Exemplo de payload:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "online",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:10:30+00:00",
+  "last_seen": "2026-04-05T19:10:30+00:00",
+  "queue_size": 1,
+  "hostname": "raspberrypi",
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico"
+  }
+}
+```
+
+#### `grn/devices/{device_id}/state`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/state
+```
+
+Exemplo de payload:
+```json
+{
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "status": "online",
+  "agent_version": "1.0.0-edge",
+  "timestamp": "2026-04-05T19:10:30+00:00",
+  "last_seen": "2026-04-05T19:10:30+00:00",
+  "queue_size": 1,
+  "health": {
+    "camera_count": 2,
+    "online_cameras": 2,
+    "trigger_source": "pico",
+    "gpio_enabled": false,
+    "pico_enabled": true
+  },
+  "cameras": [
+    {
+      "camera_id": "cam01",
+      "camera_name": "Quadra 1",
+      "source_type": "rtsp",
+      "queue_size": 1,
+      "capture_busy": false,
+      "ffmpeg_alive": true
+    },
+    {
+      "camera_id": "cam02",
+      "camera_name": "Quadra 2",
+      "source_type": "rtsp",
+      "queue_size": 0,
+      "capture_busy": false,
+      "ffmpeg_alive": true
+    }
+  ],
+  "runtime": {
+    "light_mode": false,
+    "dev_mode": true,
+    "mqtt_enabled": "1"
+  }
+}
+```
+
+#### `grn/devices/{device_id}/events`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/events
+```
+
+Exemplo de payload futuro:
+```json
+{
+  "device_id": "edge-test-01",
+  "event": "clip_enqueued",
+  "timestamp": "2026-04-05T19:11:00+00:00",
+  "details": {
+    "camera_id": "cam01",
+    "file_name": "highlight_cam01_20260405-191100Z.mp4"
+  }
+}
+```
+
+Observação:
+- tópico reservado para evolução futura; a fase 1 não publica eventos operacionais nele.
+
+#### `grn/devices/{device_id}/alerts`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/alerts
+```
+
+Exemplo de payload futuro:
+```json
+{
+  "device_id": "edge-test-01",
+  "severity": "warning",
+  "code": "camera_offline",
+  "timestamp": "2026-04-05T19:12:00+00:00",
+  "message": "Camera cam02 sem segmentos recentes"
+}
+```
+
+Observação:
+- tópico reservado para evolução futura; a fase 1 não publica alertas dedicados nele.
+
+#### `grn/devices/{device_id}/commands/in`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/commands/in
+```
+
+Exemplo de mensagem recebida:
+```json
+{
+  "command": "restart_service",
+  "request_id": "cmd-001",
+  "issued_by": "admin-user"
+}
+```
+
+Observação:
+- a fase 1 não executa comandos remotos; qualquer mensagem recebida aqui é rejeitada.
+
+#### `grn/devices/{device_id}/commands/out`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/commands/out
+```
+
+Exemplo de resposta publicada na fase 1:
+```json
+{
+  "device_id": "edge-test-01",
+  "command": "restart_service",
+  "status": "rejected",
+  "reason": "remote commands are not enabled in phase 1",
+  "source_topic": "grn/devices/edge-test-01/commands/in"
+}
+```
+
+### Payload mínimo publicado
+
+- `device_id`
+- `client_id`
+- `venue_id`
+- `status`
+- `agent_version`
+- `timestamp`
+- `last_seen`
+- `queue_size`
+- `health`
+
+### Garantias desta fase
+
+- MQTT é opcional e isolado do fluxo de replay
+- `presence` usa retained message e `last will`
+- heartbeats não executam comandos
+- qualquer comando recebido em `commands/in` é rejeitado explicitamente
 
 ### Câmera V4L2 (Local)
 
@@ -927,6 +1224,7 @@ rm logs/app.log.*
 
 - **Console:** INFO e acima (mensagens importantes)
 - **Arquivo `logs/app.log`:** DEBUG e acima (tudo)
+- **Arquivo `logs/mqtt.log`:** lifecycle MQTT, heartbeat e presença
 - **Arquivo `logs/ffmpeg.log`:** saída consolidada do FFmpeg (`stdout` + `stderr`)
 
 ### Formato

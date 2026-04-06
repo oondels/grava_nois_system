@@ -91,3 +91,13 @@ Também devem excluir localmente mensagens com snippet:
 - logs devem truncar assinatura HMAC;
 - logs devem evitar segredos, tokens e credenciais;
 - erros operacionais devem preservar contexto suficiente para auditoria local.
+
+## MQTT presence rules
+
+- MQTT deve poder ser desligado integralmente por configuração;
+- indisponibilidade do broker não pode interromper captura, trigger, worker ou retry local;
+- `presence` deve distinguir `online`, `offline` limpo e `offline` por queda abrupta via `last will`;
+- `heartbeat` deve atualizar `last_seen` sem gerar ruído excessivo de log;
+- `mqtt.log` deve ser separado do `app.log`;
+- credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
+- `commands/in` e `commands/out` podem existir, mas nenhum comando remoto pode ser executado na fase 1.

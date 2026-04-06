@@ -62,6 +62,9 @@ Bootstrap em [`main.py`](../../../main.py):
 - [`src/services/api_client.py`](../../../src/services/api_client.py)
 - [`src/services/api_error_policy.py`](../../../src/services/api_error_policy.py)
 - [`src/services/retry_upload.py`](../../../src/services/retry_upload.py)
+- `src/services/mqtt/mqtt_client.py`
+- `src/services/mqtt/device_presence_service.py`
+- `src/services/mqtt/command_dispatcher.py`
 
 ### Utilities
 
@@ -99,6 +102,22 @@ Diretórios principais:
 - `logs/`
 
 O sistema usa o filesystem como fila, lock e trilha de auditoria local.
+
+## MQTT presence layer
+
+Camada opcional e isolada do pipeline principal:
+
+- cliente MQTT com reconexão controlada e `last will`;
+- publicação de `presence`, `heartbeat` e `state`;
+- logger dedicado em `mqtt.log`;
+- estrutura de `commands/in` e `commands/out` preparada para a fase futura;
+- política explícita que bloqueia execução remota na fase 1.
+
+Ponto de integração:
+
+- bootstrap em `main.py` após iniciar câmeras e workers;
+- falhas do broker não derrubam captura, trigger nem worker;
+- payload é derivado de snapshot barato do runtime, sem dependência circular com a fila.
 
 ## Operating modes
 

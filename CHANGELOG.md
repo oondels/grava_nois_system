@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-05
+
+### Added
+- Camada MQTT dedicada em `src/services/mqtt/` com cliente, presença do device e placeholders de command/control.
+- Publicação opcional de `presence`, `heartbeat` e `state` para o namespace `grn/devices/{device_id}/...`.
+- Novo arquivo de log dedicado `mqtt.log`.
+- Novos testes `tests/test_mqtt_settings.py`, `tests/test_device_presence_service.py` e `tests/test_mqtt_commands.py`.
+
+### Changed
+- `main.py` passou a integrar o lifecycle do serviço MQTT sem acoplar na pipeline principal de captura/upload.
+- `src/config/settings.py` passou a centralizar configuração MQTT e `GN_AGENT_VERSION`.
+- `README.md`, specs do edge e `.env.example` foram atualizados para documentar a presença MQTT da fase 1 e o bloqueio explícito de comandos remotos.
+
 ## 2026-04-04
 
 ### Added

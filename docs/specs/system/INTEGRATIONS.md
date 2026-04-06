@@ -41,6 +41,23 @@ Variáveis importantes:
 - `GN_MAX_ATTEMPTS`
 - `DEV`
 - `GN_TRIGGER_MAX_WORKERS`
+- `GN_AGENT_VERSION`
+
+### MQTT
+
+- `GN_MQTT_ENABLED`
+- `GN_MQTT_BROKER_URL`
+- `GN_MQTT_HOST`
+- `GN_MQTT_PORT`
+- `GN_MQTT_USERNAME`
+- `GN_MQTT_PASSWORD`
+- `GN_MQTT_CLIENT_ID`
+- `GN_MQTT_KEEPALIVE`
+- `GN_MQTT_HEARTBEAT_INTERVAL_SEC`
+- `GN_MQTT_TOPIC_PREFIX`
+- `GN_MQTT_QOS`
+- `GN_MQTT_RETAIN_PRESENCE`
+- `GN_MQTT_TLS`
 
 ### Time window
 
@@ -77,6 +94,49 @@ Observações:
 
 - o cliente ainda aceita `Authorization: Bearer`, mas as rotas protegidas dependem de HMAC;
 - `GN_HMAC_DRY_RUN` permite validar canonical string e headers sem chamar backend.
+
+## MQTT broker
+
+Cliente: `src/services/mqtt/mqtt_client.py`
+
+Publicações da fase 1:
+
+- `grn/devices/{device_id}/presence` (retained)
+- `grn/devices/{device_id}/heartbeat`
+- `grn/devices/{device_id}/state`
+
+Tópicos reservados para evolução futura:
+
+- `grn/devices/{device_id}/events`
+- `grn/devices/{device_id}/alerts`
+- `grn/devices/{device_id}/commands/in`
+- `grn/devices/{device_id}/commands/out`
+
+Observações:
+
+- `last will` marca `offline` quando a conexão cai abruptamente;
+- o edge continua operando sem broker;
+- a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.
+
+Exemplos rápidos por tópico:
+
+- `presence`
+  - tópico: `grn/devices/edge-test-01/presence`
+  - payload típico: `status=online|offline`, `last_seen`, `queue_size`, `health`
+- `heartbeat`
+  - tópico: `grn/devices/edge-test-01/heartbeat`
+  - payload típico: mesmo envelope base de presença com `status=online`
+- `state`
+  - tópico: `grn/devices/edge-test-01/state`
+  - payload típico: envelope expandido com `cameras[]` e `runtime`
+- `events`
+  - tópico reservado para eventos operacionais futuros; fase 1 não publica nele
+- `alerts`
+  - tópico reservado para alertas futuros; fase 1 não publica nele
+- `commands/in`
+  - aceita mensagens de comando para evolução futura, mas a fase 1 não executa nada
+- `commands/out`
+  - publica resposta de rejeição: `status=rejected`, `reason=remote commands are not enabled in phase 1`
 
 ## Request signing
 
