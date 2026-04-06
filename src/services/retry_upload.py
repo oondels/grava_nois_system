@@ -94,8 +94,6 @@ def retry_failed_uploads(
 
             logger.info(f"Retry: registrando metadados de {video_path.name}")
             resp = api_client.register_clip_metadados(payload, timeout=15.0)
-            print("Resposta do backend:")
-            print(resp)
 
             resp_data = (resp or {}).get("data") or {}
             meta.setdefault("remote_registration", {})
