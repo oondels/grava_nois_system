@@ -254,12 +254,15 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 3. publica heartbeat periódico em `grn/devices/{device_id}/heartbeat`;
 4. publica estado resumido em `grn/devices/{device_id}/state`;
 5. registra `last will` para marcar `offline` em queda abrupta;
-6. mantém `commands/in` e `commands/out` reservados para a fase futura.
+6. assina `config/desired` para configuração operacional remota segura;
+7. publica `config/reported` com resultado de aplicação/rejeição;
+8. mantém `commands/in` e `commands/out` reservados para a fase futura.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
 Observação de tópico:
 - `DEVICE_ID`/`GN_DEVICE_ID` usado no namespace MQTT deve ser um único nível de tópico. Valores com `/`, `+`, `#` ou byte nulo são rejeitados ao montar os tópicos para evitar wildcard/hierarquia inesperada; nesse caso a presença MQTT é ignorada sem derrubar captura/worker.
+- configuração remota exige `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura HMAC; sem esse segredo, mensagens `config/desired` são rejeitadas.
 
 ---
 
@@ -614,6 +617,8 @@ Observação:
 - `grn/devices/{device_id}/state`
 - `grn/devices/{device_id}/events`
 - `grn/devices/{device_id}/alerts`
+- `grn/devices/{device_id}/config/desired`
+- `grn/devices/{device_id}/config/reported`
 - `grn/devices/{device_id}/commands/in`
 - `grn/devices/{device_id}/commands/out`
 
@@ -789,6 +794,68 @@ Exemplo de payload futuro:
 Observação:
 - tópico reservado para evolução futura; a fase 1 não publica alertas dedicados nele.
 
+#### `grn/devices/{device_id}/config/desired`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/desired
+```
+
+Exemplo de mensagem recebida:
+```json
+{
+  "type": "config.desired",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "config_version": 12,
+  "desired_hash": "sha256:...",
+  "correlation_id": "cfg-001",
+  "issued_at": "2026-04-07T17:00:00+00:00",
+  "expires_at": "2026-04-07T17:05:00+00:00",
+  "desired_config": {},
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Observação:
+- `desired_config` deve ser uma configuração operacional completa e não sensível;
+- secrets, tokens, credenciais MQTT e RTSP com `user:pass@` são rejeitados;
+- o payload é validado contra hash, expiração, versão, tenant/device e assinatura HMAC com `DEVICE_SECRET`.
+
+#### `grn/devices/{device_id}/config/reported`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/reported
+```
+
+Exemplo de resposta publicada:
+```json
+{
+  "type": "config.reported",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "config_version": 12,
+  "correlation_id": "cfg-001",
+  "status": "pending_restart",
+  "requires_restart": true,
+  "reported_hash": "sha256:...",
+  "reported_at": "2026-04-07T17:00:03+00:00",
+  "rejection_reason": null,
+  "agent_version": "1.0.0-edge"
+}
+```
+
+Estados possíveis nesta fase:
+- `applied`: promovida para `config.json`;
+- `pending_restart`: validada e gravada em `config.pending.json`, aguardando restart/reload controlado;
+- `rejected`: rejeitada sem alterar `config.json`.
+
 #### `grn/devices/{device_id}/commands/in`
 
 Exemplo de tópico:
@@ -844,6 +911,8 @@ Exemplo de resposta publicada na fase 1:
 - `presence` usa retained message e `last will`
 - heartbeats não executam comandos
 - qualquer comando recebido em `commands/in` é rejeitado explicitamente
+- configuração remota usa `config/desired`, não `commands/in`
+- `config.json` é atualizado por escrita atômica e mantém `config.backup.json` quando promovido
 
 ### Câmera V4L2 (Local)
 

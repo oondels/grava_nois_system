@@ -7,6 +7,7 @@
 - Validação de `config.json` em `src/config/config_schema.py`: tipos, ranges, enums e consistência de campos.
 - `config.example.json` na raiz do projeto com todos os domínios funcionais documentados.
 - `env_to_config.sh` para converter `.env` legado em `config.json` sem migrar segredos ou identidade de device.
+- `DeviceConfigService` para receber `config/desired`, validar assinatura/hash/schema, persistir `config.pending.json` e reportar `config/reported`.
 - `docs/specs/system/CONFIGURATION.md` descrevendo modelo de precedência, o que vai em `config.json`, o que fica em env, hot-reload vs. restart e guia de migração.
 - Suporte a referência `env:VAR_NAME` no campo `rtspUrl` de câmeras para evitar credenciais RTSP em texto plano no `config.json`.
 - Override de path via `GN_CONFIG_PATH` para localização customizada do `config.json`.

@@ -54,6 +54,7 @@ Testes visíveis:
 - `test_mqtt_settings.py`
 - `test_device_presence_service.py`
 - `test_mqtt_commands.py`
+- `test_device_config_service.py`
 
 Esses testes cobrem os pontos mais sensíveis do edge:
 
@@ -67,6 +68,7 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - composição mobile/vertical do FFmpeg.
 - bootstrap e payload mínimo de presença MQTT.
 - bloqueio explícito de command/control na fase 1.
+- validação, persistência pending/applied e reports da configuração remota.
 
 ## Known operational caveats
 
@@ -77,6 +79,7 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - há `.pyc` em `tests/__pycache__` e `src/__pycache__` no workspace, mas não fazem parte do contrato de runtime;
 - existe `docker-compose.yml` no repositório do system com mudança local não relacionada, então commits devem ser isolados.
 - MQTT pode ficar habilitado sem broker disponível; isso deve degradar para warning/log e seguir com o pipeline principal.
+- remote config depende de `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura; sem segredo, mensagens `config/desired` são rejeitadas.
 
 ## Audit cautions
 

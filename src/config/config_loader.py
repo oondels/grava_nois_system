@@ -74,6 +74,11 @@ def _default_config_path() -> Path:
     return _DEFAULT_CONFIG_PATH
 
 
+def get_config_path() -> Path:
+    """Retorna o path efetivo do config.json sem carregar a configuração."""
+    return _default_config_path()
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses de configuração operacional
 # ---------------------------------------------------------------------------

@@ -139,6 +139,51 @@ Para forçar recarga da config em memória (ex: testes), chame `reset_config_cac
 
 ---
 
+## Configuração remota via MQTT
+
+O edge possui `DeviceConfigService` em `src/services/mqtt/device_config_service.py` para receber configuração operacional remota de forma separada do `CommandDispatcher`.
+
+Tópicos:
+
+- entrada: `grn/devices/{device_id}/config/desired`
+- saída: `grn/devices/{device_id}/config/reported`
+
+Contrato de entrada:
+
+- `type`: `config.desired`
+- `device_id`, `client_id`, `venue_id`
+- `schema_version`: `1`
+- `config_version`: inteiro monotônico
+- `desired_hash`: `sha256:<hex>` calculado sobre o JSON canônico do `desired_config` preparado com `version` e `updatedAt`
+- `correlation_id`
+- `issued_at`, `expires_at`
+- `desired_config`: configuração operacional completa e não sensível
+- `signature`: HMAC-SHA256 base64 do envelope canônico
+- `signature_version`: opcional, padrão `hmac-sha256-v1`
+
+Canonical string da assinatura:
+
+```text
+v1:CONFIG_DESIRED:{device_id}:{config_version}:{correlation_id}:{issued_at}:{expires_at}:{desired_hash}
+```
+
+Persistência local:
+
+- `config.pending.json`: versão validada aguardando restart/reload controlado;
+- `config.backup.json`: cópia da última `config.json` antes de promoção;
+- `config.state.json`: metadata local de versão/hash/status;
+- `config.json`: só é sobrescrito por escrita atômica após validação completa e quando a mudança não exige restart.
+
+Estados reportados:
+
+- `applied`: configuração promovida para `config.json`;
+- `pending_restart`: configuração validada e gravada em `config.pending.json`, mas exige restart/reload controlado;
+- `rejected`: payload rejeitado por schema, hash, expiração, assinatura, tenant/device divergente, versão antiga ou campo sensível.
+
+O backend continua sendo a fonte de verdade futura para desired/applied config. MQTT é apenas canal de entrega e reporte.
+
+---
+
 ## Migração de instalações existentes
 
 Instalações sem `config.json` continuam funcionando sem alteração — todas as variáveis de ambiente continuam sendo lidas como fallback.

@@ -109,6 +109,8 @@ Camada opcional e isolada do pipeline principal:
 
 - cliente MQTT com reconexão controlada e `last will`;
 - publicação de `presence`, `heartbeat` e `state`;
+- assinatura de `config/desired` em serviço dedicado para configuração operacional remota segura;
+- publicação de `config/reported` com resultado `applied`, `pending_restart` ou `rejected`;
 - logger dedicado em `mqtt.log`;
 - estrutura de `commands/in` e `commands/out` preparada para a fase futura;
 - política explícita que bloqueia execução remota na fase 1.
@@ -116,6 +118,7 @@ Camada opcional e isolada do pipeline principal:
 Ponto de integração:
 
 - bootstrap em `main.py` após iniciar câmeras e workers;
+- `DeviceConfigService` fica separado de `CommandDispatcher` para não transformar config remota em command/control arbitrário;
 - falhas do broker não derrubam captura, trigger nem worker;
 - payload é derivado de snapshot barato do runtime, sem dependência circular com a fila.
 

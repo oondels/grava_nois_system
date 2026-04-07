@@ -103,3 +103,14 @@ Também devem excluir localmente mensagens com snippet:
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
 - `device_id` usado em tópicos MQTT deve rejeitar separadores de nível e wildcards (`/`, `+`, `#`);
 - `commands/in` e `commands/out` podem existir, mas nenhum comando remoto pode ser executado na fase 1.
+
+## Remote config rules
+
+- configuração remota usa `config/desired` e `config/reported`, nunca `commands/in`;
+- `desired_config` deve ser um objeto completo de configuração operacional não sensível;
+- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC;
+- a assinatura usa `DEVICE_SECRET`/`GN_DEVICE_SECRET`; sem esse segredo, o payload é rejeitado;
+- secrets, credenciais MQTT, tokens, `DEVICE_SECRET` e RTSP com `user:pass@` são rejeitados;
+- campos que exigem restart são gravados em `config.pending.json` e reportados como `pending_restart`;
+- mudanças em domínios hot-reload-safe podem ser promovidas atomicamente para `config.json`;
+- rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.
