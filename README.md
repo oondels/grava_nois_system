@@ -353,9 +353,33 @@ O sistema cria os seguintes diretórios se não existirem:
 
 ## ⚙️ Configuração
 
+### config.json — Configuração operacional gerenciada
+
+O sistema suporta um arquivo `config.json` na raiz do projeto para parâmetros operacionais não sensíveis.
+
+**Política de precedência:**
+```
+defaults → variáveis de ambiente (fallback legado) → config.json (vence quando presente)
+```
+
+Instalações existentes sem `config.json` continuam funcionando via env sem alteração.
+
+Para criar:
+```bash
+cp config.example.json config.json
+# edite os campos desejados
+```
+
+- Documentação completa: [`docs/specs/system/CONFIGURATION.md`](docs/specs/system/CONFIGURATION.md)
+- Override de path: `GN_CONFIG_PATH=/caminho/para/config.json`
+
+**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
+
+---
+
 ### Variáveis de Ambiente
 
-Todas as configurações podem ser feitas via variáveis de ambiente ou arquivo `.env`:
+Parâmetros de segredos, identidade e deploy são configurados exclusivamente via variáveis de ambiente ou arquivo `.env`. Parâmetros operacionais também podem vir de `config.json` (ver acima).
 
 #### Câmera RTSP
 

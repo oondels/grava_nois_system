@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlparse
 
+from src.config.config_loader import (
+    OperationalConfig,
+    get_effective_config,
+)
+
 
 @dataclass
 class CaptureConfig:
@@ -134,15 +139,16 @@ def _parse_mqtt_host_and_port(
 
 
 def load_mqtt_config() -> MQTTConfig:
-    enabled = _env_bool("GN_MQTT_ENABLED", False)
-    broker_url = _env_str("GN_MQTT_BROKER_URL") or _env_str("GN_MQTT_HOST")
-    default_port = _env_int("GN_MQTT_PORT", 1883)
-    host, port_from_url, tls_from_url = _parse_mqtt_host_and_port(
-        broker_url,
-        default_port,
-    )
-    port = _env_int("GN_MQTT_PORT", port_from_url)
-    use_tls = _env_bool("GN_MQTT_TLS", tls_from_url)
+    """Carrega configuração MQTT a partir do loader central + segredos de env.
+
+    Parâmetros operacionais (host, port, tls, keepalive, etc.) vêm do
+    config_loader (config.json → env → defaults).
+    Credenciais (username, password) sempre de env/secret.
+    """
+    cfg: OperationalConfig = get_effective_config()
+    mqtt = cfg.mqtt
+
+    # client_id: identidade do device — sempre de env, nunca de config.json
     client_id = (
         _env_str("GN_MQTT_CLIENT_ID")
         or _env_str("DEVICE_ID")
@@ -151,39 +157,45 @@ def load_mqtt_config() -> MQTTConfig:
     )
 
     return MQTTConfig(
-        enabled=enabled,
-        host=host,
-        port=port,
+        enabled=mqtt.enabled,
+        host=mqtt.broker.host,
+        port=mqtt.broker.port,
+        # credenciais: sempre de env/secret
         username=_env_str("GN_MQTT_USERNAME") or None,
         password=_env_str("GN_MQTT_PASSWORD") or None,
         client_id=client_id,
-        keepalive=_env_int("GN_MQTT_KEEPALIVE", 60),
-        heartbeat_interval_sec=_env_int("GN_MQTT_HEARTBEAT_INTERVAL_SEC", 30),
-        topic_prefix=_env_str("GN_MQTT_TOPIC_PREFIX", "grn"),
-        qos=max(0, min(2, _env_int("GN_MQTT_QOS", 1))),
-        retain_presence=_env_bool("GN_MQTT_RETAIN_PRESENCE", True),
-        use_tls=use_tls,
+        keepalive=mqtt.keepalive_seconds,
+        heartbeat_interval_sec=mqtt.heartbeat_interval_seconds,
+        topic_prefix=mqtt.topic_prefix,
+        qos=mqtt.qos,
+        retain_presence=mqtt.retain_presence,
+        use_tls=mqtt.broker.tls,
+        # agent_version: de env/deploy, não de config.json
         agent_version=_env_str("GN_AGENT_VERSION", "local-dev"),
     )
 
 
 def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
-    cameras_json = (os.getenv("GN_CAMERAS_JSON") or "").strip()
-    rtsp_urls_csv = (os.getenv("GN_RTSP_URLS") or "").strip()
-    rtsp_url_legacy = (os.getenv("GN_RTSP_URL") or "").strip()
+    """Carrega configurações de câmera a partir do loader central ou env legado.
 
-    has_any_rtsp_source = bool(cameras_json or rtsp_urls_csv or rtsp_url_legacy)
+    Política de fonte de câmeras:
+      1. Se config.json possui array 'cameras' não vazio → usa-o (gerenciado)
+      2. Caso contrário → fallback para GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL (env legado)
+      3. Se nenhuma fonte RTSP → câmera V4L2 local
 
-    if has_any_rtsp_source:
-        pre_seg_cfg = _env_int("GN_RTSP_PRE_SEGMENTS", 6)
-        post_seg_cfg = _env_int("GN_RTSP_POST_SEGMENTS", 3)
-        pre_sec_cfg = pre_seg_cfg * seg_time
-        post_sec_cfg = post_seg_cfg * seg_time
-    else:
-        pre_seg_cfg = None
-        post_seg_cfg = None
-        pre_sec_cfg = 25
-        post_sec_cfg = 10
+    URLs RTSP com credenciais devem usar 'env:VAR_NAME' em config.json ou
+    permanecer exclusivamente em GN_CAMERAS_JSON / GN_RTSP_URL no env.
+    """
+    cfg: OperationalConfig = get_effective_config()
+    capture = cfg.capture
+
+    # Usa pre/post segments da config operacional como base para fontes RTSP
+    pre_seg_cfg = capture.pre_segments
+    post_seg_cfg = capture.post_segments
+    pre_sec_cfg = pre_seg_cfg * seg_time
+    post_sec_cfg = post_seg_cfg * seg_time
+
+    buffer_base = Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer"))
 
     def _build_rtsp_cfg(
         camera_id: str,
@@ -191,36 +203,98 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
         camera_name: Optional[str],
         use_isolated_dirs: bool,
         pico_trigger_token: Optional[str] = None,
+        pre_seg_override: Optional[int] = None,
+        post_seg_override: Optional[int] = None,
     ) -> CaptureConfig:
         camera_suffix = Path(camera_id) if use_isolated_dirs else Path()
+        _pre_seg = pre_seg_override if pre_seg_override is not None else pre_seg_cfg
+        _post_seg = post_seg_override if post_seg_override is not None else post_seg_cfg
         return CaptureConfig(
             camera_id=camera_id,
             camera_name=camera_name,
             source_type="rtsp",
             rtsp_url=url,
-            buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer"))
-            / camera_suffix,
+            buffer_dir=buffer_base / camera_suffix,
             clips_dir=base / "recorded_clips" / camera_suffix,
             queue_dir=base / "queue_raw" / camera_suffix,
             failed_dir_highlight=base / "failed_clips" / camera_suffix,
             seg_time=seg_time,
-            pre_seconds=pre_sec_cfg,
-            post_seconds=post_sec_cfg,
+            pre_seconds=_pre_seg * seg_time,
+            post_seconds=_post_seg * seg_time,
             scan_interval=1,
             max_buffer_seconds=40,
-            pre_segments=pre_seg_cfg,
-            post_segments=post_seg_cfg,
+            pre_segments=_pre_seg,
+            post_segments=_post_seg,
             pico_trigger_token=pico_trigger_token,
         )
+
+    # --- Fonte 1: cameras de config.json ---
+    if cfg.cameras:
+        enabled = [c for c in cfg.cameras if c.enabled]
+        configs: List[CaptureConfig] = []
+        use_isolated_dirs = len(enabled) > 1
+        for cam in enabled:
+            if cam.source_type == "v4l2":
+                configs.append(
+                    CaptureConfig(
+                        camera_id=cam.id,
+                        camera_name=cam.name,
+                        source_type="v4l2",
+                        buffer_dir=buffer_base,
+                        clips_dir=base / "recorded_clips",
+                        queue_dir=base / "queue_raw",
+                        device=capture.v4l2.device,
+                        seg_time=seg_time,
+                        pre_seconds=pre_sec_cfg,
+                        post_seconds=post_sec_cfg,
+                        scan_interval=1,
+                        max_buffer_seconds=40,
+                        failed_dir_highlight=base / "failed_clips",
+                        pre_segments=pre_seg_cfg,
+                        post_segments=post_seg_cfg,
+                    )
+                )
+                continue
+
+            rtsp_url = cam.resolve_rtsp_url()
+            if not rtsp_url:
+                continue
+            configs.append(
+                _build_rtsp_cfg(
+                    camera_id=cam.id,
+                    url=rtsp_url,
+                    camera_name=cam.name,
+                    use_isolated_dirs=use_isolated_dirs,
+                    pico_trigger_token=cam.pico_trigger_token,
+                    pre_seg_override=cam.pre_segments,
+                    post_seg_override=cam.post_segments,
+                )
+            )
+        if configs:
+            return configs
+
+    # --- Fonte 2: env legado (GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL) ---
+    cameras_json = (os.getenv("GN_CAMERAS_JSON") or "").strip()
+    rtsp_urls_csv = (os.getenv("GN_RTSP_URLS") or "").strip()
+    rtsp_url_legacy = (os.getenv("GN_RTSP_URL") or "").strip()
+
+    has_any_rtsp_source = bool(cameras_json or rtsp_urls_csv or rtsp_url_legacy)
+
+    if not has_any_rtsp_source:
+        # Sem RTSP: ajusta pre/post para V4L2
+        pre_sec_cfg = 25
+        post_sec_cfg = 10
+        pre_seg_cfg = None  # type: ignore[assignment]
+        post_seg_cfg = None  # type: ignore[assignment]
 
     if cameras_json:
         parsed = json.loads(cameras_json)
         if not isinstance(parsed, list):
             raise ValueError("GN_CAMERAS_JSON deve ser uma lista JSON")
-        enabled = [c for c in parsed if isinstance(c, dict) and c.get("enabled", True)]
-        configs: List[CaptureConfig] = []
-        use_isolated_dirs = len(enabled) > 1
-        for idx, camera in enumerate(enabled, start=1):
+        enabled_env = [c for c in parsed if isinstance(c, dict) and c.get("enabled", True)]
+        configs = []
+        use_isolated_dirs = len(enabled_env) > 1
+        for idx, camera in enumerate(enabled_env, start=1):
             rtsp_url = str(camera.get("rtsp_url") or "").strip()
             if not rtsp_url:
                 continue
@@ -265,15 +339,16 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
             )
         ]
 
+    # --- Fonte 3: V4L2 local (fallback final) ---
     return [
         CaptureConfig(
             camera_id="cam01",
             camera_name="local_device",
             source_type="v4l2",
-            buffer_dir=Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer")),
+            buffer_dir=buffer_base,
             clips_dir=base / "recorded_clips",
             queue_dir=base / "queue_raw",
-            device="/dev/video0",
+            device=capture.v4l2.device,
             seg_time=seg_time,
             pre_seconds=pre_sec_cfg,
             post_seconds=post_sec_cfg,

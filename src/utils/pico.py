@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.config.config_loader import get_effective_config
 from src.utils.device import is_raspberry_pi
 
 _PICO_HINTS = (
@@ -37,20 +38,18 @@ def _log_error(logger: Any | None, message: str) -> None:
 
 
 def resolve_trigger_source(logger: Any | None = None) -> str:
-    """
-    Resolve origem de trigger física.
+    """Resolve origem de trigger física.
 
-    GN_TRIGGER_SOURCE:
-    - auto (padrão): gpio no Raspberry; pico fora do Raspberry
-    - gpio
-    - pico
-    - both
+    Lê triggers.source do loader central (config.json → env GN_TRIGGER_SOURCE → 'auto').
+
+    Valores válidos: auto, gpio, pico, both
+    - auto: gpio no Raspberry Pi; pico em outros dispositivos
     """
-    configured = (os.getenv("GN_TRIGGER_SOURCE") or "auto").strip().lower()
+    configured = get_effective_config().triggers.source or "auto"
     if configured not in _VALID_TRIGGER_SOURCES:
         _log_warning(
             logger,
-            f"GN_TRIGGER_SOURCE inválido ({configured!r}); usando auto",
+            f"triggers.source inválido ({configured!r}); usando auto",
         )
         configured = "auto"
 

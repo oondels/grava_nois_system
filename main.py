@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
+from src.config.config_loader import get_effective_config
 from src.config.settings import CaptureConfig, load_capture_configs, load_mqtt_config
 from src.services.mqtt.command_dispatcher import CommandDispatcher
 from src.services.mqtt.device_presence_service import (
@@ -139,42 +140,21 @@ def _serial_line_is_trigger(line: str, token: str) -> bool:
 def main() -> int:
     base = Path(__file__).resolve().parent
 
-    # Modo leve (pula watermark/thumbnail) por env GN_LIGHT_MODE=1/true/yes
-    def _env_bool(name: str, default: bool = False) -> bool:
-        v = os.getenv(name)
-        if v is None:
-            return default
-        return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+    # Carrega config operacional (config.json → env → defaults)
+    op_cfg = get_effective_config()
 
-    light_mode = _env_bool("GN_LIGHT_MODE", False)
-    dev_mode = _env_bool("DEV", False)
+    # DEV mode permanece em env (flag de desenvolvimento — não vai para config.json)
+    dev_mode = os.getenv("DEV", "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
-    # Permite configurar seg_time via env GN_SEG_TIME
-    def _env_int(name: str, default: int) -> int:
-        v = os.getenv(name)
-        if v is None:
-            return default
-        try:
-            return max(1, int(float(v)))
-        except Exception:
-            return default
+    light_mode = op_cfg.processing.light_mode
+    seg_time_env = op_cfg.capture.segment_seconds
+    worker_max_attempts = op_cfg.processing.max_attempts
 
-    def _env_float(name: str, default: float) -> float:
-        v = os.getenv(name)
-        if v is None:
-            return default
-        try:
-            return float(v)
-        except Exception:
-            return default
-
-    seg_time_env = _env_int("GN_SEG_TIME", 1)
     mode_desc = f"modo leve: {light_mode}"
     if dev_mode:
         mode_desc += ", DEV=true (cooldown desativado)"
     logger.info(f"Segmento de {seg_time_env}s, {mode_desc}")
 
-    worker_max_attempts = _env_int("GN_MAX_ATTEMPTS", 3)
     camera_cfgs = load_capture_configs(base=base, seg_time=seg_time_env)
     logger.info(f"Câmeras ativas: {len(camera_cfgs)}")
 
@@ -187,7 +167,7 @@ def main() -> int:
         segbuf.start()
         runtimes.append(CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf))
 
-    max_workers = _env_int("GN_TRIGGER_MAX_WORKERS", len(runtimes))
+    max_workers = op_cfg.triggers.max_workers if op_cfg.triggers.max_workers is not None else len(runtimes)
     trigger_executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
 
     # pastas do worker
@@ -208,9 +188,9 @@ def main() -> int:
         if optimized_client_wm_path.exists()
         else default_client_wm_path
     )
-    wm_margin = _env_int("GN_WM_MARGIN", 24)
-    wm_opacity = _env_float("GN_WM_OPACITY", 0.8)
-    wm_rel_width = _env_float("GN_WM_REL_WIDTH", 0.18)
+    wm_margin = op_cfg.processing.watermark.margin
+    wm_opacity = op_cfg.processing.watermark.opacity
+    wm_rel_width = op_cfg.processing.watermark.relative_width
     primary_runtime = runtimes[0]
     primary_cfg = primary_runtime.cfg
 
@@ -247,13 +227,13 @@ def main() -> int:
     logger.info(f"Fonte de trigger físico selecionada: {trigger_source}")
 
     # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
-    gpio_cooldown_sec = float(os.getenv("GN_GPIO_COOLDOWN_SEC", "120"))
+    gpio_cooldown_sec = op_cfg.triggers.gpio.cooldown_seconds
 
     # Câmeras que participam do fan-out global (sem token Pico dedicado).
     # Se todas tiverem token dedicado, o fan-out global ainda dispara todas (fallback de debug).
     _fanout_runtimes = _get_fanout_targets(runtimes)
 
-    pico_trigger_token = (os.getenv("GN_PICO_TRIGGER_TOKEN") or "BTN_REPLAY").strip()
+    pico_trigger_token = op_cfg.triggers.pico.global_token or "BTN_REPLAY"
     pico_serial_port: str | None = None
     gpio_enabled = False
     pico_enabled = False
@@ -299,7 +279,13 @@ def main() -> int:
     stdin_t.start()
 
     # habilita GPIO se o modo selecionado permitir.
-    gpio_pin_env = os.getenv("GN_GPIO_PIN") or os.getenv("GPIO_PIN")
+    # pin: lido do loader (config.json → GN_GPIO_PIN/GPIO_PIN via env fallback)
+    _gpio_pin_from_cfg = op_cfg.triggers.gpio.pin
+    gpio_pin_env = (
+        str(_gpio_pin_from_cfg)
+        if _gpio_pin_from_cfg is not None
+        else (os.getenv("GN_GPIO_PIN") or os.getenv("GPIO_PIN"))
+    )
     pi = None
     cb = None
     if trigger_source in {"gpio", "both"} and gpio_pin_env is not None:
@@ -307,7 +293,7 @@ def main() -> int:
             gpio_pin = int(gpio_pin_env)
         except ValueError:
             logger.error(
-                f"Pino GPIO inválido em GN_GPIO_PIN/GPIO_PIN: {gpio_pin_env!r}"
+                f"Pino GPIO inválido (GN_GPIO_PIN/GPIO_PIN/triggers.gpio.pin): {gpio_pin_env!r}"
             )
             gpio_pin = None
 
@@ -315,7 +301,7 @@ def main() -> int:
             try:
                 import pigpio, subprocess
 
-                debounce_ms = float(os.getenv("GN_GPIO_DEBOUNCE_MS", "300"))
+                debounce_ms = op_cfg.triggers.gpio.debounce_ms
 
                 def _connect_pi():
                     p = pigpio.pi()
