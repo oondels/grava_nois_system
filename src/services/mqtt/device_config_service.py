@@ -407,12 +407,13 @@ def _canonical_signature_payload(payload: dict[str, Any], desired_hash: str) -> 
 
 
 def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:
+    config_version = payload.get("config_version")
     return ":".join(
         [
             "v1",
             "CONFIG_REPORTED",
             _required_str(payload, "device_id"),
-            str(_required_int(payload, "config_version")),
+            str(config_version if isinstance(config_version, int) else ""),
             str(payload.get("correlation_id") or ""),
             _required_str(payload, "reported_at"),
             _required_str(payload, "status"),

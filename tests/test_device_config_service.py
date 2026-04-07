@@ -322,6 +322,25 @@ class DeviceConfigServiceTests(unittest.TestCase):
 
         self.assertIn("antiga", str(ctx.exception))
 
+    def test_malformed_payload_still_publishes_signed_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _FakeMQTTClient()
+            service = self._service(Path(tmp), client)
+
+            service._handle_message(  # noqa: SLF001 - regression test for MQTT handler
+                "grn/devices/edge-01/config/desired",
+                json.dumps({"type": "config.desired"}).encode("utf-8"),
+            )
+
+        report = client.published[-1][1]
+        self.assertEqual(report["status"], "rejected")
+        self.assertIsNone(report["config_version"])
+        self.assertEqual(report["signature_version"], "hmac-sha256-v1")
+        self.assertEqual(
+            report["signature"],
+            sign_reported_config_payload(payload=report, device_secret="secret-123"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
