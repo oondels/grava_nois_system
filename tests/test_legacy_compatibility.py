@@ -6,11 +6,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config.config_loader import reset_config_cache
 from src.config.settings import load_capture_configs
 
 
 class LegacyCompatibilityTests(unittest.TestCase):
     """Validates backward compatibility: legacy GN_RTSP_URL mode and fallback chain."""
+
+    def setUp(self) -> None:
+        reset_config_cache()
+
+    def tearDown(self) -> None:
+        reset_config_cache()
 
     # ------------------------------------------------------------------ helpers
 

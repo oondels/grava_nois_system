@@ -6,6 +6,7 @@
 - Camada central de configuração persistente em `src/config/config_loader.py` com dataclasses tipados para todos os parâmetros operacionais não sensíveis.
 - Validação de `config.json` em `src/config/config_schema.py`: tipos, ranges, enums e consistência de campos.
 - `config.example.json` na raiz do projeto com todos os domínios funcionais documentados.
+- `env_to_config.sh` para converter `.env` legado em `config.json` sem migrar segredos ou identidade de device.
 - `docs/specs/system/CONFIGURATION.md` descrevendo modelo de precedência, o que vai em `config.json`, o que fica em env, hot-reload vs. restart e guia de migração.
 - Suporte a referência `env:VAR_NAME` no campo `rtspUrl` de câmeras para evitar credenciais RTSP em texto plano no `config.json`.
 - Override de path via `GN_CONFIG_PATH` para localização customizada do `config.json`.

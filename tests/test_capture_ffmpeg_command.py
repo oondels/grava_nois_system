@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.config.config_loader import reset_config_cache
 from src.config.settings import CaptureConfig
 from src.video.capture import start_ffmpeg
 
@@ -34,6 +35,12 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         "GN_RTSP_REENCODE", "GN_RTSP_FPS", "GN_RTSP_GOP",
         "GN_RTSP_PRESET", "GN_RTSP_CRF", "GN_RTSP_VSYNC", "GN_RTSP_USE_WALLCLOCK",
     }
+
+    def setUp(self) -> None:
+        reset_config_cache()
+
+    def tearDown(self) -> None:
+        reset_config_cache()
 
     def _run_start(self, env: dict[str, str]) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:

@@ -150,6 +150,23 @@ Para migrar:
 3. Para câmeras com credenciais, use `"rtspUrl": "env:GN_CAM01_RTSP_URL"` e mantenha a URL no env.
 4. Reinicie o serviço.
 
+Alternativa para devices legados com `.env` já preenchido:
+
+```bash
+./env_to_config.sh .env config.json --dry-run
+./env_to_config.sh .env config.json
+```
+
+Em hosts provisionados pelo `grava_nois_config`, informe os paths explicitamente:
+
+```bash
+sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/config.json
+```
+
+O script converte apenas parâmetros operacionais não sensíveis. Segredos, identidade,
+tokens, credenciais MQTT e URLs RTSP com `user:pass@` permanecem no `.env`; nesses
+casos o `config.json` usa referência `env:VAR_NAME`.
+
 Não é necessário remover as variáveis de ambiente existentes — elas continuam válidas como fallback.
 
 ---

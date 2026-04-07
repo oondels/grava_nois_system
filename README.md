@@ -370,6 +370,17 @@ cp config.example.json config.json
 # edite os campos desejados
 ```
 
+Para converter um `.env` legado em `config.json` operacional:
+```bash
+./env_to_config.sh .env config.json
+./env_to_config.sh .env config.json --dry-run
+```
+
+Em devices provisionados pelo `grava_nois_config`, use explicitamente os paths do host:
+```bash
+sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/config.json
+```
+
 - Documentação completa: [`docs/specs/system/CONFIGURATION.md`](docs/specs/system/CONFIGURATION.md)
 - Override de path: `GN_CONFIG_PATH=/caminho/para/config.json`
 

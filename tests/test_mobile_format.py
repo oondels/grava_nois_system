@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+from src.config.config_loader import reset_config_cache
 from src.video.processor import add_image_watermark
 from src.workers.processing_worker import ProcessingWorker
 
@@ -231,6 +232,12 @@ class VerticalFormatTests(unittest.TestCase):
 
 class LightModeMobileFormatTests(unittest.TestCase):
     """Testa que MOBILE_FORMAT é aplicado em modo leve (GN_LIGHT_MODE=1)."""
+
+    def setUp(self) -> None:
+        reset_config_cache()
+
+    def tearDown(self) -> None:
+        reset_config_cache()
 
     def _make_worker(self, base: Path) -> ProcessingWorker:
         return ProcessingWorker(
