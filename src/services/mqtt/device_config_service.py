@@ -293,6 +293,12 @@ class DeviceConfigService:
             "rejection_reason": _sanitize_reason(result.rejection_reason),
             "agent_version": self.agent_version,
         }
+        if self.device_secret:
+            payload["signature_version"] = _SIGNATURE_VERSION
+            payload["signature"] = sign_reported_config_payload(
+                payload=payload,
+                device_secret=self.device_secret,
+            )
         return self.mqtt_client.publish_json(
             self.reported_topic,
             payload,
@@ -400,6 +406,21 @@ def _canonical_signature_payload(payload: dict[str, Any], desired_hash: str) -> 
     )
 
 
+def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:
+    return ":".join(
+        [
+            "v1",
+            "CONFIG_REPORTED",
+            _required_str(payload, "device_id"),
+            str(_required_int(payload, "config_version")),
+            str(payload.get("correlation_id") or ""),
+            _required_str(payload, "reported_at"),
+            _required_str(payload, "status"),
+            str(payload.get("reported_hash") or ""),
+        ]
+    )
+
+
 def _validate_hash(config_data: dict[str, Any], desired_hash: str) -> None:
     expected = hash_config(config_data)
     if desired_hash != expected:
@@ -488,6 +509,15 @@ def sign_desired_config_payload(
 ) -> str:
     desired_hash = _required_str(payload, "desired_hash")
     canonical = _canonical_signature_payload(payload, desired_hash)
+    return hmac_sha256_base64(device_secret, canonical)
+
+
+def sign_reported_config_payload(
+    *,
+    payload: dict[str, Any],
+    device_secret: str,
+) -> str:
+    canonical = _canonical_report_signature_payload(payload)
     return hmac_sha256_base64(device_secret, canonical)
 
 

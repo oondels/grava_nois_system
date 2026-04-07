@@ -167,6 +167,27 @@ Canonical string da assinatura:
 v1:CONFIG_DESIRED:{device_id}:{config_version}:{correlation_id}:{issued_at}:{expires_at}:{desired_hash}
 ```
 
+Contrato de saída:
+
+- `type`: `config.reported`
+- `device_id`, `client_id`, `venue_id`
+- `schema_version`: `1`
+- `config_version`: versão recebida em `config.desired`
+- `status`: `applied`, `pending_restart` ou `rejected`
+- `requires_restart`
+- `reported_hash`: hash aplicado ou pendente, quando houver
+- `reported_at`
+- `rejection_reason`: motivo sanitizado, quando houver rejeição
+- `agent_version`
+- `signature`: HMAC-SHA256 base64 do envelope reportado
+- `signature_version`: `hmac-sha256-v1`
+
+Canonical string da assinatura do report:
+
+```text
+v1:CONFIG_REPORTED:{device_id}:{config_version}:{correlation_id}:{reported_at}:{status}:{reported_hash}
+```
+
 Persistência local:
 
 - `config.pending.json`: versão validada aguardando restart/reload controlado;

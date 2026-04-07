@@ -10,6 +10,7 @@ from src.services.mqtt.device_config_service import (
     DeviceConfigService,
     hash_config,
     sign_desired_config_payload,
+    sign_reported_config_payload,
 )
 
 
@@ -188,6 +189,14 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(state_data["lastAppliedVersion"], 2)
         self.assertEqual(client.published[-1][0], "grn/devices/edge-01/config/reported")
         self.assertEqual(client.published[-1][1]["status"], "applied")
+        self.assertEqual(client.published[-1][1]["signature_version"], "hmac-sha256-v1")
+        self.assertEqual(
+            client.published[-1][1]["signature"],
+            sign_reported_config_payload(
+                payload=client.published[-1][1],
+                device_secret="secret-123",
+            ),
+        )
 
     def test_restart_changes_are_kept_pending_and_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

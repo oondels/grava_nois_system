@@ -147,7 +147,7 @@ Exemplos rápidos por tópico:
 - `config/desired`
   - recebe envelope `config.desired` com `desired_config` completo, hash, expiração e assinatura HMAC
 - `config/reported`
-  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado e motivo seguro de rejeição
+  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição e assinatura HMAC
 
 ## Request signing
 

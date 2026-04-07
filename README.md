@@ -847,7 +847,9 @@ Exemplo de resposta publicada:
   "reported_hash": "sha256:...",
   "reported_at": "2026-04-07T17:00:03+00:00",
   "rejection_reason": null,
-  "agent_version": "1.0.0-edge"
+  "agent_version": "1.0.0-edge",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
 }
 ```
 
@@ -855,6 +857,9 @@ Estados possíveis nesta fase:
 - `applied`: promovida para `config.json`;
 - `pending_restart`: validada e gravada em `config.pending.json`, aguardando restart/reload controlado;
 - `rejected`: rejeitada sem alterar `config.json`.
+
+Observação:
+- reports `config.reported` são assinados com HMAC-SHA256 usando `DEVICE_SECRET` para que a API aceite apenas estado reportado pelo device autenticado.
 
 #### `grn/devices/{device_id}/commands/in`
 
