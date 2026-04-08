@@ -220,6 +220,29 @@ class DeviceConfigServiceTests(unittest.TestCase):
             ),
         )
 
+    def test_state_snapshot_normalizes_integer_like_floats_before_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            client = _FakeMQTTClient()
+            (base / "config.json").write_text(
+                json.dumps(self._desired_config()),
+                encoding="utf-8",
+            )
+            service = self._service(base, client)
+
+            self.assertTrue(service.publish_state_snapshot())
+
+        state_payload = client.published[-1][1]
+        reported_config = state_payload["reported_config"]
+        self.assertEqual(reported_config["capture"]["rtsp"]["startupCheckSeconds"], 1)
+        self.assertIsInstance(reported_config["capture"]["rtsp"]["startupCheckSeconds"], int)
+        self.assertEqual(reported_config["triggers"]["gpio"]["debounceMs"], 300)
+        self.assertIsInstance(reported_config["triggers"]["gpio"]["debounceMs"], int)
+        self.assertEqual(reported_config["triggers"]["gpio"]["cooldownSeconds"], 120)
+        self.assertIsInstance(reported_config["triggers"]["gpio"]["cooldownSeconds"], int)
+        self.assertEqual(reported_config["processing"]["watermark"]["opacity"], 0.8)
+        self.assertIsInstance(reported_config["processing"]["watermark"]["opacity"], float)
+
     def test_applies_hot_reload_safe_config_and_reports_applied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

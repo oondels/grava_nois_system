@@ -747,7 +747,7 @@ def sign_state_snapshot_payload(
 
 def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, Any]:
     config = get_effective_config(config_path)
-    return {
+    snapshot = {
         "version": int(config.config_version),
         "updatedAt": config.updated_at or _now_iso(),
         "capture": {
@@ -827,6 +827,7 @@ def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, A
             "retainPresence": config.mqtt.retain_presence,
         },
     }
+    return _normalize_snapshot_value(snapshot)
 
 
 def _coerce_config_version(value: Any) -> int:
@@ -839,6 +840,16 @@ def _pending_version_or_none(value: Any) -> int | None:
     if isinstance(value, int) and value >= 1:
         return value
     return None
+
+
+def _normalize_snapshot_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _normalize_snapshot_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_snapshot_value(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
