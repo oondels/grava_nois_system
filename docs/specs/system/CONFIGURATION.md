@@ -188,6 +188,16 @@ Canonical string da assinatura do report:
 v1:CONFIG_REPORTED:{device_id}:{config_version}:{correlation_id}:{reported_at}:{status}:{reported_hash}
 ```
 
+Snapshot de sincronização (`config.state`):
+
+- entrada opcional: `grn/devices/{device_id}/config/request`
+- saída: `grn/devices/{device_id}/config/state`
+- o edge publica `config.state` no boot e em resposta a `config.request`
+- `reported_config` deve refletir a configuração operacional efetiva sanitizada
+- `has_pending_restart=false` implica `pending_version=null`
+- `has_pending_restart=true` implica `pending_version>=1`
+- antes do hash, o snapshot normaliza `float` inteiros (`1.0`, `300.0`, `120.0`) para `int`, preservando floats reais como `0.8`
+
 Persistência local:
 
 - `config.pending.json`: versão validada aguardando restart/reload controlado;

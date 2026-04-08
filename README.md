@@ -254,8 +254,8 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 3. publica heartbeat periódico em `grn/devices/{device_id}/heartbeat`;
 4. publica estado resumido em `grn/devices/{device_id}/state`;
 5. registra `last will` para marcar `offline` em queda abrupta;
-6. assina `config/desired` para configuração operacional remota segura;
-7. publica `config/reported` com resultado de aplicação/rejeição;
+6. consome `config/desired` e `config/request` para configuração operacional remota segura;
+7. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
 8. mantém `commands/in` e `commands/out` reservados para a fase futura.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
@@ -861,6 +861,65 @@ Estados possíveis nesta fase:
 Observação:
 - reports `config.reported` são assinados com HMAC-SHA256 usando `DEVICE_SECRET` para que a API aceite apenas estado reportado pelo device autenticado.
 
+#### `grn/devices/{device_id}/config/request`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/request
+```
+
+Exemplo de mensagem recebida:
+```json
+{
+  "type": "config.request",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "request_id": "req-001",
+  "requested_at": "2026-04-08T14:00:00+00:00",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Observação:
+- o edge responde a esse request publicando `config.state`;
+- o request só é aceito com assinatura HMAC válida usando `DEVICE_SECRET`.
+
+#### `grn/devices/{device_id}/config/state`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/state
+```
+
+Exemplo de snapshot publicado:
+```json
+{
+  "type": "config.state",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "config_version": 12,
+  "request_id": "req-001",
+  "reported_config": {},
+  "reported_hash": "sha256:...",
+  "reported_at": "2026-04-08T14:00:01+00:00",
+  "has_pending_restart": false,
+  "pending_version": null,
+  "agent_version": "1.0.0-edge",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Observação:
+- o edge publica `config.state` no boot e em resposta a `config.request`;
+- `pending_version` só é enviado como inteiro quando existe restart pendente real; sem pendência, vai `null`;
+- antes de calcular `reported_hash`, o snapshot normaliza `float` inteiros (`1.0 -> 1`) para manter compatibilidade de hash com o backend Node.
+
 #### `grn/devices/{device_id}/commands/in`
 
 Exemplo de tópico:
@@ -916,7 +975,7 @@ Exemplo de resposta publicada na fase 1:
 - `presence` usa retained message e `last will`
 - heartbeats não executam comandos
 - qualquer comando recebido em `commands/in` é rejeitado explicitamente
-- configuração remota usa `config/desired`, não `commands/in`
+- configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`
 - `config.json` é atualizado por escrita atômica e mantém `config.backup.json` quando promovido
 
 ### Câmera V4L2 (Local)
