@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.services.mqtt.device_config_service import (
     DeviceConfigService,
+    apply_pending_config_on_startup,
     hash_config,
     sign_desired_config_payload,
     sign_reported_config_payload,
@@ -218,6 +219,46 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(pending_data["capture"]["segmentSeconds"], 2)
         self.assertFalse((base / "config.json").exists())
         self.assertEqual(state_data["pendingVersion"], 2)
+
+    def test_boot_promotes_pending_config_before_runtime_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            desired_config = self._desired_config({"capture": {"segmentSeconds": 2}})
+            prepared = {
+                **desired_config,
+                "version": 2,
+                "updatedAt": "2026-04-08T12:00:00+00:00",
+            }
+            (base / "config.pending.json").write_text(
+                json.dumps(prepared),
+                encoding="utf-8",
+            )
+            (base / "config.state.json").write_text(
+                json.dumps(
+                    {
+                        "pendingVersion": 2,
+                        "pendingHash": hash_config(prepared),
+                        "pendingCorrelationId": "corr-boot-01",
+                        "lastStatus": "pending_restart",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = apply_pending_config_on_startup(base / "config.json")
+
+            config_data = json.loads((base / "config.json").read_text(encoding="utf-8"))
+            state_data = json.loads((base / "config.state.json").read_text(encoding="utf-8"))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "applied")
+        self.assertEqual(result.config_version, 2)
+        self.assertFalse(result.requires_restart)
+        self.assertEqual(config_data["capture"]["segmentSeconds"], 2)
+        self.assertFalse((base / "config.pending.json").exists())
+        self.assertEqual(state_data["lastAppliedVersion"], 2)
+        self.assertIsNone(state_data["pendingVersion"])
+        self.assertEqual(state_data["lastStatus"], "applied")
 
     def test_hot_reload_update_ignores_unchanged_restart_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

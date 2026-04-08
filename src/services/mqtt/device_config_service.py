@@ -360,6 +360,80 @@ class _ReportResult:
         self.rejection_reason = rejection_reason
 
 
+def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:
+    effective_config_path = config_path or get_config_path()
+    pending_path = effective_config_path.with_name("config.pending.json")
+    state_path = effective_config_path.with_name("config.state.json")
+    backup_path = effective_config_path.with_name("config.backup.json")
+
+    if not pending_path.exists():
+        return None
+
+    try:
+        pending_data = json.loads(pending_path.read_text(encoding="utf-8"))
+        if not isinstance(pending_data, dict):
+            raise RemoteConfigError("config.pending.json deve conter um objeto JSON")
+
+        _validate_remote_config(pending_data)
+
+        state: dict[str, Any] = {}
+        if state_path.exists():
+            loaded_state = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_state, dict):
+                state = loaded_state
+
+        applied_version = state.get("pendingVersion")
+        if not isinstance(applied_version, int):
+            applied_version = pending_data.get("version")
+        if not isinstance(applied_version, int) or applied_version <= 0:
+            raise RemoteConfigError("pendingVersion ausente para promover config pendente")
+
+        computed_hash = hash_config(pending_data)
+        pending_hash = state.get("pendingHash")
+        if pending_hash is not None and pending_hash != computed_hash:
+            raise RemoteConfigError("pendingHash divergente do conteúdo pendente")
+
+        applied_hash = pending_hash if isinstance(pending_hash, str) else computed_hash
+        correlation_id = state.get("pendingCorrelationId")
+        applied_at = _now_iso()
+
+        effective_config_path.parent.mkdir(parents=True, exist_ok=True)
+        if effective_config_path.exists():
+            shutil.copy2(effective_config_path, backup_path)
+        _atomic_write_json(effective_config_path, pending_data)
+        pending_path.unlink(missing_ok=True)
+        _atomic_write_json(
+            state_path,
+            {
+                **state,
+                "lastAppliedVersion": applied_version,
+                "lastAppliedHash": applied_hash,
+                "lastAppliedAt": applied_at,
+                "pendingVersion": None,
+                "pendingHash": None,
+                "pendingCorrelationId": None,
+                "lastStatus": "applied",
+                "lastUpdatedAt": applied_at,
+            },
+        )
+        reset_config_cache()
+        mqtt_logger.info(
+            "Configuração pendente promovida na inicialização: version=%s",
+            applied_version,
+        )
+        return _ReportResult(
+            status="applied",
+            config_version=applied_version,
+            correlation_id=correlation_id if isinstance(correlation_id, str) else None,
+            requires_restart=False,
+            reported_hash=applied_hash,
+            rejection_reason=None,
+        )
+    except Exception as exc:
+        mqtt_logger.warning("Falha ao promover config.pending.json no boot: %s", exc)
+        return None
+
+
 def _prepare_config_payload(
     config_data: dict[str, Any],
     *,

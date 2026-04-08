@@ -20,7 +20,10 @@ from dotenv import load_dotenv
 from src.config.config_loader import get_effective_config
 from src.config.settings import CaptureConfig, load_capture_configs, load_mqtt_config
 from src.services.mqtt.command_dispatcher import CommandDispatcher
-from src.services.mqtt.device_config_service import DeviceConfigService
+from src.services.mqtt.device_config_service import (
+    DeviceConfigService,
+    apply_pending_config_on_startup,
+)
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
@@ -140,6 +143,8 @@ def _serial_line_is_trigger(line: str, token: str) -> bool:
 
 def main() -> int:
     base = Path(__file__).resolve().parent
+
+    startup_config_report = apply_pending_config_on_startup()
 
     # Carrega config operacional (config.json → env → defaults)
     op_cfg = get_effective_config()
@@ -501,6 +506,11 @@ def main() -> int:
             if mqtt_presence.start():
                 mqtt_dispatcher.start()
                 mqtt_config_service.start()
+                if startup_config_report is not None:
+                    if not mqtt_config_service.publish_report(startup_config_report):
+                        mqtt_logger.warning(
+                            "Falha ao publicar config.reported de startup para config promovida"
+                        )
             elif mqtt_config.enabled:
                 mqtt_logger.warning(
                     "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
