@@ -489,6 +489,8 @@ def main() -> int:
                 venue_id=venue_id,
                 desired_topic=mqtt_config.topic_for(device_id, "config/desired"),
                 reported_topic=mqtt_config.topic_for(device_id, "config/reported"),
+                request_topic=mqtt_config.topic_for(device_id, "config/request"),
+                state_topic=mqtt_config.topic_for(device_id, "config/state"),
                 device_secret=(
                     os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
                 ),

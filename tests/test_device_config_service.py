@@ -11,15 +11,19 @@ from src.services.mqtt.device_config_service import (
     apply_pending_config_on_startup,
     hash_config,
     sign_desired_config_payload,
+    sign_request_config_payload,
     sign_reported_config_payload,
+    sign_state_snapshot_payload,
 )
 
 
 class _FakeMQTTClient:
     def __init__(self):
         self.is_enabled = True
+        self.is_connected = False
         self.subscriptions = []
         self.published = []
+        self.connect_listeners = []
 
     def subscribe(self, topic, handler, *, qos=None):
         _ = qos
@@ -30,6 +34,9 @@ class _FakeMQTTClient:
         _ = retain, qos
         self.published.append((topic, payload))
         return True
+
+    def add_on_connect_listener(self, callback):
+        self.connect_listeners.append(callback)
 
 
 def _deep_update(target: dict, overrides: dict) -> None:
@@ -49,6 +56,8 @@ class DeviceConfigServiceTests(unittest.TestCase):
             venue_id="venue-01",
             desired_topic="grn/devices/edge-01/config/desired",
             reported_topic="grn/devices/edge-01/config/reported",
+            request_topic="grn/devices/edge-01/config/request",
+            state_topic="grn/devices/edge-01/config/state",
             config_path=base / "config.json",
             device_secret="secret-123",
             agent_version="1.2.3",
@@ -150,6 +159,22 @@ class DeviceConfigServiceTests(unittest.TestCase):
             _deep_update(config, overrides)
         return config
 
+    def _request_payload(self, *, requested_at: str | None = None, request_id: str = "req-01") -> dict:
+        payload = {
+            "type": "config.request",
+            "device_id": "edge-01",
+            "client_id": "client-01",
+            "venue_id": "venue-01",
+            "schema_version": 1,
+            "request_id": request_id,
+            "requested_at": requested_at or datetime.now(timezone.utc).isoformat(),
+        }
+        payload["signature"] = sign_request_config_payload(
+            payload=payload,
+            device_secret="secret-123",
+        )
+        return payload
+
     def test_start_subscribes_to_config_desired_topic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             client = _FakeMQTTClient()
@@ -157,10 +182,40 @@ class DeviceConfigServiceTests(unittest.TestCase):
 
             self.assertTrue(service.start())
 
-        self.assertEqual(len(client.subscriptions), 1)
+        self.assertEqual(len(client.subscriptions), 2)
         self.assertEqual(
             client.subscriptions[0][0],
             "grn/devices/edge-01/config/desired",
+        )
+        self.assertEqual(
+            client.subscriptions[1][0],
+            "grn/devices/edge-01/config/request",
+        )
+        self.assertEqual(len(client.connect_listeners), 1)
+
+    def test_start_publishes_state_snapshot_when_client_is_connected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            client = _FakeMQTTClient()
+            client.is_connected = True
+            (base / "config.json").write_text(
+                json.dumps(self._desired_config()),
+                encoding="utf-8",
+            )
+            service = self._service(base, client)
+
+            self.assertTrue(service.start())
+
+        self.assertEqual(client.published[-1][0], "grn/devices/edge-01/config/state")
+        state_payload = client.published[-1][1]
+        self.assertEqual(state_payload["type"], "config.state")
+        self.assertEqual(state_payload["reported_config"]["capture"]["segmentSeconds"], 1)
+        self.assertEqual(
+            state_payload["signature"],
+            sign_state_snapshot_payload(
+                payload=state_payload,
+                device_secret="secret-123",
+            ),
         )
 
     def test_applies_hot_reload_safe_config_and_reports_applied(self) -> None:
@@ -190,6 +245,10 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(state_data["lastAppliedVersion"], 2)
         self.assertEqual(client.published[-1][0], "grn/devices/edge-01/config/reported")
         self.assertEqual(client.published[-1][1]["status"], "applied")
+        self.assertEqual(
+            client.published[-1][1]["reported_config"]["operationWindow"]["start"],
+            "08:00",
+        )
         self.assertEqual(client.published[-1][1]["signature_version"], "hmac-sha256-v1")
         self.assertEqual(
             client.published[-1][1]["signature"],
@@ -259,6 +318,48 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(state_data["lastAppliedVersion"], 2)
         self.assertIsNone(state_data["pendingVersion"])
         self.assertEqual(state_data["lastStatus"], "applied")
+
+    def test_process_config_request_publishes_state_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            client = _FakeMQTTClient()
+            (base / "config.json").write_text(
+                json.dumps(
+                    self._desired_config(
+                        {
+                            "cameras": [
+                                {
+                                    "id": "cam01",
+                                    "name": "Principal",
+                                    "enabled": True,
+                                    "sourceType": "rtsp",
+                                    "rtspUrl": "env:GN_CAM01_RTSP_URL",
+                                }
+                            ]
+                        }
+                    )
+                ),
+                encoding="utf-8",
+            )
+            service = self._service(base, client)
+
+            self.assertTrue(service.process_config_request(self._request_payload()))
+
+        self.assertEqual(client.published[-1][0], "grn/devices/edge-01/config/state")
+        state_payload = client.published[-1][1]
+        self.assertEqual(state_payload["request_id"], "req-01")
+        self.assertEqual(
+            state_payload["reported_config"]["cameras"][0]["rtspUrl"],
+            "env:GN_CAM01_RTSP_URL",
+        )
+        self.assertEqual(state_payload["signature_version"], "hmac-sha256-v1")
+        self.assertEqual(
+            state_payload["signature"],
+            sign_state_snapshot_payload(
+                payload=state_payload,
+                device_secret="secret-123",
+            ),
+        )
 
     def test_hot_reload_update_ignores_unchanged_restart_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
