@@ -210,6 +210,8 @@ class DeviceConfigServiceTests(unittest.TestCase):
         state_payload = client.published[-1][1]
         self.assertEqual(state_payload["type"], "config.state")
         self.assertEqual(state_payload["reported_config"]["capture"]["segmentSeconds"], 1)
+        self.assertFalse(state_payload["has_pending_restart"])
+        self.assertIsNone(state_payload["pending_version"])
         self.assertEqual(
             state_payload["signature"],
             sign_state_snapshot_payload(
@@ -352,6 +354,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
             state_payload["reported_config"]["cameras"][0]["rtspUrl"],
             "env:GN_CAM01_RTSP_URL",
         )
+        self.assertIsNone(state_payload["pending_version"])
         self.assertEqual(state_payload["signature_version"], "hmac-sha256-v1")
         self.assertEqual(
             state_payload["signature"],
@@ -360,6 +363,30 @@ class DeviceConfigServiceTests(unittest.TestCase):
                 device_secret="secret-123",
             ),
         )
+
+    def test_publish_state_snapshot_includes_pending_version_only_when_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            client = _FakeMQTTClient()
+            (base / "config.json").write_text(
+                json.dumps(self._desired_config()),
+                encoding="utf-8",
+            )
+            (base / "config.pending.json").write_text(
+                json.dumps(self._desired_config({"capture": {"segmentSeconds": 2}})),
+                encoding="utf-8",
+            )
+            (base / "config.state.json").write_text(
+                json.dumps({"pendingVersion": 3}),
+                encoding="utf-8",
+            )
+            service = self._service(base, client)
+
+            self.assertTrue(service.publish_state_snapshot())
+
+        state_payload = client.published[-1][1]
+        self.assertTrue(state_payload["has_pending_restart"])
+        self.assertEqual(state_payload["pending_version"], 3)
 
     def test_hot_reload_update_ignores_unchanged_restart_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

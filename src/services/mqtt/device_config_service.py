@@ -351,6 +351,13 @@ class DeviceConfigService:
         reported_at = _now_iso()
         config_version = _coerce_config_version(config_snapshot.get("version"))
         reported_hash = hash_config(config_snapshot)
+        state = self._load_state()
+        pending_version = _pending_version_or_none(state.get("pendingVersion"))
+        has_pending_restart = self.pending_path.exists() and pending_version is not None
+        if self.pending_path.exists() and pending_version is None:
+            mqtt_logger.warning(
+                "Snapshot de configuração encontrou config.pending.json sem pendingVersion válido"
+            )
         payload: dict[str, Any] = {
             "type": "config.state",
             "device_id": self.device_id,
@@ -362,8 +369,8 @@ class DeviceConfigService:
             "reported_config": config_snapshot,
             "reported_hash": reported_hash,
             "reported_at": reported_at,
-            "has_pending_restart": self.pending_path.exists(),
-            "pending_version": _coerce_config_version(self._load_state().get("pendingVersion")),
+            "has_pending_restart": has_pending_restart,
+            "pending_version": pending_version,
             "agent_version": self.agent_version,
         }
         if self.device_secret:
@@ -826,6 +833,12 @@ def _coerce_config_version(value: Any) -> int:
     if isinstance(value, int) and value >= 0:
         return value
     return 0
+
+
+def _pending_version_or_none(value: Any) -> int | None:
+    if isinstance(value, int) and value >= 1:
+        return value
+    return None
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
