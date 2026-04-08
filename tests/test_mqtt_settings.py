@@ -4,10 +4,17 @@ import os
 import unittest
 from unittest.mock import patch
 
+from src.config.config_loader import reset_config_cache
 from src.config.settings import load_mqtt_config
 
 
 class MQTTSettingsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_config_cache()
+
+    def tearDown(self) -> None:
+        reset_config_cache()
+
     def test_defaults_to_disabled_when_not_configured(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             config = load_mqtt_config()

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-04-07
+
+### Added
+- Camada central de configuração persistente em `src/config/config_loader.py` com dataclasses tipados para todos os parâmetros operacionais não sensíveis.
+- Validação de `config.json` em `src/config/config_schema.py`: tipos, ranges, enums e consistência de campos.
+- `config.example.json` na raiz do projeto com todos os domínios funcionais documentados.
+- `env_to_config.sh` para converter `.env` legado em `config.json` sem migrar segredos ou identidade de device.
+- `DeviceConfigService` para receber `config/desired`, validar assinatura/hash/schema, persistir `config.pending.json` e reportar `config/reported`.
+- `docs/specs/system/CONFIGURATION.md` descrevendo modelo de precedência, o que vai em `config.json`, o que fica em env, hot-reload vs. restart e guia de migração.
+- Suporte a referência `env:VAR_NAME` no campo `rtspUrl` de câmeras para evitar credenciais RTSP em texto plano no `config.json`.
+- Override de path via `GN_CONFIG_PATH` para localização customizada do `config.json`.
+
+### Changed
+- `src/config/settings.py`: `load_mqtt_config()` e `load_capture_configs()` passam a consumir o loader central; parâmetros operacionais (host MQTT, pre/post segmentos, tuning RTSP/V4L2) vêm de `config.json` → env → defaults.
+- `src/video/capture.py`: parâmetros RTSP (`reencode`, `gop`, `preset`, `crf`, `fps`, `useWallclock`, `maxRetries`, `timeout`, `startupCheckSec`) e V4L2 (`framerate`, `videoSize`) lidos via loader central.
+- `src/utils/time_utils.py`: `is_within_business_hours()` lê janela operacional via loader central.
+- `src/utils/pico.py`: `resolve_trigger_source()` lê `triggers.source` via loader central.
+- `src/workers/processing_worker.py`: `GN_WM_PRESET`, `MOBILE_FORMAT` e `VERTICAL_FORMAT` lidos via loader central.
+- `main.py`: `light_mode`, `seg_time`, `max_attempts`, `max_workers`, `wm_*`, `gpio_cooldown_sec`, `debounce_ms`, `pico_trigger_token` e `gpio_pin` lidos via loader central; `DEV` permanece em env.
+
+### Compatibility
+- Instalações sem `config.json` continuam operando via env/defaults sem alteração de comportamento.
+- Aliases legados (`GPIO_PIN`, `GN_RTSP_URL`, `GN_CAMERAS_JSON`, `GN_RTSP_URLS`) preservados como fallback de leitura.
+
 ## 2026-04-06
 
 ### Changed

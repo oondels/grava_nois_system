@@ -12,6 +12,7 @@ from pathlib import Path
 
 import requests
 
+from src.config.config_loader import get_effective_config
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
 from src.utils.logger import logger
@@ -315,11 +316,10 @@ class ProcessingWorker:
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
                 upload_target = out_mp4
             else:
-                wm_preset = (os.getenv("GN_WM_PRESET") or "veryfast").strip() or "veryfast"
-                mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
-                mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
-                vertical_format_env = os.getenv("VERTICAL_FORMAT", "1").strip().lower()
-                vertical_format = vertical_format_env in {"1", "true", "yes", "y", "on"}
+                _proc_cfg = get_effective_config().processing
+                wm_preset = _proc_cfg.watermark.preset or "veryfast"
+                mobile_format = _proc_cfg.mobile_format
+                vertical_format = _proc_cfg.vertical_format
                 tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
                 add_image_watermark(
                     input_path=str(mp4),
@@ -360,11 +360,10 @@ class ProcessingWorker:
                 upload_target = out_mp4
         else:
             # Modo leve: sem watermark/thumbnail.
-            # Aplica MOBILE_FORMAT e/ou VERTICAL_FORMAT se ativos.
-            mobile_format_env = os.getenv("MOBILE_FORMAT", "1").strip().lower()
-            mobile_format = mobile_format_env in {"1", "true", "yes", "y", "on"}
-            vertical_format_env = os.getenv("VERTICAL_FORMAT", "1").strip().lower()
-            vertical_format = vertical_format_env in {"1", "true", "yes", "y", "on"}
+            # Aplica mobileFormat e/ou verticalFormat se ativos.
+            _proc_cfg_light = get_effective_config().processing
+            mobile_format = _proc_cfg_light.mobile_format
+            vertical_format = _proc_cfg_light.vertical_format
             clip_meta = meta.get("meta") or ffprobe_metadata(mp4)
             src_h = int(clip_meta.get("height") or 0)
 
@@ -825,7 +824,7 @@ class ProcessingWorker:
 
             # Determina motivo para log/sidecar
             reason = "unknown"
-            if not (os.getenv("API_BASE_URL")):
+            if not (os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL")):
                 reason = "no_api_configured"
             elif (
                 isinstance(meta.get("remote_registration"), dict)

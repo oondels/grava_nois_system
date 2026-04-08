@@ -9,6 +9,8 @@
 .git/
 .gitignore
 
+env_to_config.sh
+
 # ── Documentação ─────────────────────────────────────────────────────────────
 docs/
 README.md

@@ -254,12 +254,15 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 3. publica heartbeat periódico em `grn/devices/{device_id}/heartbeat`;
 4. publica estado resumido em `grn/devices/{device_id}/state`;
 5. registra `last will` para marcar `offline` em queda abrupta;
-6. mantém `commands/in` e `commands/out` reservados para a fase futura.
+6. consome `config/desired` e `config/request` para configuração operacional remota segura;
+7. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
+8. mantém `commands/in` e `commands/out` reservados para a fase futura.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
 Observação de tópico:
 - `DEVICE_ID`/`GN_DEVICE_ID` usado no namespace MQTT deve ser um único nível de tópico. Valores com `/`, `+`, `#` ou byte nulo são rejeitados ao montar os tópicos para evitar wildcard/hierarquia inesperada; nesse caso a presença MQTT é ignorada sem derrubar captura/worker.
+- configuração remota exige `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura HMAC; sem esse segredo, mensagens `config/desired` são rejeitadas.
 
 ---
 
@@ -353,9 +356,44 @@ O sistema cria os seguintes diretórios se não existirem:
 
 ## ⚙️ Configuração
 
+### config.json — Configuração operacional gerenciada
+
+O sistema suporta um arquivo `config.json` na raiz do projeto para parâmetros operacionais não sensíveis.
+
+**Política de precedência:**
+```
+defaults → variáveis de ambiente (fallback legado) → config.json (vence quando presente)
+```
+
+Instalações existentes sem `config.json` continuam funcionando via env sem alteração.
+
+Para criar:
+```bash
+cp config.example.json config.json
+# edite os campos desejados
+```
+
+Para converter um `.env` legado em `config.json` operacional:
+```bash
+./env_to_config.sh .env config.json
+./env_to_config.sh .env config.json --dry-run
+```
+
+Em devices provisionados pelo `grava_nois_config`, use explicitamente os paths do host:
+```bash
+sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/config.json
+```
+
+- Documentação completa: [`docs/specs/system/CONFIGURATION.md`](docs/specs/system/CONFIGURATION.md)
+- Override de path: `GN_CONFIG_PATH=/caminho/para/config.json`
+
+**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
+
+---
+
 ### Variáveis de Ambiente
 
-Todas as configurações podem ser feitas via variáveis de ambiente ou arquivo `.env`:
+Parâmetros de segredos, identidade e deploy são configurados exclusivamente via variáveis de ambiente ou arquivo `.env`. Parâmetros operacionais também podem vir de `config.json` (ver acima).
 
 #### Câmera RTSP
 
@@ -579,6 +617,8 @@ Observação:
 - `grn/devices/{device_id}/state`
 - `grn/devices/{device_id}/events`
 - `grn/devices/{device_id}/alerts`
+- `grn/devices/{device_id}/config/desired`
+- `grn/devices/{device_id}/config/reported`
 - `grn/devices/{device_id}/commands/in`
 - `grn/devices/{device_id}/commands/out`
 
@@ -754,6 +794,132 @@ Exemplo de payload futuro:
 Observação:
 - tópico reservado para evolução futura; a fase 1 não publica alertas dedicados nele.
 
+#### `grn/devices/{device_id}/config/desired`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/desired
+```
+
+Exemplo de mensagem recebida:
+```json
+{
+  "type": "config.desired",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "config_version": 12,
+  "desired_hash": "sha256:...",
+  "correlation_id": "cfg-001",
+  "issued_at": "2026-04-07T17:00:00+00:00",
+  "expires_at": "2026-04-07T17:05:00+00:00",
+  "desired_config": {},
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Observação:
+- `desired_config` deve ser uma configuração operacional completa e não sensível;
+- secrets, tokens, credenciais MQTT e RTSP com `user:pass@` são rejeitados;
+- o payload é validado contra hash, expiração, versão, tenant/device e assinatura HMAC com `DEVICE_SECRET`.
+
+#### `grn/devices/{device_id}/config/reported`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/reported
+```
+
+Exemplo de resposta publicada:
+```json
+{
+  "type": "config.reported",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "config_version": 12,
+  "correlation_id": "cfg-001",
+  "status": "pending_restart",
+  "requires_restart": true,
+  "reported_hash": "sha256:...",
+  "reported_at": "2026-04-07T17:00:03+00:00",
+  "rejection_reason": null,
+  "agent_version": "1.0.0-edge",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Estados possíveis nesta fase:
+- `applied`: promovida para `config.json`;
+- `pending_restart`: validada e gravada em `config.pending.json`, aguardando restart/reload controlado;
+- `rejected`: rejeitada sem alterar `config.json`.
+
+Observação:
+- reports `config.reported` são assinados com HMAC-SHA256 usando `DEVICE_SECRET` para que a API aceite apenas estado reportado pelo device autenticado.
+
+#### `grn/devices/{device_id}/config/request`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/request
+```
+
+Exemplo de mensagem recebida:
+```json
+{
+  "type": "config.request",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "request_id": "req-001",
+  "requested_at": "2026-04-08T14:00:00+00:00",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Observação:
+- o edge responde a esse request publicando `config.state`;
+- o request só é aceito com assinatura HMAC válida usando `DEVICE_SECRET`.
+
+#### `grn/devices/{device_id}/config/state`
+
+Exemplo de tópico:
+```text
+grn/devices/edge-test-01/config/state
+```
+
+Exemplo de snapshot publicado:
+```json
+{
+  "type": "config.state",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "schema_version": 1,
+  "config_version": 12,
+  "request_id": "req-001",
+  "reported_config": {},
+  "reported_hash": "sha256:...",
+  "reported_at": "2026-04-08T14:00:01+00:00",
+  "has_pending_restart": false,
+  "pending_version": null,
+  "agent_version": "1.0.0-edge",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
+}
+```
+
+Observação:
+- o edge publica `config.state` no boot e em resposta a `config.request`;
+- `pending_version` só é enviado como inteiro quando existe restart pendente real; sem pendência, vai `null`;
+- antes de calcular `reported_hash`, o snapshot normaliza `float` inteiros (`1.0 -> 1`) para manter compatibilidade de hash com o backend Node.
+
 #### `grn/devices/{device_id}/commands/in`
 
 Exemplo de tópico:
@@ -809,6 +975,8 @@ Exemplo de resposta publicada na fase 1:
 - `presence` usa retained message e `last will`
 - heartbeats não executam comandos
 - qualquer comando recebido em `commands/in` é rejeitado explicitamente
+- configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`
+- `config.json` é atualizado por escrita atômica e mantém `config.backup.json` quando promovido
 
 ### Câmera V4L2 (Local)
 

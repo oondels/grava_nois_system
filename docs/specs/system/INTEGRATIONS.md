@@ -104,6 +104,7 @@ Publicações da fase 1:
 - `grn/devices/{device_id}/presence` (retained)
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
+- `grn/devices/{device_id}/config/reported`
 
 Tópicos reservados para evolução futura:
 
@@ -111,6 +112,11 @@ Tópicos reservados para evolução futura:
 - `grn/devices/{device_id}/alerts`
 - `grn/devices/{device_id}/commands/in`
 - `grn/devices/{device_id}/commands/out`
+
+Inscrições da fase 1:
+
+- `grn/devices/{device_id}/commands/in` — recebe e rejeita comandos remotos;
+- `grn/devices/{device_id}/config/desired` — recebe configuração operacional remota assinada.
 
 Observações:
 
@@ -138,6 +144,10 @@ Exemplos rápidos por tópico:
   - aceita mensagens de comando para evolução futura, mas a fase 1 não executa nada
 - `commands/out`
   - publica resposta de rejeição: `status=rejected`, `reason=remote commands are not enabled in phase 1`
+- `config/desired`
+  - recebe envelope `config.desired` com `desired_config` completo, hash, expiração e assinatura HMAC
+- `config/reported`
+  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição e assinatura HMAC
 
 ## Request signing
 

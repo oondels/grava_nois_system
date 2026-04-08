@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config.config_loader import reset_config_cache
 from src.workers.processing_worker import ProcessingWorker
 
 
@@ -47,11 +48,13 @@ def _place_mp4(queue_dir: Path, name: str) -> Path:
 @patch("src.workers.processing_worker.GravaNoisAPIClient")
 class WorkerMultiCameraTests(unittest.TestCase):
     def setUp(self):
+        reset_config_cache()
         self._tmp = tempfile.TemporaryDirectory()
         self.base = Path(self._tmp.name)
 
     def tearDown(self):
         self._tmp.cleanup()
+        reset_config_cache()
 
     def test_worker_processes_file_in_own_queue(self, mock_api_cls, _ffprobe):
         """Worker scans its own queue_dir and processes the mp4 it finds."""

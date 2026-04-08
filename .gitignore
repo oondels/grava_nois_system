@@ -6,6 +6,7 @@ __pycache__/
 venv/
 .vscode
 *.json
+!config.example.json
 *.lock
 *.mp4
 *.jpg

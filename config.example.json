@@ -1,0 +1,112 @@
+{
+  "_comment": "Arquivo de configuração operacional do grava_nois_system. Copie para config.json e ajuste os valores.",
+  "_precedence": "Parâmetros presentes aqui sobrescrevem variáveis de ambiente para campos operacionais.",
+  "_secrets": "NUNCA coloque senhas, tokens, DEVICE_SECRET ou URLs RTSP com credenciais neste arquivo.",
+  "_rtsp_urls": "Para câmeras com credenciais RTSP, use 'env:NOME_DA_VAR' em rtspUrl ou mantenha GN_CAMERAS_JSON no env.",
+
+  "version": 1,
+  "updatedAt": null,
+
+  "capture": {
+    "_comment": "Parâmetros de segmentação e tuning FFmpeg. Exigem restart para entrar em vigor.",
+    "segmentSeconds": 1,
+    "preSegments": 6,
+    "postSegments": 3,
+    "rtsp": {
+      "_comment": "Tuning de captura RTSP. Todos exigem restart.",
+      "maxRetries": 10,
+      "timeoutSeconds": 5,
+      "startupCheckSeconds": 1.0,
+      "reencode": true,
+      "fps": "",
+      "gop": 25,
+      "preset": "veryfast",
+      "crf": 23,
+      "useWallclockTimestamps": false
+    },
+    "v4l2": {
+      "_comment": "Câmera V4L2 local (/dev/video0). Usado quando não há câmeras RTSP.",
+      "device": "/dev/video0",
+      "framerate": 30,
+      "videoSize": "1280x720"
+    }
+  },
+
+  "cameras": [
+    {
+      "_comment_example": "Exemplo: câmera RTSP sem credenciais na URL",
+      "id": "cam01",
+      "name": "Quadra 1",
+      "enabled": true,
+      "sourceType": "rtsp",
+      "rtspUrl": "rtsp://192.168.1.10:554/stream",
+      "picoTriggerToken": "BTN_Q1",
+      "preSegments": 6,
+      "postSegments": 3
+    },
+    {
+      "_comment_example": "Exemplo: câmera RTSP com credenciais — URL lida de variável de ambiente",
+      "id": "cam02",
+      "name": "Quadra 2",
+      "enabled": false,
+      "sourceType": "rtsp",
+      "rtspUrl": "env:GN_CAM02_RTSP_URL",
+      "picoTriggerToken": "BTN_Q2",
+      "preSegments": 6,
+      "postSegments": 3
+    }
+  ],
+
+  "triggers": {
+    "_comment": "Fonte de trigger físico. 'source' exige restart. 'cooldownSeconds' e 'debounceMs' suportarão hot-reload no futuro.",
+    "source": "auto",
+    "maxWorkers": null,
+    "pico": {
+      "_comment": "Token global do Pico. Porta serial auto-detectada via GN_PICO_PORT (env) ou /dev/serial/by-id.",
+      "globalToken": "BTN_REPLAY"
+    },
+    "gpio": {
+      "_comment": "Pino BCM e ajustes de botão GPIO.",
+      "pin": 17,
+      "debounceMs": 300,
+      "cooldownSeconds": 120
+    }
+  },
+
+  "processing": {
+    "_comment": "Processamento de clips. lightMode e maxAttempts exigem restart do worker.",
+    "lightMode": false,
+    "maxAttempts": 3,
+    "mobileFormat": true,
+    "verticalFormat": true,
+    "watermark": {
+      "_comment": "Parâmetros de watermark/branding. Suportarão hot-reload no futuro.",
+      "preset": "veryfast",
+      "relativeWidth": 0.18,
+      "opacity": 0.8,
+      "margin": 24
+    }
+  },
+
+  "operationWindow": {
+    "_comment": "Janela de horário local. Suportará hot-reload no futuro.",
+    "timeZone": "America/Sao_Paulo",
+    "start": "07:00",
+    "end": "23:30"
+  },
+
+  "mqtt": {
+    "_comment": "MQTT não sensível. Credenciais (GN_MQTT_USERNAME, GN_MQTT_PASSWORD) permanecem em env.",
+    "enabled": false,
+    "broker": {
+      "host": "broker.gravanois.local",
+      "port": 1883,
+      "tls": false
+    },
+    "keepaliveSeconds": 60,
+    "heartbeatIntervalSeconds": 30,
+    "topicPrefix": "grn",
+    "qos": 1,
+    "retainPresence": true
+  }
+}

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from src.config.config_loader import get_effective_config
 from src.config.settings import CaptureConfig
 from src.utils.logger import logger
 
@@ -91,13 +92,6 @@ def _tail_file(path: Path, max_lines: int = 20) -> str:
         return ""
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
     start_num = _calc_start_number(cfg.buffer_dir)
     out_pattern = str(cfg.buffer_dir / "buffer%06d.ts")
@@ -108,8 +102,9 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
 
     # Health check: verifica conectividade com câmera RTSP antes de iniciar FFmpeg
     if use_rtsp:
-        max_retries = int(os.getenv("GN_RTSP_MAX_RETRIES", "10"))
-        timeout = int(os.getenv("GN_RTSP_TIMEOUT", "5"))
+        _rtsp_check_cfg = get_effective_config().capture.rtsp
+        max_retries = _rtsp_check_cfg.max_retries
+        timeout = _rtsp_check_cfg.timeout_seconds
 
         if not check_rtsp_connectivity(
             rtsp_url, timeout=timeout, max_retries=max_retries, camera_id=cfg.camera_id
@@ -131,14 +126,15 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         # com artefato visual menor é vastamente melhor que um frame faltando
         # (que gera stutter na concatenação).
         #
-        # Alternativa: GN_RTSP_REENCODE=0 usa passthrough (copy), apenas para
-        # câmeras com DTS estável e timestamps confiáveis.
-        rtsp_reencode = _env_bool("GN_RTSP_REENCODE", True)
-        rtsp_gop = max(1, int(float(os.getenv("GN_RTSP_GOP", "25"))))
-        rtsp_preset = (os.getenv("GN_RTSP_PRESET", "veryfast") or "veryfast").strip()
-        rtsp_crf = max(0, int(float(os.getenv("GN_RTSP_CRF", "23"))))
-        rtsp_fps = os.getenv("GN_RTSP_FPS", "").strip()
-        rtsp_use_wallclock = _env_bool("GN_RTSP_USE_WALLCLOCK", False)
+        # Alternativa: reencode=false em config.json usa passthrough (copy),
+        # apenas para câmeras com DTS estável e timestamps confiáveis.
+        _rtsp_cfg = get_effective_config().capture.rtsp
+        rtsp_reencode = _rtsp_cfg.reencode
+        rtsp_gop = _rtsp_cfg.gop
+        rtsp_preset = _rtsp_cfg.preset or "veryfast"
+        rtsp_crf = _rtsp_cfg.crf
+        rtsp_fps = _rtsp_cfg.fps
+        rtsp_use_wallclock = _rtsp_cfg.use_wallclock_timestamps
 
         cmd = [
             "ffmpeg",
@@ -227,8 +223,9 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             out_pattern,
         ]
     else:
-        framerate_raw = os.getenv("GN_INPUT_FRAMERATE", "30")
-        video_size = os.getenv("GN_VIDEO_SIZE", "1280x720")
+        _v4l2_cfg = get_effective_config().capture.v4l2
+        framerate_raw = str(_v4l2_cfg.framerate)
+        video_size = _v4l2_cfg.video_size or "1280x720"
         gop = max(1, int(float(framerate_raw)))
         cmd = [
             "ffmpeg",
@@ -318,9 +315,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         except Exception:
             pass
 
-        startup_check_sec = max(
-            0.1, float(os.getenv("GN_FFMPEG_STARTUP_CHECK_SEC", "1.0"))
-        )
+        startup_check_sec = get_effective_config().capture.rtsp.startup_check_seconds
         time.sleep(startup_check_sec)
         return_code = proc.poll()
         if return_code is not None:

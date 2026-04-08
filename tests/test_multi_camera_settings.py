@@ -6,10 +6,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config.config_loader import reset_config_cache
 from src.config.settings import load_capture_configs
 
 
 class MultiCameraSettingsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_config_cache()
+
+    def tearDown(self) -> None:
+        reset_config_cache()
+
     def test_loads_multiple_cameras_from_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

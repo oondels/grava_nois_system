@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.config.config_loader import reset_config_cache
 from src.config.settings import CaptureConfig, load_capture_configs
 from src.video.processor import build_highlight
 
@@ -51,6 +52,12 @@ def _run_build_highlight(cfg: CaptureConfig, fixed_ts: float = 1700000000.0) -> 
 
 
 class FileCollisionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_config_cache()
+
+    def tearDown(self) -> None:
+        reset_config_cache()
+
     def test_multi_camera_configs_have_isolated_dirs(self) -> None:
         """Cameras loaded from GN_CAMERAS_JSON use separate subdirectories."""
         import os
