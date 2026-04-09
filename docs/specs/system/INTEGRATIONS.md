@@ -105,6 +105,7 @@ Publicações da fase 1:
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
 - `grn/devices/{device_id}/config/reported`
+- `grn/devices/{device_id}/config/state`
 
 Tópicos reservados para evolução futura:
 
@@ -117,6 +118,7 @@ Inscrições da fase 1:
 
 - `grn/devices/{device_id}/commands/in` — recebe e rejeita comandos remotos;
 - `grn/devices/{device_id}/config/desired` — recebe configuração operacional remota assinada.
+- `grn/devices/{device_id}/config/request` — recebe solicitação assinada de snapshot atual da configuração efetiva.
 
 Observações:
 
@@ -148,6 +150,10 @@ Exemplos rápidos por tópico:
   - recebe envelope `config.desired` com `desired_config` completo, hash, expiração e assinatura HMAC
 - `config/reported`
   - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição e assinatura HMAC
+- `config/request`
+  - recebe envelope `config.request` assinado para solicitar snapshot atual do edge
+- `config/state`
+  - publica envelope `config.state` com `reported_config`, `reported_hash`, `has_pending_restart`, `pending_version` e assinatura HMAC
 
 ## Request signing
 

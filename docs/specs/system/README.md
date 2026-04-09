@@ -45,7 +45,7 @@ Este arquivo é a porta de entrada do edge system para leitura humana e lookup p
 
 ## MQTT Device Presence and Remote Config
 
-- Keywords: mqtt, broker, presence, heartbeat, online, offline, command/control, config/desired, config/reported
+- Keywords: mqtt, broker, presence, heartbeat, online, offline, command/control, config/desired, config/request, config/reported, config/state
 - File: [ARCHITECTURE.md](./ARCHITECTURE.md), [INTEGRATIONS.md](./INTEGRATIONS.md), [BUSINESS_RULES.md](./BUSINESS_RULES.md), [CONFIGURATION.md](./CONFIGURATION.md)
 - Source: [`src/services/mqtt/mqtt_client.py`](../../../src/services/mqtt/mqtt_client.py), [`src/services/mqtt/device_presence_service.py`](../../../src/services/mqtt/device_presence_service.py), [`src/services/mqtt/device_config_service.py`](../../../src/services/mqtt/device_config_service.py), [`src/services/mqtt/command_dispatcher.py`](../../../src/services/mqtt/command_dispatcher.py)
 - Related: GN_MQTT_ENABLED, GN_MQTT_BROKER_URL, GN_MQTT_HEARTBEAT_INTERVAL_SEC, GN_AGENT_VERSION, DEVICE_SECRET
