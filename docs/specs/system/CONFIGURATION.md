@@ -64,6 +64,15 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 
 ---
 
+## Ownership e identidade operacional
+
+- o `grava_nois_system` continua executando como **um device logico por processo/host provisionado**;
+- `GN_CLIENT_ID` e `GN_VENUE_ID` definem o contexto do cliente e da venue daquele host;
+- uma mesma venue pode ter varios devices no backend, entao esses dois valores podem se repetir em hosts diferentes;
+- `DEVICE_ID` e `DEVICE_SECRET` precisam permanecer exclusivos por host/device.
+
+---
+
 ## Câmeras com credenciais RTSP
 
 URLs RTSP que embutes credenciais (`rtsp://user:pass@host`) **não devem ser gravadas em texto plano** no `config.json`.

@@ -148,6 +148,12 @@ GN_RTSP_PRE_SEGMENTS=6
 GN_RTSP_POST_SEGMENTS=3
 ```
 
+Observacao operacional:
+
+- o runtime continua representando **um device logico por processo/host provisionado**;
+- o backend pode associar varios devices a mesma venue, entao varios hosts podem compartilhar o mesmo `GN_CLIENT_ID` e `GN_VENUE_ID`;
+- nesses casos, cada host precisa manter `DEVICE_ID` e `DEVICE_SECRET` proprios.
+
 ### 3. Executar
 
 ```bash
