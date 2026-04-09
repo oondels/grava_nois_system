@@ -24,6 +24,7 @@ class _FakeMQTTClient:
         self.subscriptions = []
         self.published = []
         self.connect_listeners = []
+        self.allow_publish_when_disconnected = True
 
     def subscribe(self, topic, handler, *, qos=None):
         _ = qos
@@ -32,6 +33,8 @@ class _FakeMQTTClient:
 
     def publish_json(self, topic, payload, *, retain=False, qos=None):
         _ = retain, qos
+        if not self.is_connected and not self.allow_publish_when_disconnected:
+            return False
         self.published.append((topic, payload))
         return True
 
@@ -343,6 +346,53 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(state_data["lastAppliedVersion"], 2)
         self.assertIsNone(state_data["pendingVersion"])
         self.assertEqual(state_data["lastStatus"], "applied")
+
+    def test_startup_report_waits_for_connect_and_is_published_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            client = _FakeMQTTClient()
+            client.allow_publish_when_disconnected = False
+            service = self._service(base, client)
+
+            desired_config = self._desired_config({"capture": {"segmentSeconds": 2}})
+            prepared = {
+                **desired_config,
+                "version": 2,
+                "updatedAt": "2026-04-08T12:00:00+00:00",
+            }
+            (base / "config.pending.json").write_text(
+                json.dumps(prepared),
+                encoding="utf-8",
+            )
+            (base / "config.state.json").write_text(
+                json.dumps(
+                    {
+                        "pendingVersion": 2,
+                        "pendingHash": hash_config(prepared),
+                        "pendingCorrelationId": "corr-boot-01",
+                        "lastStatus": "pending_restart",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            startup_report = apply_pending_config_on_startup(base / "config.json")
+
+            self.assertFalse(service.queue_startup_report(startup_report))
+            self.assertEqual(client.published, [])
+
+            self.assertTrue(service.start())
+            self.assertEqual(len(client.connect_listeners), 1)
+
+            client.is_connected = True
+            client.connect_listeners[0]()
+            published_topics = [topic for topic, _payload in client.published]
+            self.assertIn("grn/devices/edge-01/config/state", published_topics)
+            self.assertIn("grn/devices/edge-01/config/reported", published_topics)
+            first_publish_count = len(client.published)
+
+            client.connect_listeners[0]()
+            self.assertEqual(len(client.published), first_publish_count + 1)
+            self.assertEqual(client.published[-1][0], "grn/devices/edge-01/config/state")
 
     def test_process_config_request_publishes_state_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

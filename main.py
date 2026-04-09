@@ -496,6 +496,8 @@ def main() -> int:
                 ),
                 agent_version=mqtt_config.agent_version,
             )
+            if startup_config_report is not None:
+                mqtt_config_service.queue_startup_report(startup_config_report)
         except ValueError as exc:
             mqtt_presence = None
             mqtt_dispatcher = None
@@ -508,11 +510,6 @@ def main() -> int:
             if mqtt_presence.start():
                 mqtt_dispatcher.start()
                 mqtt_config_service.start()
-                if startup_config_report is not None:
-                    if not mqtt_config_service.publish_report(startup_config_report):
-                        mqtt_logger.warning(
-                            "Falha ao publicar config.reported de startup para config promovida"
-                        )
             elif mqtt_config.enabled:
                 mqtt_logger.warning(
                     "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"

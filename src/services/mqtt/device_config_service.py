@@ -162,22 +162,40 @@ class DeviceConfigService:
         self.device_secret = device_secret or ""
         self.agent_version = agent_version
         self._connect_listener_registered = False
+        self._pending_startup_report: _ReportResult | None = None
 
     def start(self) -> bool:
         if not self.mqtt_client.is_enabled:
             return False
         if not self._connect_listener_registered:
-            self.mqtt_client.add_on_connect_listener(self._publish_boot_snapshot)
+            self.mqtt_client.add_on_connect_listener(self._handle_mqtt_connect)
             self._connect_listener_registered = True
         started = self.mqtt_client.subscribe(self.desired_topic, self._handle_message)
         if self.request_topic:
             started = self.mqtt_client.subscribe(self.request_topic, self._handle_message) and started
         if self.mqtt_client.is_connected:
-            self._publish_boot_snapshot()
+            self._handle_mqtt_connect()
         return started
 
     def stop(self) -> None:
         return None
+
+    def queue_startup_report(self, report: "_ReportResult" | None) -> bool:
+        if report is None:
+            return False
+        self._pending_startup_report = report
+        published = self._publish_pending_startup_report()
+        if published:
+            mqtt_logger.info(
+                "Report de configuração promovida publicado imediatamente: version=%s",
+                report.config_version,
+            )
+            return True
+        mqtt_logger.info(
+            "Report de configuração promovida ficou pendente até conexão MQTT: version=%s",
+            report.config_version,
+        )
+        return False
 
     def _handle_message(self, topic: str, raw_payload: bytes) -> None:
         payload: dict[str, Any]
@@ -390,6 +408,26 @@ class DeviceConfigService:
             self.publish_state_snapshot()
         except Exception as exc:
             mqtt_logger.warning("Falha ao publicar snapshot de configuração no boot: %s", exc)
+
+    def _handle_mqtt_connect(self) -> None:
+        self._publish_boot_snapshot()
+        self._publish_pending_startup_report()
+
+    def _publish_pending_startup_report(self) -> bool:
+        report = self._pending_startup_report
+        if report is None:
+            return False
+        if not self.publish_report(report):
+            mqtt_logger.warning(
+                "Falha ao publicar config.reported de startup; nova tentativa ocorrerá no próximo connect"
+            )
+            return False
+        mqtt_logger.info(
+            "Report de configuração promovida publicado após conexão MQTT: version=%s",
+            report.config_version,
+        )
+        self._pending_startup_report = None
+        return True
 
     def _load_current_config(self) -> dict[str, Any]:
         if not self.config_path.exists():
