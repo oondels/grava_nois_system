@@ -4,6 +4,7 @@ import copy
 import hashlib
 import hmac
 import json
+import logging
 import os
 import shutil
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from src.config.config_loader import get_config_path, get_effective_config, rese
 from src.config.config_schema import validate_config_dict
 from src.security.hmac import hmac_sha256_base64
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
+from src.utils.logger import setup_logger
 
 REMOTE_CONFIG_SCHEMA_VERSION = 1
 _HASH_PREFIX = "sha256:"
@@ -130,6 +132,19 @@ _RESTART_PATHS = {
     ("mqtt", "retainPresence"),
 }
 
+_MQTT_AUDIT_CONSOLE_LEVEL = logging.CRITICAL + 1
+mqtt_audit_logger = setup_logger(
+    name="grava_nois_mqtt_audit",
+    file_name="mqtt_audit.log",
+    console_level=_MQTT_AUDIT_CONSOLE_LEVEL,
+    file_level=logging.INFO,
+)
+
+
+def _audit_log(event: str, **fields: Any) -> None:
+    payload = {"event": event, **fields}
+    mqtt_audit_logger.info(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
 
 class RemoteConfigError(Exception):
     """Erro de validação ou aplicação de configuração remota."""
@@ -209,6 +224,15 @@ class DeviceConfigService:
             payload = json.loads(raw_payload.decode("utf-8"))
             if not isinstance(payload, dict):
                 raise RemoteConfigError("payload deve ser um objeto JSON")
+            _audit_log(
+                "mqtt_message_received",
+                deviceId=self.device_id,
+                topic=topic,
+                messageType=payload.get("type"),
+                configVersion=payload.get("config_version"),
+                correlationId=payload.get("correlation_id"),
+                requestId=payload.get("request_id"),
+            )
             if topic == self.desired_topic:
                 result = self.process_desired_config(payload)
                 self.publish_report(result)
@@ -218,6 +242,12 @@ class DeviceConfigService:
                 return
             raise RemoteConfigError("tópico de configuração não suportado")
         except Exception as exc:
+            _audit_log(
+                "mqtt_message_rejected",
+                deviceId=self.device_id,
+                topic=topic,
+                reason=str(exc),
+            )
             result = _ReportResult(
                 status="rejected",
                 config_version=_safe_int_from_payload(raw_payload),
@@ -278,6 +308,14 @@ class DeviceConfigService:
             )
 
         self._write_pending(desired_config)
+        _audit_log(
+            "config_pending_written",
+            deviceId=self.device_id,
+            configVersion=config_version,
+            desiredHash=desired_hash,
+            pendingPath=str(self.pending_path),
+            requiresRestart=bool(requires_restart),
+        )
         if requires_restart:
             self._write_state(
                 {
@@ -288,6 +326,14 @@ class DeviceConfigService:
                     "lastStatus": "pending_restart",
                     "lastUpdatedAt": _now_iso(),
                 }
+            )
+            _audit_log(
+                "config_state_updated",
+                deviceId=self.device_id,
+                configVersion=config_version,
+                statePath=str(self.state_path),
+                lastStatus="pending_restart",
+                pendingVersion=config_version,
             )
             return _ReportResult(
                 status="pending_restart",
@@ -312,6 +358,14 @@ class DeviceConfigService:
                 "lastStatus": "applied",
                 "lastUpdatedAt": _now_iso(),
             }
+        )
+        _audit_log(
+            "config_applied_immediately",
+            deviceId=self.device_id,
+            configVersion=config_version,
+            configPath=str(self.config_path),
+            statePath=str(self.state_path),
+            reportedHash=desired_hash,
         )
         return _ReportResult(
             status="applied",
@@ -346,12 +400,23 @@ class DeviceConfigService:
             payload["signature"] = sign_reported_config_payload(
                 payload=payload,
                 device_secret=self.device_secret,
-        )
-        return self.mqtt_client.publish_json(
+            )
+        published = self.mqtt_client.publish_json(
             self.reported_topic,
             payload,
             retain=False,
         )
+        _audit_log(
+            "config_report_published",
+            deviceId=self.device_id,
+            topic=self.reported_topic,
+            status=result.status,
+            configVersion=result.config_version,
+            correlationId=result.correlation_id,
+            published=published,
+            requiresRestart=result.requires_restart,
+        )
+        return published
 
     def process_config_request(self, payload: dict[str, Any]) -> bool:
         request_id = _required_str(payload, "request_id")
@@ -367,6 +432,12 @@ class DeviceConfigService:
             raise RemoteConfigError("venue_id divergente")
         _required_str(payload, "requested_at")
         _validate_request_signature(payload, self.device_secret)
+        _audit_log(
+            "config_request_validated",
+            deviceId=self.device_id,
+            topic=self.request_topic,
+            requestId=request_id,
+        )
         return self.publish_state_snapshot(request_id=request_id)
 
     def publish_state_snapshot(self, *, request_id: str | None = None) -> bool:
@@ -403,11 +474,23 @@ class DeviceConfigService:
                 payload=payload,
                 device_secret=self.device_secret,
             )
-        return self.mqtt_client.publish_json(
+        published = self.mqtt_client.publish_json(
             self.state_topic,
             payload,
             retain=False,
         )
+        _audit_log(
+            "config_state_published",
+            deviceId=self.device_id,
+            topic=self.state_topic,
+            requestId=request_id,
+            configVersion=config_version,
+            reportedHash=reported_hash,
+            published=published,
+            hasPendingRestart=has_pending_restart,
+            pendingVersion=pending_version,
+        )
+        return published
 
     def _publish_boot_snapshot(self) -> None:
         try:
@@ -427,10 +510,24 @@ class DeviceConfigService:
             mqtt_logger.warning(
                 "Falha ao publicar config.reported de startup; nova tentativa ocorrerá no próximo connect"
             )
+            _audit_log(
+                "startup_report_publish_failed",
+                deviceId=self.device_id,
+                topic=self.reported_topic,
+                configVersion=report.config_version,
+                status=report.status,
+            )
             return False
         mqtt_logger.info(
             "Report de configuração promovida publicado após conexão MQTT: version=%s",
             report.config_version,
+        )
+        _audit_log(
+            "startup_report_published",
+            deviceId=self.device_id,
+            topic=self.reported_topic,
+            configVersion=report.config_version,
+            status=report.status,
         )
         self._pending_startup_report = None
         return True
@@ -553,6 +650,14 @@ def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportR
             "Configuração pendente promovida na inicialização: version=%s",
             applied_version,
         )
+        _audit_log(
+            "pending_config_promoted_on_startup",
+            configPath=str(effective_config_path),
+            pendingPath=str(pending_path),
+            statePath=str(state_path),
+            configVersion=applied_version,
+            reportedHash=applied_hash,
+        )
         return _ReportResult(
             status="applied",
             config_version=applied_version,
@@ -564,6 +669,13 @@ def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportR
         )
     except Exception as exc:
         mqtt_logger.warning("Falha ao promover config.pending.json no boot: %s", exc)
+        _audit_log(
+            "pending_config_promotion_failed",
+            configPath=str(effective_config_path),
+            pendingPath=str(pending_path),
+            statePath=str(state_path),
+            reason=str(exc),
+        )
         return None
 
 
