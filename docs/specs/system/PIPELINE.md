@@ -58,9 +58,9 @@ Em `build_highlight()`:
 2. calcula segmentos necessários;
 3. lê snapshot do buffer;
 4. cria manifesto de concat;
-5. concatena para `.ts`;
-6. remuxa para `.mp4`;
-7. salva em `recorded_clips/`.
+5. concatena diretamente para `.mp4` temporário com `ffmpeg -f concat -c copy`;
+6. promove o `.tmp.mp4` para o arquivo final;
+7. salva em `recorded_clips/` com nome `highlight_{camera_id}_{timestamp}.mp4`.
 
 Se falhar:
 
@@ -87,6 +87,8 @@ Campos típicos do sidecar:
 - `meta`
 - `pre_seconds`
 - `post_seconds`
+- `pre_segments`
+- `post_segments`
 - `seg_time`
 - `status`
 
@@ -103,29 +105,31 @@ Campos típicos do sidecar:
 
 ### Normal mode
 
-1. recorta o highlight para `9:16` no centro da ação e escala para `1080x1920`;
-2. aplica watermark em `highlights_wm/` após o crop;
+1. aplica transformação vertical/mobile conforme `VERTICAL_FORMAT` e `MOBILE_FORMAT`;
+2. aplica watermark em `highlights_wm/` após as transformações;
 3. atualiza sidecar com `meta_wm` e `wm_path`;
 4. registra metadados no backend;
 5. recebe `upload_url`;
 6. faz `PUT` do arquivo final;
 7. chama finalize;
-8. remove raw local da fila no sucesso.
+8. remove artefatos locais no sucesso.
 
 ### Light mode
 
-1. transforma o clipe para `9:16` e `1080x1920` quando `VERTICAL_FORMAT=1`;
-2. marca sidecar como `ready_for_upload`;
-3. registra no backend;
-4. faz upload do arquivo transformado da fila;
-5. chama finalize.
+1. não aplica watermark local;
+2. transforma o clipe quando `VERTICAL_FORMAT=1` e/ou `MOBILE_FORMAT=1`;
+3. marca sidecar como `ready_for_upload`;
+4. registra no backend;
+5. faz upload do arquivo transformado quando existir; caso contrário usa o original;
+6. chama finalize.
 
 ### DEV mode
 
 1. não chama backend;
 2. marca `remote_registration` como `skipped`;
-3. preserva artefatos locais úteis para inspeção;
-4. interrompe antes da limpeza final de fila/upload.
+3. marca o sidecar como `dev_local_preserved`;
+4. preserva artefatos locais úteis para inspeção;
+5. interrompe antes da limpeza final de sucesso.
 
 ## 8. Retry and failed paths
 

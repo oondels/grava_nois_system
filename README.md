@@ -1,6 +1,6 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
-> **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, processar com marca d'água/thumbnail e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
+> **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, processar transformação vertical/mobile e marca d'água quando aplicável, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
 >
@@ -35,12 +35,13 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 ### Arquivos Principais
 
 - **`main.py`**: Bootstrap, orquestração de câmeras, listeners de trigger e fan-out
-- **`src/config/settings.py`**: Parsing de `CaptureConfig` e fontes de câmera
+- **`src/config/settings.py`**: Parsing de `CaptureConfig`, MQTT e fontes de câmera
+- **`src/config/config_loader.py`**: Resolução da configuração operacional (`config.json` -> env legado -> defaults)
 - **`src/video/`**: Captura FFmpeg, buffer circular e montagem de highlight
 - **`src/workers/processing_worker.py`**: Worker de processamento, watermark, upload e retry
 - **`src/utils/logger.py`**: Sistema de logging centralizado
 - **`src/services/api_client.py`**: Cliente HTTP para comunicação com backend
-- **`src/services/mqtt/`**: Cliente MQTT, presença do device e placeholders de command/control
+- **`src/services/mqtt/`**: Cliente MQTT, presença do device, configuração remota e bloqueio explícito de command/control
 
 ### Dependências
 
@@ -65,8 +66,8 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 [ Enqueue → queue_raw/ ]
        ↓
 [ ProcessingWorker (1 por câmera) ]
-   ├─ Watermark (opcional)
-   ├─ Thumbnail (opcional)
+   ├─ Transformação vertical/mobile (condicional)
+   ├─ Watermark local (modo normal)
    └─ Upload via API
        ↓
 [ Backend (URL assinada) ]
@@ -190,8 +191,8 @@ Ao pressionar ENTER, botão físico (GPIO) ou botão Pico serial:
 2. Se estiver fora da janela, o trigger é ignorado e o `build_highlight()` não é executado
 3. Se estiver dentro da janela, aguarda `post_seconds` (padrão: 3 segmentos = 3s)
 4. Seleciona `pre_segments + post_segments` (padrão: 6 + 3 = 9 segmentos)
-5. Concatena com `ffmpeg` (sem reencode)
-6. Salva em `recorded_clips/highlight_YYYYMMDD-HHMMSSZ.mp4`
+5. Gera manifesto de concat e concatena diretamente para `.mp4` temporário com `ffmpeg -c copy`
+6. Promove o arquivo temporário para `recorded_clips/highlight_{camera_id}_{timestamp}.mp4`
 
 ### 4. Enfileiramento
 
@@ -202,7 +203,7 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
   "type": "highlight_raw",
   "status": "queued",
   "created_at": "2026-02-13T10:00:00Z",
-  "file_name": "highlight_20260213-100000Z.mp4",
+  "file_name": "highlight_cam01_20260213-100000-123456Z.mp4",
   "size_bytes": 1234567,
   "sha256": "abc123...",
   "meta": {
@@ -211,7 +212,12 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
     "height": 720,
     "fps": 30.0,
     "duration_sec": 9.0
-  }
+  },
+  "pre_seconds": 6,
+  "post_seconds": 3,
+  "pre_segments": 6,
+  "post_segments": 3,
+  "seg_time": 1
 }
 ```
 
@@ -220,27 +226,30 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Recorta o clipe para `9:16` priorizando a zona central da ação e escala para `1080x1920`
-2. Aplica as marcas d'água depois do crop, no topo central dentro da safe zone
-3. Gera thumbnail (meio do vídeo)
+1. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` e escala para `1080x1920`
+2. Se `MOBILE_FORMAT=1` e não estiver em vertical, reduz a saída horizontal para no máximo `720p`
+3. Aplica as marcas d'água depois das transformações, no topo central em vertical ou no rodapé em horizontal
 4. Registra metadados no backend → recebe `upload_url`
 5. Faz upload para URL assinada (S3/Supabase)
 6. Notifica backend sobre conclusão
-7. Remove arquivo da fila
+7. Remove os artefatos locais no sucesso
+8. Observação: existe helper de thumbnail no código, mas ele não faz parte do pipeline ativo do worker
 
 **Modo Leve (`GN_LIGHT_MODE=1`):**
-1. Recorta o clipe para `9:16` priorizando a zona central da ação e escala para `1080x1920`
-2. Registra metadados no backend → recebe `upload_url`
-3. Faz upload do arquivo transformado
-4. Notifica backend sobre conclusão
-5. Remove arquivo da fila
+1. Não aplica watermark local
+2. Se `VERTICAL_FORMAT=1` e/ou `MOBILE_FORMAT=1`, transforma o clipe antes do upload
+3. Marca o sidecar como `ready_for_upload`
+4. Registra metadados no backend → recebe `upload_url`
+5. Faz upload do arquivo transformado quando existir; caso contrário usa o original
+6. Notifica backend sobre conclusão
+7. Remove os artefatos locais no sucesso
 
 **Modo DEV (`DEV=true`):**
 1. Executa processamento local normalmente (watermark no modo normal, ou fluxo leve)
 2. Não chama API externa (`register/upload/finalize`)
 3. Marca `remote_registration` como `skipped` com motivo `DEV mode`
-4. Limpa `queue_raw` (remove vídeo cru + sidecar) sem mover para `failed_clips`
-5. Preserva o arquivo final local em `highlights_wm/` quando estiver no modo normal
+4. Marca o item local como `dev_local_preserved`
+5. Preserva os artefatos locais para inspeção e evita reprocessamento automático
 
 ### 6. Tratamento de Erros
 
@@ -250,6 +259,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 - **Diagnóstico seguro:** O retry registra a resposta do backend no sidecar sanitizando `upload_url`/URLs assinadas antes de persistir metadados locais.
 - **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
 - **Erros HMAC/device não-retriáveis:** Quando a API retorna erros de autenticação/integridade do device (ex.: `signature_mismatch`, `client_mismatch`, `device_revoked`), o worker remove o registro local (vídeo + sidecar) para evitar loop infinito de retry.
+- **Conflito de reupload não-retriável:** Se o backend responder `HTTP 409` indicando transição inválida para reupload, o worker exclui o registro local para não insistir em um estado já bloqueado pelo backend.
 
 ### 7. Presença MQTT
 
@@ -305,6 +315,7 @@ grava_nois_system/
 │       └── mqtt/
 │           ├── mqtt_client.py            # Cliente MQTT e lifecycle
 │           ├── device_presence_service.py# Presença, heartbeat e estado
+│           ├── device_config_service.py  # Configuração remota assinada
 │           ├── command_dispatcher.py     # Estrutura futura de command/control
 │           ├── command_executor.py       # Placeholder sem execução real
 │           └── command_policy.py         # Política que bloqueia comandos na fase 1
@@ -342,6 +353,7 @@ grava_nois_system/
         ├── DESIGN_SPEC.md
         └── system/
             ├── ARCHITECTURE.md
+            ├── CONFIGURATION.md
             ├── PIPELINE.md
             ├── BUSINESS_RULES.md
             ├── INTEGRATIONS.md
@@ -433,7 +445,7 @@ GN_RTSP_CRF=23                  # Qualidade x264 (apenas com GN_RTSP_REENCODE=1)
 ```
 
 Observação:
-- O modo padrão é re-encode CFR (`-vsync cfr`), necessário para câmeras com DTS não-monotônico (ex: Tapo C500). Garante segmentos de duração exata e concatenação sem falhas.
+- O modo padrão é re-encode RTSP com segmentação estável e geração de PTS (`+genpts`), necessário para câmeras com DTS não-monotônico (ex: Tapo C500).
 - Use `GN_RTSP_REENCODE=0` apenas para câmeras com DTS estável (passthrough sem re-encode).
 - Ordem de precedência da fonte RTSP: `GN_CAMERAS_JSON` > `GN_RTSP_URLS` > `GN_RTSP_URL`.
 
@@ -511,7 +523,7 @@ Observações:
 #### Processamento
 
 ```bash
-GN_LIGHT_MODE=1                 # 0=normal (com identidade visual), 1=leve (mantém crop 9:16 e pula watermark)
+GN_LIGHT_MODE=1                 # 0=normal (watermark local), 1=leve (sem watermark local)
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_TRIGGER_MAX_WORKERS=2        # Vazio=auto (número de câmeras); define paralelismo do trigger
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
@@ -519,6 +531,7 @@ GN_WM_PRESET=veryfast           # Preset ffmpeg no watermark (default: veryfast)
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
 GN_WM_OPACITY=0.8               # Opacidade alvo da logo (limitada internamente a 70-85%)
 GN_WM_MARGIN=24                 # Margem vertical da safe zone
+MOBILE_FORMAT=1                 # Mantém saída horizontal em até 720p quando não estiver em vertical
 VERTICAL_FORMAT=1               # Padrão: crop central 9:16 + saída 1080x1920
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
@@ -564,7 +577,8 @@ DEV_VIDEO_MODE=false            # Envia payload com "dev=true" no register de me
 Com `DEV=true`:
 - O processamento local do vídeo continua ativo.
 - O worker não faz requisições HTTP para registro, upload e finalização.
-- O item é removido de `queue_raw` como sucesso local (sem `upload_failed`).
+- O sidecar é marcado como `dev_local_preserved`.
+- Os artefatos locais ficam preservados para inspeção e deixam de ser reprocessados automaticamente.
 
 #### Janela de Funcionamento
 
@@ -1176,13 +1190,11 @@ python3 main.py
 
 | Recurso | Modo Normal | Modo Leve |
 |---------|-------------|-----------|
-| Marca d'água | ✅ Sim | ❌ Não |
-| Thumbnail | ✅ Sim | ❌ Não |
-| Reencode | ✅ H.264 CRF 20 | ❌ Copy direto |
-| Cálculo SHA-256 | 2x (fila + upload) | 1x (upload) |
-| CPU | ~80% por vídeo | ~15% por vídeo |
-| Tempo/vídeo | ~30s | ~5s |
-| Pasta de saída | `highlights_wm/` | `queue_raw/` → upload direto |
+| Marca d'água local | ✅ Sim | ❌ Não |
+| Transformação vertical/mobile | ✅ Configurável | ✅ Configurável |
+| Helper de thumbnail no pipeline ativo | ❌ Não | ❌ Não |
+| Cálculo SHA-256 | enqueue + upload | upload |
+| Artefato local principal | `highlights_wm/` | `highlights_wm/` quando houver transformação; caso contrário upload do original |
 
 ### Quando Usar
 
@@ -1210,8 +1222,8 @@ nc -zv 192.168.1.100 554
 # Testar RTSP diretamente
 ffplay rtsp://user:pass@192.168.1.100:554/cam/realmonitor
 
-# Ver logs do FFmpeg
-tail -f logs/ffmpeg.log
+# Ver logs do FFmpeg por câmera
+tail -f logs/ffmpeg_cam01.log
 
 # Ver logs da aplicação
 tail -f logs/app.log
@@ -1350,7 +1362,18 @@ o device aplica uma política local (em `src/services/api_error_policy.py`) para
 - `device_hmac_verification_failed`
 - outros erros transitórios de rede/infra
 
-### 7. CPU/Memória Alta
+### 7. Conflito de Reupload (HTTP 409)
+
+**Sintomas:**
+- Log com `Upload bloqueado pelo backend (reupload não permitido).`
+- O item é excluído localmente em vez de voltar para retry
+
+**Comportamento esperado:**
+- O worker trata `HTTP 409` com mensagem de transição inválida para reupload como erro não-retriável.
+- O vídeo e o sidecar JSON são removidos localmente.
+- O item não deve voltar para `failed_clips/upload_failed/`.
+
+### 8. CPU/Memória Alta
 
 **Soluções:**
 
@@ -1368,7 +1391,7 @@ export GN_BUFFER_DIR=/home/pi/buffer
 # (Editar main.py: scan_interval=3 em vez de 1)
 ```
 
-### 8. Modo DEV Não Está Isolando Rede
+### 9. Modo DEV Não Está Isolando Rede
 
 **Sintomas:**
 - Mesmo com `.env` configurado, ainda aparecem logs de chamada HTTP.
@@ -1387,7 +1410,7 @@ DEV=true
 - Em `DEV=true`, o worker deve logar:
   `Modo DEV ativado. Pulando comunicação com a API e upload para a nuvem.`
 
-### 9. Logs Muito Grandes
+### 10. Logs Muito Grandes
 
 ```bash
 # Logs rotativos estão ativados por padrão
@@ -1407,7 +1430,7 @@ rm logs/app.log.*
 - **Console:** INFO e acima (mensagens importantes)
 - **Arquivo `logs/app.log`:** DEBUG e acima (tudo)
 - **Arquivo `logs/mqtt.log`:** lifecycle MQTT, heartbeat e presença
-- **Arquivo `logs/ffmpeg.log`:** saída consolidada do FFmpeg (`stdout` + `stderr`)
+- **Arquivo `logs/ffmpeg_<camera_id>.log`:** saída do FFmpeg por câmera (`stdout` + `stderr`)
 
 ### Formato
 
@@ -1489,7 +1512,7 @@ api_client.finalize_clip_uploaded(
 - ✅ Pico serial com roteamento multi-botão por câmera (`pico_trigger_token`)
 - ✅ Cooldown por câmera (triggers físicos independentes entre câmeras)
 - ✅ Worker de processamento com retry
-- ✅ Marca d'água e thumbnail (modo normal)
+- ✅ Marca d'água local no modo normal
 - ✅ Upload via URL assinada
 - ✅ Health check RTSP com retry automático
 - ✅ Modo leve para hardware limitado
@@ -1531,7 +1554,7 @@ Para contribuir com o projeto:
 1. Leia a documentação completa em `docs/`
 2. Teste em ambiente local antes de deploy
 3. Siga as convenções de logging estabelecidas
-4. Atualize a documentação se necessário
+4. Atualize toda documentação impactada no mesmo change (`README.md`, `.env.example`, specs e `AGENTS.md` quando aplicável)
 
 ---
 
@@ -1539,7 +1562,7 @@ Para contribuir com o projeto:
 
 Em caso de problemas:
 
-1. Verifique os logs em `logs/app.log` e `logs/ffmpeg.log`
+1. Verifique os logs em `logs/app.log` e `logs/ffmpeg_<camera_id>.log`
 2. Consulte a seção [Troubleshooting](#troubleshooting)
 3. Entre em contato com a equipe de desenvolvimento
 

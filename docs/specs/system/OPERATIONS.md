@@ -1,5 +1,7 @@
 # Edge Operations
 
+O repositório usa `unittest` como framework de teste.
+
 ## Startup behavior
 
 No startup, o serviço:
@@ -47,6 +49,7 @@ Testes visíveis:
 - `test_multi_camera_settings.py`
 - `test_no_file_collisions.py`
 - `test_pico_utils.py`
+- `test_retry_upload.py`
 - `test_security_signing.py`
 - `test_trigger_fanout.py`
 - `test_trigger_sources.py`
@@ -90,7 +93,9 @@ Verdades do código atual que costumam ser esquecidas:
 - `build_highlight()` espera o pós-buffer antes de concatenar;
 - em light mode o SHA256 pode ser adiado/evitado no enqueue;
 - `request_outside_allowed_time_window` é descarte local, não retry;
-- falhas HMAC/client mismatch também devem sair do loop de retry.
+- falhas HMAC/client mismatch também devem sair do loop de retry;
+- `HTTP 409` de reupload bloqueado também é descarte local;
+- `DEV=true` preserva artefatos locais com status `dev_local_preserved`.
 
 ## Change checklist
 
@@ -102,4 +107,5 @@ Antes de alterar fluxos centrais do edge, valide:
 4. a política de erro da API continua distinguindo retry vs delete;
 5. o comportamento de multi-camera continua isolado por câmera;
 6. a spec especializada correspondente foi atualizada.
-7. `README.md` e `CHANGELOG.md` foram atualizados quando houve mudança de comportamento.
+7. `README.md`, `.env.example` e `AGENTS.md` foram atualizados quando houve mudança de contrato operacional;
+8. qualquer doc impactada pelo change foi atualizada no mesmo patch.

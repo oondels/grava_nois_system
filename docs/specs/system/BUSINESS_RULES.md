@@ -36,6 +36,7 @@
 - highlights brutos nascem em `recorded_clips/`;
 - após enqueue, o raw vai para `queue_raw/`;
 - arquivos processados em modo normal geram artefato em `highlights_wm/`;
+- em `DEV=true`, o sidecar pode permanecer em `queue_raw/` com status `dev_local_preserved`;
 - falhas de build vão para `failed_clips/build_failed`;
 - falhas de upload/retry podem ir para `failed_clips/upload_failed`.
 
@@ -67,6 +68,10 @@ Também devem excluir localmente mensagens com snippet:
 
 - `forbidden - video does not belong to device client`
 
+Também devem excluir localmente conflitos de negócio não-retriáveis:
+
+- `HTTP 409` com mensagem de transição inválida para reupload
+
 ## Business-hours rejection rule
 
 - se a API rejeitar o registro com `request_outside_allowed_time_window`, o worker não deve fazer retry;
@@ -77,14 +82,16 @@ Também devem excluir localmente mensagens com snippet:
 
 ### Light mode
 
-- pula watermark e thumbnail;
+- pula watermark local;
+- ainda pode aplicar transformação vertical/mobile;
 - preserva upload e finalize.
 
 ### DEV mode
 
 - não chama API externa;
 - não gera retry remoto;
-- preserva ou limpa artefatos locais conforme fluxo do worker.
+- marca o item como `dev_local_preserved`;
+- preserva artefatos locais para inspeção e bloqueia reprocessamento automático.
 
 ## Logging rules
 
