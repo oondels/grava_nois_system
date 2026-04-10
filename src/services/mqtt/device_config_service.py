@@ -70,11 +70,14 @@ _ALLOWED_KEYS_BY_PATH: dict[tuple[str, ...], set[str]] = {
     ("processing",): {
         "lightMode",
         "maxAttempts",
-        "mobileFormat",
         "verticalFormat",
+        "hqCrf",
+        "hqPreset",
+        "lmCrf",
+        "lmPreset",
         "watermark",
     },
-    ("processing", "watermark"): {"preset", "relativeWidth", "opacity", "margin"},
+    ("processing", "watermark"): {"relativeWidth", "opacity", "margin"},
     ("operationWindow",): {"timeZone", "start", "end"},
     ("mqtt",): {
         "enabled",
@@ -837,10 +840,12 @@ def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, A
         "processing": {
             "lightMode": config.processing.light_mode,
             "maxAttempts": config.processing.max_attempts,
-            "mobileFormat": config.processing.mobile_format,
             "verticalFormat": config.processing.vertical_format,
+            "hqCrf": config.processing.hq_crf,
+            "hqPreset": config.processing.hq_preset,
+            "lmCrf": config.processing.lm_crf,
+            "lmPreset": config.processing.lm_preset,
             "watermark": {
-                "preset": config.processing.watermark.preset,
                 "relativeWidth": config.processing.watermark.relative_width,
                 "opacity": config.processing.watermark.opacity,
                 "margin": config.processing.watermark.margin,

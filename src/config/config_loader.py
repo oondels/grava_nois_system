@@ -183,7 +183,6 @@ class TriggerConfig:
 class WatermarkConfig:
     """Parâmetros de watermark/branding."""
 
-    preset: str = "veryfast"
     relative_width: float = 0.18
     opacity: float = 0.8
     margin: int = 24
@@ -191,12 +190,24 @@ class WatermarkConfig:
 
 @dataclass
 class ProcessingConfig:
-    """Configuração de processamento de clips."""
+    """Configuração de processamento de clips.
+
+    Modos de qualidade:
+    - light_mode=False (padrão): alta qualidade — hq_crf + hq_preset.
+    - light_mode=True: modo leve para hardware fraco — lm_crf + lm_preset.
+    Watermark é sempre aplicada em ambos os modos.
+    vertical_format é apenas reframe 9:16 (crop), sem scale forçado.
+    """
 
     light_mode: bool = False
     max_attempts: int = 3
-    mobile_format: bool = True
-    vertical_format: bool = True
+    vertical_format: bool = False
+    # Encode de alta qualidade (light_mode=False)
+    hq_crf: int = 18
+    hq_preset: str = "medium"
+    # Encode leve (light_mode=True)
+    lm_crf: int = 26
+    lm_preset: str = "veryfast"
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
 
 
@@ -426,10 +437,12 @@ def _build_from_env() -> OperationalConfig:
         processing=ProcessingConfig(
             light_mode=_env_bool("GN_LIGHT_MODE", False),
             max_attempts=max(1, _env_int("GN_MAX_ATTEMPTS", 3)),
-            mobile_format=_env_bool("MOBILE_FORMAT", True),
-            vertical_format=_env_bool("VERTICAL_FORMAT", True),
+            vertical_format=_env_bool("VERTICAL_FORMAT", False),
+            hq_crf=max(0, min(51, _env_int("GN_HQ_CRF", 18))),
+            hq_preset=_env_str("GN_HQ_PRESET", "medium") or "medium",
+            lm_crf=max(0, min(51, _env_int("GN_LM_CRF", 26))),
+            lm_preset=_env_str("GN_LM_PRESET", "veryfast") or "veryfast",
             watermark=WatermarkConfig(
-                preset=_env_str("GN_WM_PRESET", "veryfast") or "veryfast",
                 relative_width=max(0.01, _env_float("GN_WM_REL_WIDTH", 0.18)),
                 opacity=max(0.0, min(1.0, _env_float("GN_WM_OPACITY", 0.8))),
                 margin=max(0, _env_int("GN_WM_MARGIN", 24)),
@@ -567,10 +580,12 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
     processing = ProcessingConfig(
         light_mode=_get(proc_d, "lightMode", base.processing.light_mode),
         max_attempts=max(1, _get(proc_d, "maxAttempts", base.processing.max_attempts)),
-        mobile_format=_get(proc_d, "mobileFormat", base.processing.mobile_format),
         vertical_format=_get(proc_d, "verticalFormat", base.processing.vertical_format),
+        hq_crf=max(0, min(51, _get(proc_d, "hqCrf", base.processing.hq_crf))),
+        hq_preset=_get(proc_d, "hqPreset", base.processing.hq_preset) or "medium",
+        lm_crf=max(0, min(51, _get(proc_d, "lmCrf", base.processing.lm_crf))),
+        lm_preset=_get(proc_d, "lmPreset", base.processing.lm_preset) or "veryfast",
         watermark=WatermarkConfig(
-            preset=_get(wm_d, "preset", base.processing.watermark.preset) or "veryfast",
             relative_width=max(
                 0.01, _get(wm_d, "relativeWidth", base.processing.watermark.relative_width)
             ),

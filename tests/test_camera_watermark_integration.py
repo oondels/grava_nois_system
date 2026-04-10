@@ -84,7 +84,6 @@ class CameraWatermarkIntegrationTests(unittest.TestCase):
             "DEV": "1",
             "GN_LIGHT_MODE": "0",
             "VERTICAL_FORMAT": "1",
-            "MOBILE_FORMAT": "1",
             "GN_BUFFER_DIR": str(buffer_root),
             "GN_RTSP_MAX_RETRIES": "1",
             "GN_RTSP_TIMEOUT": "3",
@@ -150,8 +149,14 @@ class CameraWatermarkIntegrationTests(unittest.TestCase):
                     self.assertGreater(final_mp4.stat().st_size, 0, "Arquivo final gerado vazio")
 
                     final_meta = ffprobe_metadata(final_mp4)
-                    self.assertEqual(final_meta.get("width"), 1080)
-                    self.assertEqual(final_meta.get("height"), 1920)
+                    final_w = final_meta.get("width") or 0
+                    final_h = final_meta.get("height") or 0
+                    self.assertGreater(final_w, 0, "Largura do vídeo final deve ser > 0")
+                    self.assertGreater(final_h, 0, "Altura do vídeo final deve ser > 0")
+                    # Vertical format: proporção deve ser aproximadamente 9:16
+                    if env.get("VERTICAL_FORMAT") == "1":
+                        ratio = final_w / final_h
+                        self.assertAlmostEqual(ratio, 9 / 16, delta=0.02, msg="Proporção final deve ser ~9:16")
                     processed_outputs.append(final_mp4)
             finally:
                 for _cfg, proc, segbuf in runtimes:

@@ -75,13 +75,17 @@
 
   "processing": {
     "_comment": "Processamento de clips. lightMode e maxAttempts exigem restart do worker.",
+    "_modes": "lightMode=false: alta qualidade (hqCrf+hqPreset). lightMode=true: modo leve para hardware fraco (lmCrf+lmPreset). Watermark sempre ativa em ambos os modos.",
     "lightMode": false,
     "maxAttempts": 3,
-    "mobileFormat": true,
-    "verticalFormat": true,
+    "verticalFormat": false,
+    "_verticalFormat": "Reframe 9:16 via crop central. Sem scale forçado — resolução final é a do crop.",
+    "hqCrf": 18,
+    "hqPreset": "medium",
+    "lmCrf": 26,
+    "lmPreset": "veryfast",
     "watermark": {
       "_comment": "Parâmetros de watermark/branding. Suportarão hot-reload no futuro.",
-      "preset": "veryfast",
       "relativeWidth": 0.18,
       "opacity": 0.8,
       "margin": 24

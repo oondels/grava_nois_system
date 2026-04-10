@@ -10,7 +10,7 @@ Responsabilidades centrais:
 - manter buffer circular local;
 - disparar highlights por ENTER, GPIO ou Pico serial;
 - persistir sidecar JSON local;
-- processar transformação vertical/mobile e watermark quando aplicável;
+- processar watermark (sempre) e reframe vertical opcional;
 - registrar/upload/finalize com o backend;
 - reprocessar falhas locais conforme política.
 
@@ -126,17 +126,17 @@ Ponto de integração:
 
 ## Operating modes
 
-### Normal mode
+### Normal mode (light_mode=false)
 
-- transforma para vertical/mobile conforme `VERTICAL_FORMAT` e `MOBILE_FORMAT`;
-- watermark com safe zone e tamanho relativo configurável por `GN_WM_REL_WIDTH`;
+- aplica watermark sempre, com encode de alta qualidade (`hqCrf` + `hqPreset`, padrão CRF 18 + medium);
+- crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 - register/upload/finalize.
 
-### Light mode
+### Light mode (light_mode=true)
 
-- sem watermark local;
-- transforma para vertical/mobile quando configurado;
-- upload do arquivo transformado quando existir, senão do highlight original.
+- aplica watermark sempre, com encode leve para hardware fraco (`lmCrf` + `lmPreset`, padrão CRF 26 + veryfast);
+- crop 9:16 quando `VERTICAL_FORMAT=1` (mesmo reframe do modo normal);
+- register/upload/finalize (idêntico ao modo normal após o encode).
 
 ### DEV mode
 

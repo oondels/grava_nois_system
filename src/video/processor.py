@@ -244,12 +244,11 @@ def add_image_watermark(
     secondary_watermark_path: Optional[str] = None,
     margin: int = 24,
     opacity: float = 0.8,
-    rel_width: float = 0.2,
+    rel_width: float = 0.18,
     secondary_rel_width: Optional[float] = None,
     codec: str = "libx264",
-    crf: int = 20,
+    crf: int = 18,
     preset: str = "medium",
-    mobile_format: bool = True,
     vertical_format: bool = False,
 ) -> None:
     """
@@ -257,14 +256,14 @@ def add_image_watermark(
 
     - Dimensiona a(s) marca(s) d'água para `rel_width * largura_do_vídeo`.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
-    - Se `mobile_format=True`: redimensiona para máx 720p horizontal.
-    - Se `vertical_format=True`: recorta o centro do vídeo para 9:16 e entrega 1080x1920.
+    - Se `vertical_format=True`: recorta o centro do vídeo para 9:16 (crop apenas,
+      sem scale forçado). A resolução final é a do crop — sem upscale artificial.
     - Em `vertical_format`, a marca d'água é posicionada no topo central dentro da safe zone.
-    - Requer ffmpeg no PATH. Não requer MoviePy.
+    - Requer ffmpeg no PATH.
     """
     logger.info(
-        f"Adicionando marca d'água ao vídeo "
-        f"(mobile_format={mobile_format}, vertical_format={vertical_format})..."
+        f"Adicionando marca d'água ao vídeo (vertical_format={vertical_format}, "
+        f"crf={crf}, preset={preset})..."
     )
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
@@ -284,52 +283,27 @@ def add_image_watermark(
     if vw <= 0:
         raise RuntimeError("Não foi possível obter largura do vídeo via ffprobe.")
 
-    # Constrói cadeia de filtros de transformação de vídeo (crop e/ou scale).
-    # A ordem importa: crop sempre antes de scale.
-    video_filters: list[str] = []
-
     if vertical_format:
-        # Recorta o centro do vídeo para proporção 9:16.
-        # crop=largura_alvo:altura:(x_offset):0
-        # largura_alvo = altura * 9/16 (mantém altura, corta laterais)
-        video_filters.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
-        logger.info(f"Vertical format ativo: crop 9:16 — {vw}x{vh}")
-
-    if vertical_format:
-        video_filters.append("scale=1080:1920")
-        logger.info("Vertical format ativo: scale final para 1080x1920")
-    elif mobile_format:
-        target_h = 720
-        if vh > target_h:
-            video_filters.append(f"scale=-2:{target_h}")
-            logger.info(f"Mobile format ativo: scale para altura ≤{target_h}p")
-
-    if video_filters:
-        transform = ",".join(video_filters)
+        # Crop central 9:16: mantém altura original, corta laterais.
+        # Para 1920x1080: vw_final = int(1080 * 9/16) = 607, vh_final = 1080.
+        # Sem scale forçado — a resolução pós-crop é a resolução final.
+        transform_filter = "[0:v]crop=ih*9/16:ih:(iw-ih*9/16)/2:0[v_transformed]"
         input_video_label = "[v_transformed]"
-        transform_filter = f"[0:v]{transform}[v_transformed]"
+        vw_final = max(1, int(vh * 9 / 16))
+        vh_final = vh
+        logger.info(f"Vertical format: crop 9:16 — {vw}x{vh} → {vw_final}x{vh_final}")
     else:
-        input_video_label = "[0:v]"
         transform_filter = None
-
-    # Calcula largura efetiva do vídeo após as transformações,
-    # pois a watermark é dimensionada em relação à largura final.
-    if vertical_format:
-        vw_final = 1080
-        vh_final = 1920
-    elif mobile_format and vh > 720:
-        # Scale horizontal: mantém aspect ratio, altura = 720
-        vw_final = max(1, int(vw * 720 / vh))
-        vh_final = 720
-    else:
+        input_video_label = "[0:v]"
         vw_final = vw
         vh_final = vh
 
-    # Largura alvo da(s) marca(s) d'água baseada na largura final do vídeo
-    primary_rel_width = min(0.2, float(rel_width))
+    # Largura alvo da(s) marca(s) d'água baseada na largura final do vídeo.
+    # Sem cap artificial — respeita o valor configurado.
+    primary_rel_width = float(rel_width)
     secondary_base_rel = rel_width if secondary_rel_width is None else secondary_rel_width
-    secondary_rel = min(0.2, float(secondary_base_rel))
-    alpha = min(0.85, max(0.7, float(opacity)))
+    secondary_rel = float(secondary_base_rel)
+    alpha = float(opacity)
     wm_w = max(1, int(vw_final * primary_rel_width))
     wm2_w = max(1, int(vw_final * secondary_rel))
     overlay_y = (

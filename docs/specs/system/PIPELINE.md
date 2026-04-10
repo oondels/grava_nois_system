@@ -72,7 +72,7 @@ Se falhar:
 `enqueue_clip()`:
 
 1. calcula tamanho;
-2. calcula SHA256, exceto em light mode;
+2. calcula SHA256 (omitido em light mode para reduzir CPU);
 3. extrai metadados com `ffprobe`;
 4. cria sidecar JSON;
 5. move o vídeo para `queue_raw/`.
@@ -103,25 +103,27 @@ Campos típicos do sidecar:
 
 ## 7. Worker processing path
 
-### Normal mode
+### Normal mode (light_mode=false)
 
-1. aplica transformação vertical/mobile conforme `VERTICAL_FORMAT` e `MOBILE_FORMAT`;
-2. aplica watermark em `highlights_wm/` após as transformações;
-3. atualiza sidecar com `meta_wm` e `wm_path`;
-4. registra metadados no backend;
-5. recebe `upload_url`;
-6. faz `PUT` do arquivo final;
-7. chama finalize;
-8. remove artefatos locais no sucesso.
+1. aplica watermark com `hqCrf` + `hqPreset` (alta qualidade);
+2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
+3. salva resultado em `highlights_wm/`;
+4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
+5. registra metadados no backend;
+6. recebe `upload_url`;
+7. faz `PUT` do arquivo final;
+8. chama finalize;
+9. remove artefatos locais no sucesso.
 
-### Light mode
+### Light mode (light_mode=true)
 
-1. não aplica watermark local;
-2. transforma o clipe quando `VERTICAL_FORMAT=1` e/ou `MOBILE_FORMAT=1`;
-3. marca sidecar como `ready_for_upload`;
-4. registra no backend;
-5. faz upload do arquivo transformado quando existir; caso contrário usa o original;
-6. chama finalize.
+Modo para hardware fraco — watermark é sempre aplicada, mas com encode mais leve:
+
+1. aplica watermark com `lmCrf` + `lmPreset` (menor custo de CPU);
+2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
+3. salva resultado em `highlights_wm/`;
+4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
+5. registra no backend, faz upload e chama finalize (igual ao modo normal).
 
 ### DEV mode
 

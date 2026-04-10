@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import threading
 import time
 import traceback
@@ -60,8 +59,7 @@ class ProcessingWorker:
         self._stop = threading.Event()
         self._t = None
 
-        if not self.light_mode:
-            self.out_wm_dir.mkdir(parents=True, exist_ok=True)
+        self.out_wm_dir.mkdir(parents=True, exist_ok=True)
         self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
     def _scan_retry_failed(self):
@@ -298,136 +296,67 @@ class ProcessingWorker:
         meta = json.loads(meta_path.read_text())
         attempts = int(meta.get("attempts", 0))
 
-        # idempotência e pré-processamento conforme modo
-        upload_target = mp4
-        out_mp4 = None
+        # Watermark é sempre aplicada — ambos os modos diferem apenas no CRF/preset.
+        # Marca d'água aplicada no worker (assíncrono) para não aumentar latência do trigger.
+        _proc_cfg = get_effective_config().processing
+        vertical_format = _proc_cfg.vertical_format
 
-        if not self.light_mode:
-            # Marca d'água é aplicada no worker (assíncrono) para não aumentar latência do trigger.
-            out_mp4 = self.out_wm_dir / mp4.name
-            if out_mp4.exists():
-                meta.update(
-                    {
-                        "status": "watermarked",
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "wm_path": str(out_mp4),
-                    }
-                )
-                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                upload_target = out_mp4
-            else:
-                _proc_cfg = get_effective_config().processing
-                wm_preset = _proc_cfg.watermark.preset or "veryfast"
-                mobile_format = _proc_cfg.mobile_format
-                vertical_format = _proc_cfg.vertical_format
-                tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
-                add_image_watermark(
-                    input_path=str(mp4),
-                    watermark_path=str(self.watermark_path),
-                    output_path=str(tmp_out),
-                    secondary_watermark_path=(
-                        str(self.client_watermark_path)
-                        if self.client_watermark_path is not None
-                        else None
-                    ),
-                    margin=self.wm_margin,
-                    opacity=self.wm_opacity,
-                    rel_width=self.wm_rel_width,
-                    codec="libx264",
-                    crf=20,
-                    preset=wm_preset,
-                    mobile_format=mobile_format,
-                    vertical_format=vertical_format,
-                )
-                tmp_out.replace(out_mp4)
-
-                meta.update(
-                    {
-                        "status": "watermarked",
-                        "attempts": attempts,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "wm_path": str(out_mp4),
-                        "meta_wm": ffprobe_metadata(out_mp4),
-                        "wm_encode": {
-                            "preset": wm_preset,
-                            "crf": 20,
-                            "mobile_format": mobile_format,
-                            "vertical_format": vertical_format,
-                        },
-                    }
-                )
-                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-                upload_target = out_mp4
+        if self.light_mode:
+            encode_crf = _proc_cfg.lm_crf
+            encode_preset = _proc_cfg.lm_preset
         else:
-            # Modo leve: sem watermark/thumbnail.
-            # Aplica mobileFormat e/ou verticalFormat se ativos.
-            _proc_cfg_light = get_effective_config().processing
-            mobile_format = _proc_cfg_light.mobile_format
-            vertical_format = _proc_cfg_light.vertical_format
-            clip_meta = meta.get("meta") or ffprobe_metadata(mp4)
-            src_h = int(clip_meta.get("height") or 0)
+            encode_crf = _proc_cfg.hq_crf
+            encode_preset = _proc_cfg.hq_preset
 
-            # Monta a cadeia de filtros -vf (mesma lógica do modo completo)
-            vf_parts: list[str] = []
-            if vertical_format:
-                vf_parts.append("crop=ih*9/16:ih:(iw-ih*9/16)/2:0")
-                vf_parts.append("scale=1080:1920")
-            elif mobile_format:
-                target_h = 720
-                if src_h > target_h:
-                    vf_parts.append(f"scale=-2:{target_h}")
-
-            if vf_parts:
-                vf_str = ",".join(vf_parts)
-                labels = []
-                if vertical_format:
-                    labels.append("vertical")
-                if mobile_format:
-                    labels.append("mobile")
-                logger.info(
-                    f"[light] {'+'.join(labels)} format: aplicando '{vf_str}' — {mp4.name}"
-                )
-                self.out_wm_dir.mkdir(parents=True, exist_ok=True)
-                out_transformed = self.out_wm_dir / mp4.name
-                tmp_transformed = self.out_wm_dir / f"{mp4.stem}.transform_tmp.mp4"
-                try:
-                    subprocess.run(
-                        [
-                            "ffmpeg", "-nostdin", "-y",
-                            "-i", str(mp4),
-                            "-vf", vf_str,
-                            "-c:v", "libx264",
-                            "-preset", "veryfast",
-                            "-crf", "20",
-                            "-pix_fmt", "yuv420p",
-                            "-c:a", "aac",
-                            "-movflags", "+faststart",
-                            str(tmp_transformed),
-                        ],
-                        check=True,
-                        capture_output=True,
-                    )
-                    tmp_transformed.replace(out_transformed)
-                    upload_target = out_transformed
-                    logger.info(f"[light] Transformação concluída: {out_transformed.name}")
-                except Exception as exc:
-                    logger.warning(
-                        f"[light] Falha na transformação de vídeo ({exc}); usando original"
-                    )
-                    if tmp_transformed.exists():
-                        tmp_transformed.unlink(missing_ok=True)
-
+        out_mp4 = self.out_wm_dir / mp4.name
+        if out_mp4.exists():
             meta.update(
                 {
-                    "status": "ready_for_upload",
-                    "attempts": attempts,
+                    "status": "watermarked",
                     "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "meta_raw": clip_meta,
-                    "mobile_format": mobile_format,
-                    "vertical_format": vertical_format,
+                    "wm_path": str(out_mp4),
                 }
             )
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+        else:
+            tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
+            add_image_watermark(
+                input_path=str(mp4),
+                watermark_path=str(self.watermark_path),
+                output_path=str(tmp_out),
+                secondary_watermark_path=(
+                    str(self.client_watermark_path)
+                    if self.client_watermark_path is not None
+                    else None
+                ),
+                margin=self.wm_margin,
+                opacity=self.wm_opacity,
+                rel_width=self.wm_rel_width,
+                codec="libx264",
+                crf=encode_crf,
+                preset=encode_preset,
+                vertical_format=vertical_format,
+            )
+            tmp_out.replace(out_mp4)
+
+            meta.update(
+                {
+                    "status": "watermarked",
+                    "attempts": attempts,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "wm_path": str(out_mp4),
+                    "meta_wm": ffprobe_metadata(out_mp4),
+                    "wm_encode": {
+                        "crf": encode_crf,
+                        "preset": encode_preset,
+                        "vertical_format": vertical_format,
+                        "light_mode": self.light_mode,
+                    },
+                }
+            )
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+        upload_target = out_mp4
 
         # Faz verificação se esta em ambiente de desenvolvimento
         is_dev = os.getenv("DEV", "").strip().lower() in {"true", "1", "yes"}
