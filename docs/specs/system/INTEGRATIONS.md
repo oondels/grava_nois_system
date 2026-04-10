@@ -39,15 +39,29 @@ Variáveis importantes:
 
 - `GN_LIGHT_MODE`
 - `GN_MAX_ATTEMPTS`
-- `MOBILE_FORMAT`
 - `VERTICAL_FORMAT`
-- `GN_WM_PRESET`
+- `GN_HQ_CRF`
+- `GN_HQ_PRESET`
+- `GN_LM_CRF`
+- `GN_LM_PRESET`
 - `GN_WM_REL_WIDTH`
 - `GN_WM_OPACITY`
 - `GN_WM_MARGIN`
 - `DEV`
 - `GN_TRIGGER_MAX_WORKERS`
 - `GN_AGENT_VERSION`
+
+### RTSP tuning
+
+- `GN_RTSP_PROFILE`
+- `GN_RTSP_REENCODE`
+- `GN_RTSP_FPS`
+- `GN_RTSP_GOP`
+- `GN_RTSP_PRESET`
+- `GN_RTSP_CRF`
+- `GN_RTSP_USE_WALLCLOCK`
+- `GN_RTSP_LOW_LATENCY_INPUT`
+- `GN_RTSP_LOW_DELAY_CODEC_FLAGS`
 
 ### MQTT
 
@@ -83,7 +97,7 @@ Uso:
 - segmentação contínua;
 - concat/remux;
 - watermark;
-- transformação vertical/mobile;
+- crop vertical opcional;
 - inspeção de metadados.
 
 Observação:

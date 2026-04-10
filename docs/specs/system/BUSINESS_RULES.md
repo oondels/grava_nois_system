@@ -82,8 +82,9 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 
 ### Light mode
 
-- pula watermark local;
-- ainda pode aplicar transformação vertical/mobile;
+- aplica watermark local com encode mais leve (`lmCrf` + `lmPreset`);
+- se `capture.rtsp.profile` não estiver explícito, infere perfil RTSP `compatible`;
+- `verticalFormat` continua sendo apenas crop/reframe 9:16;
 - preserva upload e finalize.
 
 ### DEV mode

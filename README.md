@@ -1,6 +1,6 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
-> **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, processar transformação vertical/mobile e marca d'água quando aplicável, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
+> **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
 >
@@ -66,8 +66,8 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 [ Enqueue → queue_raw/ ]
        ↓
 [ ProcessingWorker (1 por câmera) ]
-   ├─ Transformação vertical/mobile (condicional)
-   ├─ Watermark local (modo normal)
+   ├─ Crop vertical opcional
+   ├─ Watermark local (HQ ou leve)
    └─ Upload via API
        ↓
 [ Backend (URL assinada) ]
@@ -226,9 +226,9 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` e escala para `1080x1920`
-2. Se `MOBILE_FORMAT=1` e não estiver em vertical, reduz a saída horizontal para no máximo `720p`
-3. Aplica as marcas d'água depois das transformações, no topo central em vertical ou no rodapé em horizontal
+1. Aplica watermark sempre, com encode de alta qualidade (`GN_HQ_CRF` + `GN_HQ_PRESET`)
+2. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` sem scale forçado
+3. Salva o resultado em `highlights_wm/` e atualiza o sidecar com `meta_wm`, `wm_path` e `wm_encode`
 4. Registra metadados no backend → recebe `upload_url`
 5. Faz upload para URL assinada (S3/Supabase)
 6. Notifica backend sobre conclusão
@@ -236,11 +236,11 @@ O `ProcessingWorker` varre a fila periodicamente:
 8. Observação: existe helper de thumbnail no código, mas ele não faz parte do pipeline ativo do worker
 
 **Modo Leve (`GN_LIGHT_MODE=1`):**
-1. Não aplica watermark local
-2. Se `VERTICAL_FORMAT=1` e/ou `MOBILE_FORMAT=1`, transforma o clipe antes do upload
-3. Marca o sidecar como `ready_for_upload`
+1. Continua aplicando watermark local, mas com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
+2. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` sem scale forçado
+3. Usa perfil de captura RTSP `compatible` por inferência quando `GN_RTSP_PROFILE` não estiver explícito
 4. Registra metadados no backend → recebe `upload_url`
-5. Faz upload do arquivo transformado quando existir; caso contrário usa o original
+5. Faz upload do arquivo final
 6. Notifica backend sobre conclusão
 7. Remove os artefatos locais no sucesso
 
@@ -332,7 +332,7 @@ grava_nois_system/
 │
 ├── recorded_clips/              # Highlights após concat
 ├── queue_raw/                   # Fila de processamento (isolada por câmera em multi-cam)
-├── highlights_wm/               # Vídeos com marca d'água (modo normal)
+├── highlights_wm/               # Vídeos finais com marca d'água
 ├── failed_clips/                # Vídeos que falharam
 │   ├── upload_failed/           # Falhas de upload (retry automático)
 │   ├── build_failed/            # Falhas na construção
@@ -366,7 +366,7 @@ O sistema cria os seguintes diretórios se não existirem:
 - `/dev/shm/grn_buffer/` (ou `GN_BUFFER_DIR`)
 - `recorded_clips/`
 - `queue_raw/`
-- `highlights_wm/` (apenas em modo normal)
+- `highlights_wm/`
 - `failed_clips/`
 - `logs/`
 
@@ -437,16 +437,23 @@ GN_RTSP_PRE_SEGMENTS=6          # Segmentos antes do clique (padrão: 6)
 GN_RTSP_POST_SEGMENTS=3         # Segmentos depois do clique (padrão: 3)
 
 # Encoder RTSP
-GN_RTSP_REENCODE=1              # 1=recodifica para CFR (padrão, necessário para DTS não-monotônico), 0=passthrough/copy
-GN_RTSP_FPS=25                  # FPS da câmera (apenas com GN_RTSP_REENCODE=1)
-GN_RTSP_GOP=25                  # GOP para segmentação estável (apenas com GN_RTSP_REENCODE=1)
-GN_RTSP_PRESET=veryfast         # Preset x264 (apenas com GN_RTSP_REENCODE=1)
-GN_RTSP_CRF=23                  # Qualidade x264 (apenas com GN_RTSP_REENCODE=1)
+GN_RTSP_PROFILE=               # vazio=inferido por GN_LIGHT_MODE; "hq" ou "compatible"
+GN_RTSP_REENCODE=              # vazio=usa o default do profile; 1/0 força override explicito
+GN_RTSP_FPS=25                 # Filtro fps opcional (somente quando houver reencode)
+GN_RTSP_GOP=25                 # GOP/keyframe interval para segmentacao estavel no reencode
+GN_RTSP_PRESET=veryfast        # Preset x264 (somente quando houver reencode)
+GN_RTSP_CRF=23                 # Qualidade x264 (somente quando houver reencode)
+GN_RTSP_USE_WALLCLOCK=0        # Opt-in para cameras com timestamps instaveis
+GN_RTSP_LOW_LATENCY_INPUT=0    # Experimental: adiciona -fflags nobuffer
+GN_RTSP_LOW_DELAY_CODEC_FLAGS=0  # Experimental: adiciona -flags low_delay no reencode
 ```
 
 Observação:
-- O modo padrão é re-encode RTSP com segmentação estável e geração de PTS (`+genpts`), necessário para câmeras com DTS não-monotônico (ex: Tapo C500).
-- Use `GN_RTSP_REENCODE=0` apenas para câmeras com DTS estável (passthrough sem re-encode).
+- `GN_RTSP_PROFILE=hq` prioriza qualidade e usa passthrough (`-c:v copy`) por padrão; ideal para câmeras com timestamps estáveis.
+- `GN_RTSP_PROFILE=compatible` prioriza robustez e usa reencode libx264 com `fps_mode=vfr` por padrão; ideal para streams problemáticos.
+- Se `GN_RTSP_PROFILE` estiver vazio, o profile é inferido por `GN_LIGHT_MODE`: `0 -> hq`, `1 -> compatible`.
+- `GN_RTSP_REENCODE` é override opcional do default do profile, não a chave principal de decisão do modo.
+- `GN_RTSP_LOW_LATENCY_INPUT` e `GN_RTSP_LOW_DELAY_CODEC_FLAGS` são tuning experimental e ficam desligados por padrão.
 - Ordem de precedência da fonte RTSP: `GN_CAMERAS_JSON` > `GN_RTSP_URLS` > `GN_RTSP_URL`.
 
 #### Backend API
@@ -523,16 +530,18 @@ Observações:
 #### Processamento
 
 ```bash
-GN_LIGHT_MODE=1                 # 0=normal (watermark local), 1=leve (sem watermark local)
+GN_LIGHT_MODE=1                 # 0=HQ/default, 1=modo leve para hardware fraco
 GN_MAX_ATTEMPTS=3               # Tentativas de processamento (padrão: 3)
 GN_TRIGGER_MAX_WORKERS=2        # Vazio=auto (número de câmeras); define paralelismo do trigger
 GN_BUFFER_DIR=/dev/shm/grn_buffer  # Diretório de buffer (padrão: /dev/shm)
-GN_WM_PRESET=veryfast           # Preset ffmpeg no watermark (default: veryfast)
+GN_HQ_CRF=18                    # CRF do encode com watermark no modo normal
+GN_HQ_PRESET=medium             # Preset do encode com watermark no modo normal
+GN_LM_CRF=26                    # CRF do encode com watermark no modo leve
+GN_LM_PRESET=veryfast           # Preset do encode com watermark no modo leve
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
 GN_WM_OPACITY=0.8               # Opacidade alvo da logo (limitada internamente a 70-85%)
 GN_WM_MARGIN=24                 # Margem vertical da safe zone
-MOBILE_FORMAT=1                 # Mantém saída horizontal em até 720p quando não estiver em vertical
-VERTICAL_FORMAT=1               # Padrão: crop central 9:16 + saída 1080x1920
+VERTICAL_FORMAT=1               # Crop central 9:16 sem upscale forçado
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
@@ -1190,18 +1199,20 @@ python3 main.py
 
 | Recurso | Modo Normal | Modo Leve |
 |---------|-------------|-----------|
-| Marca d'água local | ✅ Sim | ❌ Não |
-| Transformação vertical/mobile | ✅ Configurável | ✅ Configurável |
+| Marca d'água local | ✅ Sim | ✅ Sim |
+| Encode do watermark | `GN_HQ_CRF` + `GN_HQ_PRESET` | `GN_LM_CRF` + `GN_LM_PRESET` |
+| Perfil RTSP inferido | `hq` | `compatible` |
+| Transformação vertical | ✅ Configurável | ✅ Configurável |
 | Helper de thumbnail no pipeline ativo | ❌ Não | ❌ Não |
 | Cálculo SHA-256 | enqueue + upload | upload |
-| Artefato local principal | `highlights_wm/` | `highlights_wm/` quando houver transformação; caso contrário upload do original |
+| Artefato local principal | `highlights_wm/` | `highlights_wm/` |
 
 ### Quando Usar
 
 - ✅ Hardware limitado (Pi 3B, 1GB RAM)
 - ✅ Múltiplos cliques em sequência
-- ✅ Marca d'água será aplicada pelo backend
-- ❌ Precisa de marca d'água local imediata
+- ✅ Quer priorizar robustez/CPU em vez de qualidade máxima
+- ❌ Quer passthrough RTSP e encode final de maior qualidade
 
 ---
 
