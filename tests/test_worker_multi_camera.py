@@ -44,6 +44,12 @@ def _place_mp4(queue_dir: Path, name: str) -> Path:
     return p
 
 
+def _fake_add_watermark(**kwargs):
+    """Side effect for add_image_watermark: creates the output file."""
+    Path(kwargs["output_path"]).write_bytes(b"fake_wm_output")
+
+
+@patch("src.workers.processing_worker.add_image_watermark", side_effect=_fake_add_watermark)
 @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 5.0})
 @patch("src.workers.processing_worker.GravaNoisAPIClient")
 class WorkerMultiCameraTests(unittest.TestCase):
@@ -56,7 +62,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
         self._tmp.cleanup()
         reset_config_cache()
 
-    def test_worker_processes_file_in_own_queue(self, mock_api_cls, _ffprobe):
+    def test_worker_processes_file_in_own_queue(self, mock_api_cls, _ffprobe, _wm):
         """Worker scans its own queue_dir and processes the mp4 it finds."""
         mock_api_cls.return_value.is_configured.return_value = False
 
@@ -77,7 +83,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
             "Worker must process its own file (move to upload_failed or delete)",
         )
 
-    def test_worker_ignores_other_camera_queue(self, mock_api_cls, _ffprobe):
+    def test_worker_ignores_other_camera_queue(self, mock_api_cls, _ffprobe, _wm):
         """Worker does NOT touch files belonging to a different camera's queue_dir."""
         mock_api_cls.return_value.is_configured.return_value = False
 
@@ -97,7 +103,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
         sidecar_cam02 = queue_cam02 / "highlight_cam02_test.json"
         self.assertFalse(sidecar_cam02.exists(), "cam01 worker must not create cam02 sidecar")
 
-    def test_two_workers_process_independently(self, mock_api_cls, _ffprobe):
+    def test_two_workers_process_independently(self, mock_api_cls, _ffprobe, _wm):
         """Two workers each process their own file without cross-contamination."""
         mock_api_cls.return_value.is_configured.return_value = False
 
@@ -130,7 +136,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
             "cam02 file must be processed",
         )
 
-    def test_dev_mode_preserves_file_after_processing(self, mock_api_cls, _ffprobe):
+    def test_dev_mode_preserves_file_after_processing(self, mock_api_cls, _ffprobe, _wm):
         """In DEV mode, the mp4 and sidecar remain locally preserved."""
         mock_api_cls.return_value.is_configured.return_value = False
 
@@ -150,7 +156,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
         meta = json.loads(sidecar.read_text())
         self.assertEqual(meta.get("status"), "dev_local_preserved")
 
-    def test_no_api_moves_file_to_upload_failed(self, mock_api_cls, _ffprobe):
+    def test_no_api_moves_file_to_upload_failed(self, mock_api_cls, _ffprobe, _wm):
         """Without API configured, processed file is moved to upload_failed/."""
         mock_api_cls.return_value.is_configured.return_value = False
 
@@ -168,7 +174,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
         self.assertTrue(upload_failed_path.exists(), "File must land in upload_failed/ when no API")
         self.assertFalse(mp4.exists(), "Original mp4 must be removed from queue")
 
-    def test_upload_failed_sidecar_has_camera_context(self, mock_api_cls, _ffprobe):
+    def test_upload_failed_sidecar_has_camera_context(self, mock_api_cls, _ffprobe, _wm):
         """Sidecar moved to upload_failed must retain file_name with camera_id."""
         mock_api_cls.return_value.is_configured.return_value = False
 
@@ -187,10 +193,8 @@ class WorkerMultiCameraTests(unittest.TestCase):
         meta = json.loads(sidecar_path.read_text())
         self.assertIn("cam03", meta["file_name"], "Sidecar file_name must include camera_id")
 
-    def test_non_light_mode_calls_watermark_encoder_with_fast_preset(
-        self, mock_api_cls, _ffprobe
-    ):
-        """Non-light mode deve aplicar watermark no worker com preset rápido."""
+    def test_hq_mode_calls_watermark_with_medium_preset(self, mock_api_cls, _ffprobe, _wm):
+        """Modo HQ (light_mode=False) deve aplicar watermark com preset medium."""
         mock_api_cls.return_value.is_configured.return_value = False
 
         queue = self.base / "queue_raw" / "cam04"
@@ -200,7 +204,7 @@ class WorkerMultiCameraTests(unittest.TestCase):
         client_logo.parent.mkdir(parents=True, exist_ok=True)
         client_logo.write_bytes(b"png")
 
-        mp4 = _place_mp4(queue, "highlight_cam04_nowm.mp4")
+        _place_mp4(queue, "highlight_cam04_hq.mp4")
         worker = _make_worker(
             queue,
             failed,
@@ -210,26 +214,45 @@ class WorkerMultiCameraTests(unittest.TestCase):
 
         wm_calls: list[dict] = []
 
-        def _fake_wm(**kwargs):
+        def _capture_wm(**kwargs):
             wm_calls.append(kwargs)
-            out = Path(kwargs["output_path"])
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(b"wm")
+            Path(kwargs["output_path"]).write_bytes(b"wm")
 
-        with patch("src.workers.processing_worker.add_image_watermark", side_effect=_fake_wm):
-            with patch.dict(os.environ, {"DEV": "", "API_BASE_URL": ""}):
+        with patch("src.workers.processing_worker.add_image_watermark", side_effect=_capture_wm):
+            with patch.dict(os.environ, {"DEV": "", "API_BASE_URL": "", "GN_HQ_PRESET": "medium"}):
                 worker._scan_once()
 
-        self.assertEqual(len(wm_calls), 1, "Worker deve aplicar watermark no modo completo")
-        self.assertEqual(wm_calls[0]["preset"], "veryfast")
-        self.assertTrue(str(wm_calls[0]["output_path"]).endswith(".wm_tmp.mp4"))
+        self.assertEqual(len(wm_calls), 1, "Worker deve aplicar watermark no modo HQ")
+        self.assertEqual(wm_calls[0]["preset"], "medium", "Modo HQ deve usar preset medium")
         self.assertEqual(
             wm_calls[0]["secondary_watermark_path"],
             str(client_logo),
             "Worker deve repassar a logo secundária do cliente",
         )
-        upload_failed = failed / "upload_failed" / mp4.name
-        self.assertTrue(upload_failed.exists(), "Fluxo deve continuar com o arquivo processado")
+
+    def test_light_mode_calls_watermark_with_veryfast_preset(self, mock_api_cls, _ffprobe, _wm):
+        """Modo leve (light_mode=True) deve aplicar watermark com preset veryfast."""
+        mock_api_cls.return_value.is_configured.return_value = False
+
+        queue = self.base / "queue_raw" / "cam05"
+        failed = self.base / "failed_clips" / "cam05"
+        queue.mkdir(parents=True, exist_ok=True)
+
+        _place_mp4(queue, "highlight_cam05_lm.mp4")
+        worker = _make_worker(queue, failed, light_mode=True)
+
+        wm_calls: list[dict] = []
+
+        def _capture_wm(**kwargs):
+            wm_calls.append(kwargs)
+            Path(kwargs["output_path"]).write_bytes(b"wm")
+
+        with patch("src.workers.processing_worker.add_image_watermark", side_effect=_capture_wm):
+            with patch.dict(os.environ, {"DEV": "", "API_BASE_URL": "", "GN_LM_PRESET": "veryfast"}):
+                worker._scan_once()
+
+        self.assertEqual(len(wm_calls), 1, "Worker deve aplicar watermark no modo leve")
+        self.assertEqual(wm_calls[0]["preset"], "veryfast", "Modo leve deve usar preset veryfast")
 
 
 if __name__ == "__main__":

@@ -134,10 +134,12 @@ class DeviceConfigServiceTests(unittest.TestCase):
             "processing": {
                 "lightMode": False,
                 "maxAttempts": 3,
-                "mobileFormat": True,
-                "verticalFormat": True,
+                "verticalFormat": False,
+                "hqCrf": 18,
+                "hqPreset": "medium",
+                "lmCrf": 26,
+                "lmPreset": "veryfast",
                 "watermark": {
-                    "preset": "veryfast",
                     "relativeWidth": 0.18,
                     "opacity": 0.8,
                     "margin": 24,

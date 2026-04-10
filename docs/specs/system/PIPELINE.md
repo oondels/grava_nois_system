@@ -20,6 +20,13 @@ Entradas possíveis:
 
 FFmpeg gera segmentos contínuos de 1s ou `GN_SEG_TIME`.
 
+Perfis de captura RTSP (`capture.rtsp.profile`):
+
+- `hq` (padrão quando `lightMode=false`): passthrough `-c:v copy`, preserva qualidade original da câmera. Adequado para câmeras com timestamps estáveis.
+- `compatible` (padrão quando `lightMode=true`): reencode libx264 com `fps_mode=vfr` e `force_key_frames`. Tolerante a DTS/PTS ruins e perda de pacotes.
+- Profile explícito (`hq`/`compatible`) sempre tem precedência sobre inferência por `lightMode`.
+- `capture.rtsp.reencode` (null/true/false): override explícito do reencode, independente do profile.
+
 O `SegmentBuffer`:
 
 - indexa segmentos disponíveis;
@@ -58,9 +65,9 @@ Em `build_highlight()`:
 2. calcula segmentos necessários;
 3. lê snapshot do buffer;
 4. cria manifesto de concat;
-5. concatena para `.ts`;
-6. remuxa para `.mp4`;
-7. salva em `recorded_clips/`.
+5. concatena diretamente para `.mp4` temporário com `ffmpeg -f concat -c copy`;
+6. promove o `.tmp.mp4` para o arquivo final;
+7. salva em `recorded_clips/` com nome `highlight_{camera_id}_{timestamp}.mp4`.
 
 Se falhar:
 
@@ -72,7 +79,7 @@ Se falhar:
 `enqueue_clip()`:
 
 1. calcula tamanho;
-2. calcula SHA256, exceto em light mode;
+2. calcula SHA256 (omitido em light mode para reduzir CPU);
 3. extrai metadados com `ffprobe`;
 4. cria sidecar JSON;
 5. move o vídeo para `queue_raw/`.
@@ -87,6 +94,8 @@ Campos típicos do sidecar:
 - `meta`
 - `pre_seconds`
 - `post_seconds`
+- `pre_segments`
+- `post_segments`
 - `seg_time`
 - `status`
 
@@ -101,31 +110,35 @@ Campos típicos do sidecar:
 
 ## 7. Worker processing path
 
-### Normal mode
+### Normal mode (light_mode=false)
 
-1. recorta o highlight para `9:16` no centro da ação e escala para `1080x1920`;
-2. aplica watermark em `highlights_wm/` após o crop;
-3. atualiza sidecar com `meta_wm` e `wm_path`;
-4. registra metadados no backend;
-5. recebe `upload_url`;
-6. faz `PUT` do arquivo final;
-7. chama finalize;
-8. remove raw local da fila no sucesso.
+1. aplica watermark com `hqCrf` + `hqPreset` (alta qualidade);
+2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
+3. salva resultado em `highlights_wm/`;
+4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
+5. registra metadados no backend;
+6. recebe `upload_url`;
+7. faz `PUT` do arquivo final;
+8. chama finalize;
+9. remove artefatos locais no sucesso.
 
-### Light mode
+### Light mode (light_mode=true)
 
-1. transforma o clipe para `9:16` e `1080x1920` quando `VERTICAL_FORMAT=1`;
-2. marca sidecar como `ready_for_upload`;
-3. registra no backend;
-4. faz upload do arquivo transformado da fila;
-5. chama finalize.
+Modo para hardware fraco — watermark é sempre aplicada, mas com encode mais leve:
+
+1. aplica watermark com `lmCrf` + `lmPreset` (menor custo de CPU);
+2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
+3. salva resultado em `highlights_wm/`;
+4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
+5. registra no backend, faz upload e chama finalize (igual ao modo normal).
 
 ### DEV mode
 
 1. não chama backend;
 2. marca `remote_registration` como `skipped`;
-3. preserva artefatos locais úteis para inspeção;
-4. interrompe antes da limpeza final de fila/upload.
+3. marca o sidecar como `dev_local_preserved`;
+4. preserva artefatos locais úteis para inspeção;
+5. interrompe antes da limpeza final de sucesso.
 
 ## 8. Retry and failed paths
 

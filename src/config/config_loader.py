@@ -86,18 +86,37 @@ def get_config_path() -> Path:
 
 @dataclass
 class RtspConfig:
-    """Parâmetros de captura RTSP."""
+    """Parâmetros de captura RTSP.
+
+    Perfis (profile):
+      - "hq": câmera com timestamps estáveis; prioriza qualidade — passthrough por
+        padrão (reencode=None → False). Sem -fps_mode, sem -use_wallclock por padrão.
+      - "compatible": streams problemáticos; mantém reencode completo com libx264,
+        force_key_frames e fps_mode=vfr para tolerância a DTS/PTS ruins.
+      - None: inferido de processing.lightMode (False→hq, True→compatible).
+
+    reencode=None significa "usar o default do profile efetivo":
+      - hq  → reencode=False (passthrough)
+      - compatible → reencode=True (libx264)
+    Um valor explícito (True/False) sempre sobrescreve o default do profile.
+    """
 
     max_retries: int = 10
     timeout_seconds: int = 5
     startup_check_seconds: float = 1.0
-    reencode: bool = True
+    # None = usa o default do profile (hq→False, compatible→True)
+    reencode: Optional[bool] = None
     # fps: string vazia = sem filtro fps; ex: "25" aplica -vf fps=25
     fps: str = ""
     gop: int = 25
     preset: str = "veryfast"
     crf: int = 23
     use_wallclock_timestamps: bool = False
+    # None = inferido de processing.lightMode (False→hq, True→compatible)
+    profile: Optional[str] = None
+    # Flags experimentais de baixa latência (opt-in, off por padrão)
+    low_latency_input: bool = False
+    low_delay_codec_flags: bool = False
 
 
 @dataclass
@@ -183,7 +202,6 @@ class TriggerConfig:
 class WatermarkConfig:
     """Parâmetros de watermark/branding."""
 
-    preset: str = "veryfast"
     relative_width: float = 0.18
     opacity: float = 0.8
     margin: int = 24
@@ -191,12 +209,24 @@ class WatermarkConfig:
 
 @dataclass
 class ProcessingConfig:
-    """Configuração de processamento de clips."""
+    """Configuração de processamento de clips.
+
+    Modos de qualidade:
+    - light_mode=False (padrão): alta qualidade — hq_crf + hq_preset.
+    - light_mode=True: modo leve para hardware fraco — lm_crf + lm_preset.
+    Watermark é sempre aplicada em ambos os modos.
+    vertical_format é apenas reframe 9:16 (crop), sem scale forçado.
+    """
 
     light_mode: bool = False
     max_attempts: int = 3
-    mobile_format: bool = True
-    vertical_format: bool = True
+    vertical_format: bool = False
+    # Encode de alta qualidade (light_mode=False)
+    hq_crf: int = 18
+    hq_preset: str = "medium"
+    # Encode leve (light_mode=True)
+    lm_crf: int = 26
+    lm_preset: str = "veryfast"
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
 
 
@@ -285,6 +315,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
     v = os.getenv(name)
     if v is None:
         return default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_bool_optional(name: str) -> Optional[bool]:
+    """Retorna True/False se env definido, None se ausente."""
+    v = os.getenv(name)
+    if v is None:
+        return None
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
@@ -394,12 +432,15 @@ def _build_from_env() -> OperationalConfig:
                 startup_check_seconds=max(
                     0.1, _env_float("GN_FFMPEG_STARTUP_CHECK_SEC", 1.0)
                 ),
-                reencode=_env_bool("GN_RTSP_REENCODE", True),
+                reencode=_env_bool_optional("GN_RTSP_REENCODE"),
                 fps=_env_str("GN_RTSP_FPS", ""),
                 gop=max(1, _env_int("GN_RTSP_GOP", 25)),
                 preset=_env_str("GN_RTSP_PRESET", "veryfast") or "veryfast",
                 crf=max(0, min(51, _env_int("GN_RTSP_CRF", 23))),
                 use_wallclock_timestamps=_env_bool("GN_RTSP_USE_WALLCLOCK", False),
+                profile=_env_str("GN_RTSP_PROFILE", "") or None,
+                low_latency_input=_env_bool("GN_RTSP_LOW_LATENCY_INPUT", False),
+                low_delay_codec_flags=_env_bool("GN_RTSP_LOW_DELAY_CODEC_FLAGS", False),
             ),
             v4l2=V4l2Config(
                 device="/dev/video0",
@@ -426,10 +467,12 @@ def _build_from_env() -> OperationalConfig:
         processing=ProcessingConfig(
             light_mode=_env_bool("GN_LIGHT_MODE", False),
             max_attempts=max(1, _env_int("GN_MAX_ATTEMPTS", 3)),
-            mobile_format=_env_bool("MOBILE_FORMAT", True),
-            vertical_format=_env_bool("VERTICAL_FORMAT", True),
+            vertical_format=_env_bool("VERTICAL_FORMAT", False),
+            hq_crf=max(0, min(51, _env_int("GN_HQ_CRF", 18))),
+            hq_preset=_env_str("GN_HQ_PRESET", "medium") or "medium",
+            lm_crf=max(0, min(51, _env_int("GN_LM_CRF", 26))),
+            lm_preset=_env_str("GN_LM_PRESET", "veryfast") or "veryfast",
             watermark=WatermarkConfig(
-                preset=_env_str("GN_WM_PRESET", "veryfast") or "veryfast",
                 relative_width=max(0.01, _env_float("GN_WM_REL_WIDTH", 0.18)),
                 opacity=max(0.0, min(1.0, _env_float("GN_WM_OPACITY", 0.8))),
                 margin=max(0, _env_int("GN_WM_MARGIN", 24)),
@@ -478,19 +521,36 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
     if fps_raw is not None:
         fps_str = str(fps_raw).strip() if fps_raw != "" else ""
 
+    # reencode: None = usa default do profile. Só sobrescreve se key presente no JSON.
+    reencode_from_json: Optional[bool] = base.capture.rtsp.reencode
+    if "reencode" in rtsp_d and rtsp_d["reencode"] is not None:
+        reencode_from_json = bool(rtsp_d["reencode"])
+
+    # profile: None = inferido de lightMode. Só sobrescreve se key presente e não vazio.
+    profile_from_json: Optional[str] = base.capture.rtsp.profile
+    if "profile" in rtsp_d and rtsp_d["profile"]:
+        profile_from_json = str(rtsp_d["profile"]).strip() or None
+
     rtsp = RtspConfig(
         max_retries=_get(rtsp_d, "maxRetries", base.capture.rtsp.max_retries),
         timeout_seconds=_get(rtsp_d, "timeoutSeconds", base.capture.rtsp.timeout_seconds),
         startup_check_seconds=max(
             0.1, _get(rtsp_d, "startupCheckSeconds", base.capture.rtsp.startup_check_seconds)
         ),
-        reencode=_get(rtsp_d, "reencode", base.capture.rtsp.reencode),
+        reencode=reencode_from_json,
         fps=fps_str,
         gop=max(1, _get(rtsp_d, "gop", base.capture.rtsp.gop)),
         preset=_get(rtsp_d, "preset", base.capture.rtsp.preset) or "veryfast",
         crf=max(0, min(51, _get(rtsp_d, "crf", base.capture.rtsp.crf))),
         use_wallclock_timestamps=_get(
             rtsp_d, "useWallclockTimestamps", base.capture.rtsp.use_wallclock_timestamps
+        ),
+        profile=profile_from_json,
+        low_latency_input=_get(
+            rtsp_d, "lowLatencyInput", base.capture.rtsp.low_latency_input
+        ),
+        low_delay_codec_flags=_get(
+            rtsp_d, "lowDelayCodecFlags", base.capture.rtsp.low_delay_codec_flags
         ),
     )
 
@@ -567,10 +627,12 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
     processing = ProcessingConfig(
         light_mode=_get(proc_d, "lightMode", base.processing.light_mode),
         max_attempts=max(1, _get(proc_d, "maxAttempts", base.processing.max_attempts)),
-        mobile_format=_get(proc_d, "mobileFormat", base.processing.mobile_format),
         vertical_format=_get(proc_d, "verticalFormat", base.processing.vertical_format),
+        hq_crf=max(0, min(51, _get(proc_d, "hqCrf", base.processing.hq_crf))),
+        hq_preset=_get(proc_d, "hqPreset", base.processing.hq_preset) or "medium",
+        lm_crf=max(0, min(51, _get(proc_d, "lmCrf", base.processing.lm_crf))),
+        lm_preset=_get(proc_d, "lmPreset", base.processing.lm_preset) or "veryfast",
         watermark=WatermarkConfig(
-            preset=_get(wm_d, "preset", base.processing.watermark.preset) or "veryfast",
             relative_width=max(
                 0.01, _get(wm_d, "relativeWidth", base.processing.watermark.relative_width)
             ),

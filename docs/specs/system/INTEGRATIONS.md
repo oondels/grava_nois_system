@@ -2,7 +2,7 @@
 
 ## Environment and settings
 
-Config principal em [`src/config/settings.py`](../../../src/config/settings.py) e leitura complementar em `main.py`.
+Config principal em [`src/config/config_loader.py`](../../../src/config/config_loader.py) e [`src/config/settings.py`](../../../src/config/settings.py), com bootstrap complementar em `main.py`.
 
 Variáveis importantes:
 
@@ -39,9 +39,29 @@ Variáveis importantes:
 
 - `GN_LIGHT_MODE`
 - `GN_MAX_ATTEMPTS`
+- `VERTICAL_FORMAT`
+- `GN_HQ_CRF`
+- `GN_HQ_PRESET`
+- `GN_LM_CRF`
+- `GN_LM_PRESET`
+- `GN_WM_REL_WIDTH`
+- `GN_WM_OPACITY`
+- `GN_WM_MARGIN`
 - `DEV`
 - `GN_TRIGGER_MAX_WORKERS`
 - `GN_AGENT_VERSION`
+
+### RTSP tuning
+
+- `GN_RTSP_PROFILE`
+- `GN_RTSP_REENCODE`
+- `GN_RTSP_FPS`
+- `GN_RTSP_GOP`
+- `GN_RTSP_PRESET`
+- `GN_RTSP_CRF`
+- `GN_RTSP_USE_WALLCLOCK`
+- `GN_RTSP_LOW_LATENCY_INPUT`
+- `GN_RTSP_LOW_DELAY_CODEC_FLAGS`
 
 ### MQTT
 
@@ -77,8 +97,12 @@ Uso:
 - segmentação contínua;
 - concat/remux;
 - watermark;
-- thumbnail;
+- crop vertical opcional;
 - inspeção de metadados.
+
+Observação:
+
+- existe helper de thumbnail em `src/video/processor.py`, mas ele não participa do pipeline ativo do worker.
 
 ## Backend API
 

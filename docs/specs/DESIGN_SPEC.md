@@ -17,6 +17,7 @@ Use este arquivo como índice. Para detalhes, abra apenas a spec especializada r
 - Edge lookup: [docs/specs/system/README.md](./system/README.md)
 - Arquitetura e módulos internos: [docs/specs/system/ARCHITECTURE.md](./system/ARCHITECTURE.md)
 - Pipeline de captura até upload: [docs/specs/system/PIPELINE.md](./system/PIPELINE.md)
+- Configuração operacional e remota: [docs/specs/system/CONFIGURATION.md](./system/CONFIGURATION.md)
 - Regras operacionais e de segurança local: [docs/specs/system/BUSINESS_RULES.md](./system/BUSINESS_RULES.md)
 - Integrações externas e configuração: [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md)
 - Operação, testes e cautelas: [docs/specs/system/OPERATIONS.md](./system/OPERATIONS.md)
@@ -27,7 +28,8 @@ Para manutenção geral:
 
 1. [docs/specs/system/README.md](./system/README.md)
 2. [docs/specs/system/ARCHITECTURE.md](./system/ARCHITECTURE.md)
-3. A spec especializada da área impactada
+3. [docs/specs/system/CONFIGURATION.md](./system/CONFIGURATION.md) quando a task tocar config, env, MQTT ou deploy
+4. A spec especializada da área impactada
 
 Para tasks por assunto:
 
@@ -36,7 +38,7 @@ Para tasks por assunto:
 - upload, HMAC, API, retry policy: [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/BUSINESS_RULES.md](./system/BUSINESS_RULES.md)
 - MQTT, presença, heartbeat e futuro command/control: [docs/specs/system/ARCHITECTURE.md](./system/ARCHITECTURE.md), [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/BUSINESS_RULES.md](./system/BUSINESS_RULES.md)
 - worker, sidecar, fila, falhas, reprocessamento: [docs/specs/system/PIPELINE.md](./system/PIPELINE.md) e [docs/specs/system/OPERATIONS.md](./system/OPERATIONS.md)
-- configuração e deploy do edge: [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/OPERATIONS.md](./system/OPERATIONS.md)
+- configuração e deploy do edge: [docs/specs/system/CONFIGURATION.md](./system/CONFIGURATION.md), [docs/specs/system/INTEGRATIONS.md](./system/INTEGRATIONS.md) e [docs/specs/system/OPERATIONS.md](./system/OPERATIONS.md)
 
 ## 4. Source-of-Truth Rule
 

@@ -14,6 +14,7 @@ _VALID_PRESETS = {
 }
 _VALID_TRIGGER_SOURCES = {"auto", "gpio", "pico", "both"}
 _VALID_SOURCE_TYPES = {"rtsp", "v4l2"}
+_VALID_RTSP_PROFILES = {"hq", "compatible"}
 
 
 class ConfigValidationError(Exception):
@@ -114,6 +115,18 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
         else:
             errors.append("capture.rtsp.fps deve ser número, string numérica ou null")
 
+    rtsp_profile = rtsp.get("profile")
+    if rtsp_profile is not None and rtsp_profile not in _VALID_RTSP_PROFILES:
+        errors.append(
+            f"capture.rtsp.profile inválido: {rtsp_profile!r}. "
+            f"Válidos: {sorted(_VALID_RTSP_PROFILES)}"
+        )
+
+    for bool_key in ("lowLatencyInput", "lowDelayCodecFlags"):
+        val = rtsp.get(bool_key)
+        if val is not None and not isinstance(val, bool):
+            errors.append(f"capture.rtsp.{bool_key} deve ser booleano")
+
     v4l2 = capture.get("v4l2") or {}
     if not isinstance(v4l2, dict):
         errors.append("capture.v4l2 deve ser um objeto")
@@ -198,16 +211,30 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
     if ma is not None and (not isinstance(ma, int) or not (1 <= ma <= 20)):
         errors.append("processing.maxAttempts deve ser inteiro entre 1 e 20")
 
+    hq_crf = processing.get("hqCrf")
+    if hq_crf is not None and (not isinstance(hq_crf, int) or not (0 <= hq_crf <= 51)):
+        errors.append("processing.hqCrf deve ser inteiro entre 0 e 51")
+
+    hq_preset = processing.get("hqPreset")
+    if hq_preset is not None and hq_preset not in _VALID_PRESETS:
+        errors.append(
+            f"processing.hqPreset inválido: {hq_preset!r}. Válidos: {sorted(_VALID_PRESETS)}"
+        )
+
+    lm_crf = processing.get("lmCrf")
+    if lm_crf is not None and (not isinstance(lm_crf, int) or not (0 <= lm_crf <= 51)):
+        errors.append("processing.lmCrf deve ser inteiro entre 0 e 51")
+
+    lm_preset = processing.get("lmPreset")
+    if lm_preset is not None and lm_preset not in _VALID_PRESETS:
+        errors.append(
+            f"processing.lmPreset inválido: {lm_preset!r}. Válidos: {sorted(_VALID_PRESETS)}"
+        )
+
     wm = processing.get("watermark") or {}
     if not isinstance(wm, dict):
         errors.append("processing.watermark deve ser um objeto")
         wm = {}
-
-    wm_preset = wm.get("preset")
-    if wm_preset is not None and wm_preset not in _VALID_PRESETS:
-        errors.append(
-            f"processing.watermark.preset inválido: {wm_preset!r}. Válidos: {sorted(_VALID_PRESETS)}"
-        )
 
     rw = wm.get("relativeWidth")
     if rw is not None and (not isinstance(rw, (int, float)) or not (0 < rw <= 1)):

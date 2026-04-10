@@ -10,7 +10,7 @@ Responsabilidades centrais:
 - manter buffer circular local;
 - disparar highlights por ENTER, GPIO ou Pico serial;
 - persistir sidecar JSON local;
-- processar watermark/thumbnail quando aplicável;
+- processar watermark (sempre) e reframe vertical opcional;
 - registrar/upload/finalize com o backend;
 - reprocessar falhas locais conforme política.
 
@@ -26,7 +26,7 @@ Fora do escopo:
 Bootstrap em [`main.py`](../../../main.py):
 
 1. carrega `.env`;
-2. resolve `GN_LIGHT_MODE`, `GN_MAX_ATTEMPTS` e segment size;
+2. resolve configuração operacional efetiva (`config.json` -> env legado -> defaults);
 3. cria `CaptureConfig` por câmera;
 4. limpa buffer e inicia FFmpeg por câmera;
 5. inicia `SegmentBuffer` por câmera;
@@ -38,8 +38,9 @@ Bootstrap em [`main.py`](../../../main.py):
 
 ### Config
 
+- [`src/config/config_loader.py`](../../../src/config/config_loader.py)
 - [`src/config/settings.py`](../../../src/config/settings.py)
-- resolve single camera, multi-camera via JSON e RTSP legacy
+- resolve configuração operacional, single camera, multi-camera via JSON e RTSP legacy
 
 ### Video
 
@@ -64,6 +65,7 @@ Bootstrap em [`main.py`](../../../main.py):
 - [`src/services/retry_upload.py`](../../../src/services/retry_upload.py)
 - `src/services/mqtt/mqtt_client.py`
 - `src/services/mqtt/device_presence_service.py`
+- `src/services/mqtt/device_config_service.py`
 - `src/services/mqtt/command_dispatcher.py`
 
 ### Utilities
@@ -124,25 +126,24 @@ Ponto de integração:
 
 ## Operating modes
 
-### Normal mode
+### Normal mode (light_mode=false)
 
-- crop `9:16` e escala `1080x1920`;
-- watermark com safe zone e tamanho relativo configuravel por `GN_WM_REL_WIDTH`;
-- thumbnail;
+- aplica watermark sempre, com encode de alta qualidade (`hqCrf` + `hqPreset`, padrão CRF 18 + medium);
+- crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 - register/upload/finalize.
 
-### Light mode
+### Light mode (light_mode=true)
 
-- sem watermark e sem thumbnail;
-- transforma para vertical quando `VERTICAL_FORMAT=1`;
-- upload direto do highlight transformado.
+- aplica watermark sempre, com encode leve para hardware fraco (`lmCrf` + `lmPreset`, padrão CRF 26 + veryfast);
+- crop 9:16 quando `VERTICAL_FORMAT=1` (mesmo reframe do modo normal);
+- register/upload/finalize (idêntico ao modo normal após o encode).
 
 ### DEV mode
 
 - processa localmente;
 - não chama API externa;
-- limpa `queue_raw`;
-- preserva saída local útil para inspeção.
+- marca o item como `dev_local_preserved`;
+- preserva artefatos locais úteis para inspeção sem reprocessamento automático.
 
 ## Architectural constraints
 

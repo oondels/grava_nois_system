@@ -34,6 +34,8 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
     _CONTROLLED_VARS = {
         "GN_RTSP_REENCODE", "GN_RTSP_FPS", "GN_RTSP_GOP",
         "GN_RTSP_PRESET", "GN_RTSP_CRF", "GN_RTSP_VSYNC", "GN_RTSP_USE_WALLCLOCK",
+        "GN_RTSP_PROFILE", "GN_RTSP_LOW_LATENCY_INPUT", "GN_RTSP_LOW_DELAY_CODEC_FLAGS",
+        "GN_LIGHT_MODE",
     }
 
     def setUp(self) -> None:
@@ -67,25 +69,13 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cmd = mock_popen.call_args.args[0]
         return list(cmd)
 
-    def test_rtsp_defaults_to_reencode_vfr(self) -> None:
+    # -------------------------------------------------------------------------
+    # Default behavior: no profile, no lightMode → infers hq → passthrough
+    # -------------------------------------------------------------------------
+
+    def test_rtsp_default_is_hq_passthrough(self) -> None:
+        """Default (no profile, lightMode=false) → hq profile → -c:v copy."""
         cmd = self._run_start(env={})
-
-        self.assertIn("-c:v", cmd)
-        cidx = cmd.index("-c:v")
-        self.assertEqual(cmd[cidx + 1], "libx264")
-        self.assertIn("-force_key_frames", cmd)
-        self.assertIn("-fps_mode", cmd)
-        self.assertEqual(cmd[cmd.index("-fps_mode") + 1], "vfr")
-        # discardcorrupt removed — causes static video when combined with frame duplication
-        self.assertNotIn("discardcorrupt", " ".join(cmd))
-        # break_non_keyframes removed — not needed with forced keyframes on re-encode
-        self.assertNotIn("-break_non_keyframes", cmd)
-
-        ridx = cmd.index("-reset_timestamps")
-        self.assertEqual(cmd[ridx + 1], "1")
-
-    def test_rtsp_passthrough_copy_when_reencode_disabled(self) -> None:
-        cmd = self._run_start(env={"GN_RTSP_REENCODE": "0"})
 
         self.assertIn("-c:v", cmd)
         cidx = cmd.index("-c:v")
@@ -96,6 +86,92 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
 
         ridx = cmd.index("-reset_timestamps")
         self.assertEqual(cmd[ridx + 1], "1")
+
+    def test_rtsp_audio_always_discarded(self) -> None:
+        """RTSP capture always strips audio (-an)."""
+        for env in ({}, {"GN_RTSP_REENCODE": "1"}, {"GN_RTSP_PROFILE": "compatible"}):
+            cmd = self._run_start(env=env)
+            self.assertIn("-an", cmd)
+
+    # -------------------------------------------------------------------------
+    # Profile: hq (explicit)
+    # -------------------------------------------------------------------------
+
+    def test_rtsp_profile_hq_uses_copy(self) -> None:
+        """Explicit profile=hq → -c:v copy, no fps_mode, no force_key_frames."""
+        cmd = self._run_start(env={"GN_RTSP_PROFILE": "hq"})
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "copy")
+        self.assertNotIn("libx264", cmd)
+        self.assertNotIn("-force_key_frames", cmd)
+        self.assertNotIn("-fps_mode", cmd)
+
+    def test_rtsp_profile_hq_no_wallclock_by_default(self) -> None:
+        """hq profile should not add -use_wallclock_as_timestamps by default."""
+        cmd = self._run_start(env={"GN_RTSP_PROFILE": "hq"})
+        self.assertNotIn("-use_wallclock_as_timestamps", cmd)
+
+    # -------------------------------------------------------------------------
+    # Profile: compatible (explicit)
+    # -------------------------------------------------------------------------
+
+    def test_rtsp_profile_compatible_uses_reencode(self) -> None:
+        """Explicit profile=compatible → libx264, force_key_frames, fps_mode=vfr."""
+        cmd = self._run_start(env={"GN_RTSP_PROFILE": "compatible"})
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "libx264")
+        self.assertIn("-force_key_frames", cmd)
+        self.assertIn("-fps_mode", cmd)
+        self.assertEqual(cmd[cmd.index("-fps_mode") + 1], "vfr")
+
+    # -------------------------------------------------------------------------
+    # lightMode inference
+    # -------------------------------------------------------------------------
+
+    def test_rtsp_lightmode_false_infers_hq(self) -> None:
+        """lightMode=false without explicit profile → infers hq → passthrough."""
+        cmd = self._run_start(env={"GN_LIGHT_MODE": "0"})
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "copy")
+        self.assertNotIn("libx264", cmd)
+
+    def test_rtsp_lightmode_true_infers_compatible(self) -> None:
+        """lightMode=true without explicit profile → infers compatible → reencode."""
+        cmd = self._run_start(env={"GN_LIGHT_MODE": "1"})
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "libx264")
+        self.assertIn("-force_key_frames", cmd)
+        self.assertIn("-fps_mode", cmd)
+        self.assertEqual(cmd[cmd.index("-fps_mode") + 1], "vfr")
+
+    # -------------------------------------------------------------------------
+    # Explicit reencode override (wins over profile)
+    # -------------------------------------------------------------------------
+
+    def test_rtsp_reencode_true_overrides_hq_profile(self) -> None:
+        """profile=hq + reencode=true → explicit reencode wins → libx264."""
+        cmd = self._run_start(env={"GN_RTSP_PROFILE": "hq", "GN_RTSP_REENCODE": "1"})
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "libx264")
+        self.assertIn("-force_key_frames", cmd)
+
+    def test_rtsp_reencode_false_overrides_compatible_profile(self) -> None:
+        """profile=compatible + reencode=false → explicit passthrough wins."""
+        cmd = self._run_start(env={"GN_RTSP_PROFILE": "compatible", "GN_RTSP_REENCODE": "0"})
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "copy")
+        self.assertNotIn("libx264", cmd)
+        self.assertNotIn("-force_key_frames", cmd)
+
+    # -------------------------------------------------------------------------
+    # Reencode tuning params (only apply when reencode active)
+    # -------------------------------------------------------------------------
 
     def test_rtsp_reencode_respects_tuning_envs(self) -> None:
         cmd = self._run_start(
@@ -117,7 +193,7 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-keyint_min") + 1], "30")
 
     def test_rtsp_fps_filter_when_configured(self) -> None:
-        """GN_RTSP_FPS applies -vf fps=N filter (leve, não re-encode pesado)."""
+        """GN_RTSP_FPS applies -vf fps=N filter when reencode is active."""
         cmd = self._run_start(
             env={
                 "GN_RTSP_REENCODE": "1",
@@ -135,22 +211,30 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         cmd = self._run_start(env={"GN_RTSP_REENCODE": "1"})
         self.assertNotIn("-vf", cmd)
 
+    # -------------------------------------------------------------------------
+    # Wallclock timestamps
+    # -------------------------------------------------------------------------
+
     def test_rtsp_no_wallclock_timestamps_by_default(self) -> None:
-        """Wallclock timestamps disabled by default — may cause jitter on unstable networks."""
+        """Wallclock timestamps disabled by default."""
         for env in ({}, {"GN_RTSP_REENCODE": "1"}):
             cmd = self._run_start(env=env)
             self.assertNotIn("-use_wallclock_as_timestamps", cmd)
 
     def test_rtsp_wallclock_timestamps_when_enabled(self) -> None:
-        """GN_RTSP_USE_WALLCLOCK=1 enables wallclock timestamps for non-monotonic camera streams."""
+        """GN_RTSP_USE_WALLCLOCK=1 enables wallclock timestamps."""
         cmd = self._run_start(env={"GN_RTSP_USE_WALLCLOCK": "1"})
         self.assertIn("-use_wallclock_as_timestamps", cmd)
         self.assertEqual(cmd[cmd.index("-use_wallclock_as_timestamps") + 1], "1")
         # Must come before -i (input option)
         self.assertLess(cmd.index("-use_wallclock_as_timestamps"), cmd.index("-i"))
 
+    # -------------------------------------------------------------------------
+    # Decoder / stream options
+    # -------------------------------------------------------------------------
+
     def test_rtsp_err_detect_ignore_err(self) -> None:
-        """err_detect ignore_err forces decoder to reconstruct corrupt frames via error concealment."""
+        """err_detect ignore_err forces decoder to reconstruct corrupt frames."""
         cmd = self._run_start(env={})
         self.assertIn("-err_detect", cmd)
         self.assertEqual(cmd[cmd.index("-err_detect") + 1], "ignore_err")
@@ -158,12 +242,60 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
         self.assertLess(cmd.index("-err_detect"), cmd.index("-i"))
 
     def test_rtsp_no_frame_duplication_flags(self) -> None:
-        """discardcorrupt + CFR causes static video — neither should be present in default mode."""
+        """discardcorrupt + CFR causes static video — neither should be present."""
         cmd = self._run_start(env={})
         self.assertNotIn("discardcorrupt", " ".join(cmd))
-        # CFR forcing removed; VFR used instead to avoid frame duplication
         if "-fps_mode" in cmd:
             self.assertNotEqual(cmd[cmd.index("-fps_mode") + 1], "cfr")
+
+    # -------------------------------------------------------------------------
+    # Experimental flags
+    # -------------------------------------------------------------------------
+
+    def test_low_latency_input_injects_nobuffer_before_genpts(self) -> None:
+        """lowLatencyInput=true adds -fflags nobuffer before -fflags +genpts."""
+        cmd = self._run_start(env={"GN_RTSP_LOW_LATENCY_INPUT": "1"})
+
+        self.assertIn("-fflags", cmd)
+        # nobuffer appears before +genpts
+        indices_fflags = [i for i, v in enumerate(cmd) if v == "-fflags"]
+        fflags_values = [cmd[i + 1] for i in indices_fflags]
+        self.assertIn("nobuffer", fflags_values)
+        self.assertIn("+genpts", fflags_values)
+        nobuffer_idx = next(i for i in indices_fflags if cmd[i + 1] == "nobuffer")
+        genpts_idx = next(i for i in indices_fflags if cmd[i + 1] == "+genpts")
+        self.assertLess(nobuffer_idx, genpts_idx)
+
+    def test_low_latency_input_disabled_by_default(self) -> None:
+        """lowLatencyInput off by default — no -fflags nobuffer."""
+        cmd = self._run_start(env={})
+        # +genpts is expected; nobuffer should NOT appear
+        fflags_values = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-fflags"]
+        self.assertNotIn("nobuffer", fflags_values)
+
+    def test_low_delay_codec_flags_injects_flags_low_delay_with_reencode(self) -> None:
+        """lowDelayCodecFlags=true adds -flags low_delay when reencode is active."""
+        cmd = self._run_start(
+            env={"GN_RTSP_REENCODE": "1", "GN_RTSP_LOW_DELAY_CODEC_FLAGS": "1"}
+        )
+
+        self.assertIn("-flags", cmd)
+        self.assertEqual(cmd[cmd.index("-flags") + 1], "low_delay")
+
+    def test_low_delay_codec_flags_absent_without_reencode(self) -> None:
+        """lowDelayCodecFlags=true with passthrough (-c:v copy) must NOT add -flags low_delay."""
+        cmd = self._run_start(
+            env={"GN_RTSP_PROFILE": "hq", "GN_RTSP_LOW_DELAY_CODEC_FLAGS": "1"}
+        )
+
+        cidx = cmd.index("-c:v")
+        self.assertEqual(cmd[cidx + 1], "copy")
+        self.assertNotIn("-flags", cmd)
+
+    def test_low_delay_codec_flags_disabled_by_default(self) -> None:
+        """lowDelayCodecFlags off by default — no -flags low_delay."""
+        cmd = self._run_start(env={"GN_RTSP_REENCODE": "1"})
+        self.assertNotIn("-flags", cmd)
 
 
 if __name__ == "__main__":

@@ -55,18 +55,18 @@ Este arquivo é a porta de entrada do edge system para leitura humana e lookup p
 - Keywords: request_outside_allowed_time_window, signature_mismatch, client_mismatch, delete local record
 - File: [BUSINESS_RULES.md](./BUSINESS_RULES.md), [OPERATIONS.md](./OPERATIONS.md)
 - Source: [`src/services/api_error_policy.py`](../../../src/services/api_error_policy.py)
-- Related: retry vs delete, non-retriable auth failures
+- Related: retry vs delete, non-retriable auth failures, reupload conflict
 
 ## Config and Environment
 
-- Keywords: env, settings, multi camera, rtsp urls, cameras json, light mode
-- File: [INTEGRATIONS.md](./INTEGRATIONS.md)
-- Source: [`src/config/settings.py`](../../../src/config/settings.py)
-- Related: GN_CAMERAS_JSON, GN_RTSP_URLS, GN_LIGHT_MODE, GN_MAX_ATTEMPTS
+- Keywords: env, config.json, config loader, settings, multi camera, rtsp urls, light mode
+- File: [CONFIGURATION.md](./CONFIGURATION.md), [INTEGRATIONS.md](./INTEGRATIONS.md)
+- Source: [`src/config/config_loader.py`](../../../src/config/config_loader.py), [`src/config/settings.py`](../../../src/config/settings.py)
+- Related: config.json, GN_CONFIG_PATH, GN_CAMERAS_JSON, GN_RTSP_URLS, GN_LIGHT_MODE, GN_MAX_ATTEMPTS
 
 ## Tests
 
-- Keywords: pytest, hmac, trigger, multi camera, retry, ffmpeg command
+- Keywords: unittest, hmac, trigger, multi camera, retry, ffmpeg command
 - File: [OPERATIONS.md](./OPERATIONS.md)
 - Source: [`tests`](../../../tests)
 - Related: regression, edge safety checks
@@ -74,6 +74,7 @@ Este arquivo é a porta de entrada do edge system para leitura humana e lookup p
 ## Suggested Reading Order
 
 - Geral: [ARCHITECTURE.md](./ARCHITECTURE.md) -> [PIPELINE.md](./PIPELINE.md)
+- Configuração e deploy: [CONFIGURATION.md](./CONFIGURATION.md) -> [INTEGRATIONS.md](./INTEGRATIONS.md)
 - Trigger e captura: [PIPELINE.md](./PIPELINE.md) -> [BUSINESS_RULES.md](./BUSINESS_RULES.md)
 - API/HMAC: [INTEGRATIONS.md](./INTEGRATIONS.md) -> [BUSINESS_RULES.md](./BUSINESS_RULES.md)
 - MQTT/presença: [ARCHITECTURE.md](./ARCHITECTURE.md) -> [INTEGRATIONS.md](./INTEGRATIONS.md) -> [BUSINESS_RULES.md](./BUSINESS_RULES.md)

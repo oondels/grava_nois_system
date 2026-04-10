@@ -24,7 +24,7 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | Domínio | Campos | Exige restart? |
 |---|---|---|
 | Captura / segmentação | `capture.segmentSeconds`, `capture.preSegments`, `capture.postSegments` | Sim |
-| Tuning RTSP | `capture.rtsp.*` (maxRetries, timeout, reencode, gop, preset, crf, fps, useWallclockTimestamps) | Sim |
+| Tuning RTSP | `capture.rtsp.*` (maxRetries, timeout, profile, reencode, gop, preset, crf, fps, useWallclockTimestamps, lowLatencyInput, lowDelayCodecFlags) | Sim |
 | Câmera V4L2 | `capture.v4l2.*` (device, framerate, videoSize) | Sim |
 | Estrutura de câmeras | `cameras[]` (id, name, enabled, sourceType, rtspUrl, picoTriggerToken, pre/postSegments) | Sim |
 | Fonte de trigger | `triggers.source` (auto/gpio/pico/both) | Sim |
@@ -32,8 +32,8 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | Pico serial | `triggers.pico.globalToken` | Sim |
 | GPIO | `triggers.gpio.pin` | Sim |
 | GPIO cooldown/debounce | `triggers.gpio.cooldownSeconds`, `triggers.gpio.debounceMs` | Futuro: hot-reload |
-| Processamento | `processing.lightMode`, `processing.maxAttempts`, `processing.mobileFormat`, `processing.verticalFormat` | Sim (worker) |
-| Watermark | `processing.watermark.*` (preset, relativeWidth, opacity, margin) | Futuro: hot-reload |
+| Processamento | `processing.lightMode`, `processing.maxAttempts`, `processing.verticalFormat`, `processing.hqCrf`, `processing.hqPreset`, `processing.lmCrf`, `processing.lmPreset` | Sim (worker) |
+| Watermark | `processing.watermark.*` (relativeWidth, opacity, margin) | Futuro: hot-reload |
 | Janela operacional | `operationWindow.*` (timeZone, start, end) | Futuro: hot-reload |
 | MQTT (não sensível) | `mqtt.enabled`, `mqtt.broker.host`, `mqtt.broker.port`, `mqtt.broker.tls`, `mqtt.keepaliveSeconds`, `mqtt.heartbeatIntervalSeconds`, `mqtt.topicPrefix`, `mqtt.qos`, `mqtt.retainPresence` | Sim |
 
@@ -142,7 +142,7 @@ A separação entre parâmetros que suportarão hot-reload e os que exigem resta
 - `capture.rtsp.*` — parâmetros do stream RTSP
 - `triggers.source` — fonte de trigger físico
 - `triggers.gpio.pin` — pino BCM
-- `processing.lightMode` e `maxAttempts` — comportamento do worker
+- `processing.lightMode`, `maxAttempts`, `hqCrf`, `hqPreset`, `lmCrf`, `lmPreset` — qualidade e comportamento do worker
 
 Para forçar recarga da config em memória (ex: testes), chame `reset_config_cache()` de `src.config.config_loader`.
 

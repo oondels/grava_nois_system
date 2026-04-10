@@ -14,15 +14,22 @@
     "postSegments": 3,
     "rtsp": {
       "_comment": "Tuning de captura RTSP. Todos exigem restart.",
+      "_profiles": "profile=hq: passthrough (-c:v copy), ideal para câmeras com timestamps estáveis. profile=compatible: reencode libx264 com fps_mode=vfr, tolerante a DTS/PTS ruins. null = inferido por lightMode (false→hq, true→compatible).",
       "maxRetries": 10,
       "timeoutSeconds": 5,
       "startupCheckSeconds": 1.0,
-      "reencode": true,
+      "profile": null,
+      "reencode": null,
+      "_reencode": "null=usa default do profile (compatible→true, hq→false). true/false sobrescreve explicitamente.",
       "fps": "",
       "gop": 25,
       "preset": "veryfast",
       "crf": 23,
-      "useWallclockTimestamps": false
+      "useWallclockTimestamps": false,
+      "lowLatencyInput": false,
+      "_lowLatencyInput": "Experimental: adiciona -fflags nobuffer. Reduz buffer de probe de entrada; ganho limitado.",
+      "lowDelayCodecFlags": false,
+      "_lowDelayCodecFlags": "Experimental: adiciona -flags low_delay. Só tem efeito com reencode ativo; ignorado em passthrough."
     },
     "v4l2": {
       "_comment": "Câmera V4L2 local (/dev/video0). Usado quando não há câmeras RTSP.",
@@ -75,13 +82,17 @@
 
   "processing": {
     "_comment": "Processamento de clips. lightMode e maxAttempts exigem restart do worker.",
+    "_modes": "lightMode=false: alta qualidade (hqCrf+hqPreset). lightMode=true: modo leve para hardware fraco (lmCrf+lmPreset). Watermark sempre ativa em ambos os modos.",
     "lightMode": false,
     "maxAttempts": 3,
-    "mobileFormat": true,
-    "verticalFormat": true,
+    "verticalFormat": false,
+    "_verticalFormat": "Reframe 9:16 via crop central. Sem scale forçado — resolução final é a do crop.",
+    "hqCrf": 18,
+    "hqPreset": "medium",
+    "lmCrf": 26,
+    "lmPreset": "veryfast",
     "watermark": {
       "_comment": "Parâmetros de watermark/branding. Suportarão hot-reload no futuro.",
-      "preset": "veryfast",
       "relativeWidth": 0.18,
       "opacity": 0.8,
       "margin": 24
