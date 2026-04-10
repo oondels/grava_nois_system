@@ -14,6 +14,7 @@ _VALID_PRESETS = {
 }
 _VALID_TRIGGER_SOURCES = {"auto", "gpio", "pico", "both"}
 _VALID_SOURCE_TYPES = {"rtsp", "v4l2"}
+_VALID_RTSP_PROFILES = {"hq", "compatible"}
 
 
 class ConfigValidationError(Exception):
@@ -113,6 +114,18 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
                     errors.append("capture.rtsp.fps deve ser número ou string numérica vazia")
         else:
             errors.append("capture.rtsp.fps deve ser número, string numérica ou null")
+
+    rtsp_profile = rtsp.get("profile")
+    if rtsp_profile is not None and rtsp_profile not in _VALID_RTSP_PROFILES:
+        errors.append(
+            f"capture.rtsp.profile inválido: {rtsp_profile!r}. "
+            f"Válidos: {sorted(_VALID_RTSP_PROFILES)}"
+        )
+
+    for bool_key in ("lowLatencyInput", "lowDelayCodecFlags"):
+        val = rtsp.get(bool_key)
+        if val is not None and not isinstance(val, bool):
+            errors.append(f"capture.rtsp.{bool_key} deve ser booleano")
 
     v4l2 = capture.get("v4l2") or {}
     if not isinstance(v4l2, dict):

@@ -24,7 +24,7 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | Domínio | Campos | Exige restart? |
 |---|---|---|
 | Captura / segmentação | `capture.segmentSeconds`, `capture.preSegments`, `capture.postSegments` | Sim |
-| Tuning RTSP | `capture.rtsp.*` (maxRetries, timeout, reencode, gop, preset, crf, fps, useWallclockTimestamps) | Sim |
+| Tuning RTSP | `capture.rtsp.*` (maxRetries, timeout, profile, reencode, gop, preset, crf, fps, useWallclockTimestamps, lowLatencyInput, lowDelayCodecFlags) | Sim |
 | Câmera V4L2 | `capture.v4l2.*` (device, framerate, videoSize) | Sim |
 | Estrutura de câmeras | `cameras[]` (id, name, enabled, sourceType, rtspUrl, picoTriggerToken, pre/postSegments) | Sim |
 | Fonte de trigger | `triggers.source` (auto/gpio/pico/both) | Sim |

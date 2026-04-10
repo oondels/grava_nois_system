@@ -20,6 +20,13 @@ Entradas possíveis:
 
 FFmpeg gera segmentos contínuos de 1s ou `GN_SEG_TIME`.
 
+Perfis de captura RTSP (`capture.rtsp.profile`):
+
+- `hq` (padrão quando `lightMode=false`): passthrough `-c:v copy`, preserva qualidade original da câmera. Adequado para câmeras com timestamps estáveis.
+- `compatible` (padrão quando `lightMode=true`): reencode libx264 com `fps_mode=vfr` e `force_key_frames`. Tolerante a DTS/PTS ruins e perda de pacotes.
+- Profile explícito (`hq`/`compatible`) sempre tem precedência sobre inferência por `lightMode`.
+- `capture.rtsp.reencode` (null/true/false): override explícito do reencode, independente do profile.
+
 O `SegmentBuffer`:
 
 - indexa segmentos disponíveis;

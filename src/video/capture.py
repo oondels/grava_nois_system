@@ -119,22 +119,37 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             )
 
     if use_rtsp:
-        # Modo padrão: re-encode — necessário para câmeras WiFi com DTS
-        # não-monotônico e perda de pacotes (ex: Tapo C500).
-        # O decoder recebe -err_detect ignore_err para reconstruir frames
-        # corrompidos via error concealment em vez de descartá-los: um frame
-        # com artefato visual menor é vastamente melhor que um frame faltando
-        # (que gera stutter na concatenação).
-        #
-        # Alternativa: reencode=false em config.json usa passthrough (copy),
-        # apenas para câmeras com DTS estável e timestamps confiáveis.
-        _rtsp_cfg = get_effective_config().capture.rtsp
-        rtsp_reencode = _rtsp_cfg.reencode
+        _cfg_op = get_effective_config()
+        _rtsp_cfg = _cfg_op.capture.rtsp
+        _light_mode = _cfg_op.processing.light_mode
+
+        # --- Resolve perfil efetivo ----------------------------------------
+        # Precedência: profile explícito > env GN_RTSP_PROFILE (já absorvido
+        # no loader) > inferência por lightMode > fallback "compatible".
+        effective_profile: str = _rtsp_cfg.profile or (
+            "hq" if not _light_mode else "compatible"
+        )
+
+        # --- Resolve reencode efetivo --------------------------------------
+        # None = usa default do profile; True/False = override explícito.
+        if _rtsp_cfg.reencode is None:
+            rtsp_reencode = effective_profile == "compatible"
+        else:
+            rtsp_reencode = _rtsp_cfg.reencode
+
         rtsp_gop = _rtsp_cfg.gop
         rtsp_preset = _rtsp_cfg.preset or "veryfast"
         rtsp_crf = _rtsp_cfg.crf
         rtsp_fps = _rtsp_cfg.fps
+        # wallclock: só aplica se explicitamente habilitado (nunca pelo profile)
         rtsp_use_wallclock = _rtsp_cfg.use_wallclock_timestamps
+
+        logger.info(
+            f"[{cfg.camera_id}] Perfil RTSP: {effective_profile} | "
+            f"reencode={rtsp_reencode} | "
+            f"low_latency_input={_rtsp_cfg.low_latency_input} | "
+            f"low_delay_codec_flags={_rtsp_cfg.low_delay_codec_flags}"
+        )
 
         cmd = [
             "ffmpeg",
@@ -147,14 +162,17 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "prefer_tcp",
         ]
 
-        # Wallclock timestamps: ativa se GN_RTSP_USE_WALLCLOCK=1
+        # Wallclock timestamps: ativa apenas se explicitamente habilitado.
         # Útil para câmeras que geram timestamps não-monotônicos.
         # Use com cuidado: pode causar jitter em redes instáveis.
         if rtsp_use_wallclock:
-            cmd += [
-                "-use_wallclock_as_timestamps",
-                "1",
-            ]
+            cmd += ["-use_wallclock_as_timestamps", "1"]
+
+        # lowLatencyInput: reduz buffering do probe de entrada.
+        # Ganho limitado ao buffer de análise inicial; não elimina latência
+        # de rede ou pipeline. Mantido fora do caminho padrão.
+        if _rtsp_cfg.low_latency_input:
+            cmd += ["-fflags", "nobuffer"]
 
         cmd += [
             # +genpts: regenera PTS para frames sem timestamp.
@@ -162,8 +180,6 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "+genpts",
             # ignore_err: decoder tenta reconstruir macroblocks corrompidos
             # via error concealment em vez de descartar o frame inteiro.
-            # Sem isso, cada frame corrompido vira um "buraco" no tempo
-            # que se manifesta como stutter no highlight final.
             "-err_detect",
             "ignore_err",
             "-i",
@@ -174,10 +190,15 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         ]
 
         if rtsp_reencode:
-            # Se GN_RTSP_FPS definido, aplica filtro fps leve antes do encoding.
-            # Exemplo: -vf fps=15 limita a 15fps sem re-encode pesado.
+            # Profile compatible / reencode explícito:
+            # libx264 com force_key_frames e fps_mode=vfr para tolerância
+            # a DTS/PTS ruins e perda de pacotes.
             if rtsp_fps:
                 cmd += ["-vf", f"fps={rtsp_fps}"]
+
+            # lowDelayCodecFlags: só faz sentido com reencode ativo.
+            if _rtsp_cfg.low_delay_codec_flags:
+                cmd += ["-flags", "low_delay"]
 
             cmd += [
                 "-c:v",
@@ -204,10 +225,16 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
                 "vfr",
             ]
         else:
-            cmd += [
-                "-c:v",
-                "copy",
-            ]
+            # Profile hq / passthrough:
+            # Sem re-encode — preserva qualidade original da câmera.
+            # Adequado para câmeras com timestamps estáveis.
+            if _rtsp_cfg.low_delay_codec_flags:
+                logger.warning(
+                    f"[{cfg.camera_id}] low_delay_codec_flags=true ignorado: "
+                    "sem efeito com -c:v copy (reencode desativado)"
+                )
+
+            cmd += ["-c:v", "copy"]
 
         cmd += [
             "-f",

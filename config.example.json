@@ -14,15 +14,22 @@
     "postSegments": 3,
     "rtsp": {
       "_comment": "Tuning de captura RTSP. Todos exigem restart.",
+      "_profiles": "profile=hq: passthrough (-c:v copy), ideal para câmeras com timestamps estáveis. profile=compatible: reencode libx264 com fps_mode=vfr, tolerante a DTS/PTS ruins. null = inferido por lightMode (false→hq, true→compatible).",
       "maxRetries": 10,
       "timeoutSeconds": 5,
       "startupCheckSeconds": 1.0,
-      "reencode": true,
+      "profile": null,
+      "reencode": null,
+      "_reencode": "null=usa default do profile (compatible→true, hq→false). true/false sobrescreve explicitamente.",
       "fps": "",
       "gop": 25,
       "preset": "veryfast",
       "crf": 23,
-      "useWallclockTimestamps": false
+      "useWallclockTimestamps": false,
+      "lowLatencyInput": false,
+      "_lowLatencyInput": "Experimental: adiciona -fflags nobuffer. Reduz buffer de probe de entrada; ganho limitado.",
+      "lowDelayCodecFlags": false,
+      "_lowDelayCodecFlags": "Experimental: adiciona -flags low_delay. Só tem efeito com reencode ativo; ignorado em passthrough."
     },
     "v4l2": {
       "_comment": "Câmera V4L2 local (/dev/video0). Usado quando não há câmeras RTSP.",
