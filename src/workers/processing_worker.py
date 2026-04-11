@@ -14,6 +14,7 @@ import requests
 from src.config.config_loader import get_effective_config
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
+from src.services.backend_response_sanitizer import sanitize_backend_response
 from src.utils.logger import logger
 from src.video.processor import (
     _sha256_file,
@@ -424,13 +425,16 @@ class ProcessingWorker:
                     resp = api_client.register_clip_metadados(payload, timeout=15.0)
 
                     # Aguarda Resposta do Backend
-                    logger.debug(f"Resposta do backend: {json.dumps(resp)[:300]}")
+                    sanitized_resp = sanitize_backend_response(resp)
+                    logger.debug(
+                        f"Resposta do backend: {json.dumps(sanitized_resp)[:300]}"
+                    )
                     meta.setdefault("remote_registration", {})
                     meta["remote_registration"].update(
                         {
                             "status": "registered",
                             "registered_at": datetime.now(timezone.utc).isoformat(),
-                            "response": resp,
+                            "response": sanitized_resp,
                         }
                     )
                     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))

@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import requests
 
 from src.security.request_signer import SignedRequest, sign_request, truncate_signature
+from src.services.backend_response_sanitizer import redact_url_for_log
 from src.utils.logger import logger
 
 _METADATA_SIGNED_PATH_RE = re.compile(r"^/api/videos/metadados/client/([^/]+)(?:/|$)")
@@ -306,7 +307,8 @@ class GravaNoisAPIClient:
                 return response.status_code, response.reason, normalized_headers
 
         except requests.exceptions.RequestException as e:
-            error_msg = f"Erro de rede durante upload para {upload_url}: {e}"
+            safe_url = redact_url_for_log(upload_url)
+            error_msg = f"Erro de rede durante upload para {safe_url}: {e}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 

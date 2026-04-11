@@ -30,6 +30,7 @@ from src.services.mqtt.device_presence_service import (
     build_runtime_snapshot,
 )
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
+from src.services.docker_action_request import DockerActionRequestService
 from src.utils.logger import logger
 from src.utils.pico import get_pico_serial_port, resolve_trigger_source
 from src.utils.time_utils import is_within_business_hours
@@ -403,6 +404,7 @@ def main() -> int:
     _fanout_runtimes = _get_fanout_targets(runtimes)
 
     pico_trigger_token = op_cfg.triggers.pico.global_token or "BTN_REPLAY"
+    docker_action_requests = DockerActionRequestService.from_env(logger=logger)
     pico_serial_port: str | None = None
 
     # Mapa de roteamento: token Pico dedicado → handler de câmera específica.
@@ -578,6 +580,8 @@ def main() -> int:
                             if not line:
                                 continue
                             line_upper = line.upper()
+                            if docker_action_requests.handle_token(line_upper):
+                                continue
                             if line_upper in token_map:
                                 token_map[line_upper]()
                             elif _serial_line_is_trigger(line, pico_trigger_token):

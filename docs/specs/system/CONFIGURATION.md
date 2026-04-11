@@ -217,6 +217,8 @@ Persistência local:
 
 Em Docker, os quatro arquivos acima devem compartilhar o mesmo diretorio persistente e gravavel. Montar apenas `config.json` como arquivo `:ro` quebra a promoção de configurações remotas e impede a persistência correta de pending/state/backup.
 
+O compose local e o compose gerenciado devem apontar `GN_CONFIG_PATH` para `/usr/src/app/runtime_config/config.json` e montar o diretório `runtime_config` como volume gravável. Esse mesmo diretório também recebe `docker-action.request.json` quando o Pico solicita manutenção Docker ao host.
+
 Estados reportados:
 
 - `applied`: configuração promovida para `config.json`;

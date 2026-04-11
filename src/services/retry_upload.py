@@ -12,26 +12,16 @@ from typing import Dict, Optional
 
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
+from src.services.backend_response_sanitizer import sanitize_backend_response
 from src.utils.logger import logger
 from src.video.processor import ffprobe_metadata, _sha256_file
 
 
 DEFAULT_CONTENT_TYPE = "video/mp4"
-SENSITIVE_RESPONSE_KEYS = {"upload_url", "signed_upload_url"}
 
 
 def _sanitize_backend_response(value):
-    if isinstance(value, dict):
-        sanitized = {}
-        for key, item in value.items():
-            if str(key).lower() in SENSITIVE_RESPONSE_KEYS:
-                sanitized[key] = "[redacted]"
-            else:
-                sanitized[key] = _sanitize_backend_response(item)
-        return sanitized
-    if isinstance(value, list):
-        return [_sanitize_backend_response(item) for item in value]
-    return value
+    return sanitize_backend_response(value)
 
 
 def _load_or_init_sidecar(video_path: Path, sidecar_path: Path) -> Dict:

@@ -216,7 +216,10 @@ Canonical string:
 - descoberta automática por `/dev/serial/by-id`, `/dev/ttyACM*`, `/dev/ttyUSB*`;
 - token global configurável por `GN_PICO_TRIGGER_TOKEN` (fan-out para câmeras sem token dedicado);
 - cada câmera em `GN_CAMERAS_JSON` pode declarar `pico_trigger_token` próprio — quando recebido, dispara apenas aquela câmera sem acionar as demais;
+- tokens `GN_PICO_DOCKER_PULL_TOKEN` e `GN_PICO_DOCKER_RESTART_TOKEN` são consumidos antes dos tokens de câmera para criar uma solicitação de manutenção Docker no `runtime_config`;
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
+
+O edge não usa Docker socket. A execução real de `pull/up` ou `restart` é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`.
 
 ## WiFi Provisioning (hotspot local)
 

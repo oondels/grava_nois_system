@@ -515,9 +515,21 @@ GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado
 ```
 
 Lógica de roteamento ao receber um token pela serial:
-1. Token está no mapa dedicado → dispara só a câmera correspondente
-2. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
-3. Token desconhecido → `warning` no log, listener continua sem interrupção
+1. Token de manutenção Docker (`PULL_DOCKER`/`RESTART_DOCKER`) → grava uma solicitação em `runtime_config` para o host executar via systemd
+2. Token está no mapa dedicado → dispara só a câmera correspondente
+3. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
+4. Token desconhecido → `warning` no log, listener continua sem interrupção
+
+Tokens de manutenção Docker:
+
+```bash
+GN_PICO_DOCKER_ACTIONS_ENABLED=1
+GN_PICO_DOCKER_PULL_TOKEN=PULL_DOCKER
+GN_PICO_DOCKER_RESTART_TOKEN=RESTART_DOCKER
+GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
+```
+
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --remove-orphans` ou `docker restart grava_nois_system`. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:

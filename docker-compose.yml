@@ -8,6 +8,8 @@ services:
     tty: true
     env_file:
       - .env
+    environment:
+      GN_CONFIG_PATH: /usr/src/app/runtime_config/config.json
     working_dir: /usr/src/app
     shm_size: 512m
 
@@ -22,6 +24,7 @@ services:
 
     volumes:
       - ./.env:/usr/src/app/.env:ro
+      - ./runtime_config:/usr/src/app/runtime_config
       - ./files:/usr/src/app/files:ro
       - ./recorded_clips:/usr/src/app/recorded_clips
       - ./queue_raw:/usr/src/app/queue_raw
