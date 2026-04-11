@@ -93,7 +93,7 @@ Dependências Python diretas em `requirements.txt`:
 4. O clipe é movido para `queue_raw/` com sidecar JSON (`.json`).
 5. O worker processa a fila:
    - **Modo normal**: watermark + upload.
-   - **Modo leve (`GN_LIGHT_MODE=1`)**: upload direto (sem watermark/thumbnail).
+   - **Modo leve (`GN_LIGHT_MODE=1`)**: watermark com encode mais leve + upload.
 6. Backend retorna `upload_url` assinada.
 7. Upload `PUT` para storage.
 8. API recebe confirmação final (`/uploaded`) com `size_bytes`, `sha256` e opcionalmente `etag`.
@@ -104,7 +104,7 @@ Dependências Python diretas em `requirements.txt`:
 ## Modos de Operação
 
 - **Produção (padrão):** fluxo completo com comunicação remota.
-- **Light mode (`GN_LIGHT_MODE=1`):** reduz custo de CPU, sem watermark/thumbnail.
+- **Light mode (`GN_LIGHT_MODE=1`):** reduz custo de CPU usando parâmetros leves de encode para watermark.
 - **DEV (`DEV=true`):** não chama API remota; preserva processamento local para testes de pipeline.
 
 ---
@@ -167,4 +167,3 @@ Trigger manual: pressionar `ENTER` no terminal.
 ## Resumo Final
 
 O `grava_nois_system` é o componente de borda responsável por transformar stream contínuo de câmera em highlights com pipeline robusto de fila + upload assinado + finalização validada, com foco em operação estável em hardware limitado (como Raspberry Pi) e integração segura com o backend Grava Nóis.
-

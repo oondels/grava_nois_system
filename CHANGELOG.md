@@ -2,10 +2,27 @@
 
 ## 2026-04-11
 
+### Added
+- Supervisor de câmera em background com retry/backoff exponencial (5s..300s) e restart automático de FFmpeg.
+- Campos `camera_status`, `last_error`, `last_error_at` e `restart_attempts` no snapshot MQTT por câmera.
+- Métricas expandidas no payload MQTT: `failed_clips_count`, `upload_failed_count`, `disk_free_bytes`, `disk_total_bytes`, `storage_status`.
+- Thread dedicada para processamento de mensagens MQTT (handlers desacoplados do loop Paho).
+- Reconexão MQTT explícita com `reconnect_delay_set(min_delay=1, max_delay=120)`.
+- Sanitização de credenciais RTSP nos logs de comando FFmpeg (`ffmpeg_*.log`).
+
+### Changed
+- **MQTT inicia antes das câmeras**: presença e heartbeat publicam status mesmo com falha total de hardware.
+- Startup de câmera não-fatal: falha em `start_ffmpeg()` marca câmera como `UNAVAILABLE` sem abortar o processo.
+- Healthcheck Docker mede liveness do processo Python (`pgrep -f 'python.*main'`) em vez de FFmpeg.
+- `CameraRuntime.proc` e `.segbuf` agora são opcionais (`None` quando câmera indisponível).
+- Heartbeat MQTT protegido com try/except permanente; snapshot provider com fallback seguro.
+- Shutdown gracioso verifica `proc` e `segbuf` antes de chamar `terminate()`/`stop()`.
+
 ### Fixed
 - `env_to_config.sh`: conversor local passa a gerar o contrato atual de `config.json`, removendo campos legados `processing.mobileFormat` e `processing.watermark.preset`.
 - `DeviceConfigService`: removido resíduo `processing.mobileFormat` da lista de paths que exigem restart.
 - `.dockerignore`: artefatos reais de configuração runtime (`config.json`, pending/state/backup e backup local) deixam de entrar no contexto de build.
+- `provisioning_server.py`: corrigida ordem de definição de `_detect_wifi_interface()` (NameError no import).
 
 ### Changed
 - Documentacao passa a recomendar `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json` com diretorio de config persistente e gravavel em Docker.

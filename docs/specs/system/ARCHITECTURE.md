@@ -28,11 +28,19 @@ Bootstrap em [`main.py`](../../../main.py):
 1. carrega `.env`;
 2. resolve configuração operacional efetiva (`config.json` -> env legado -> defaults);
 3. cria `CaptureConfig` por câmera;
-4. limpa buffer e inicia FFmpeg por câmera;
-5. inicia `SegmentBuffer` por câmera;
-6. inicia `ProcessingWorker` por câmera;
-7. resolve trigger source e listeners;
-8. orquestra trigger fan-out até shutdown.
+4. **inicia MQTT (presence, dispatcher, config service) antes das câmeras**;
+5. tenta iniciar FFmpeg por câmera (não-fatal: falha marca `camera_status=UNAVAILABLE`);
+6. inicia supervisor por câmera em background (retry com backoff exponencial);
+7. inicia `ProcessingWorker` por câmera;
+8. resolve trigger source e listeners;
+9. orquestra trigger fan-out até shutdown.
+
+### Resiliência de startup
+
+- Falha de câmera não aborta o processo; MQTT publica estado degradado.
+- Supervisor monitora `proc.poll()` e reinicia FFmpeg com backoff (5s..300s).
+- Heartbeat MQTT protegido contra exceções no snapshot provider.
+- Trigger fan-out verifica disponibilidade da câmera antes de disparar.
 
 ## Main internal modules
 
@@ -80,10 +88,12 @@ Bootstrap em [`main.py`](../../../main.py):
 `CameraRuntime` em `main.py` encapsula:
 
 - `cfg` (`CaptureConfig`, inclui `pico_trigger_token`)
-- processo FFmpeg
-- `SegmentBuffer`
+- processo FFmpeg opcional (`None` quando a câmera está indisponível)
+- `SegmentBuffer` opcional (`None` enquanto FFmpeg não está rodando)
 - `capture_lock` — evita sobreposição de build para a mesma câmera
 - `_cooldown_until: float` — timestamp até o qual novos triggers físicos são ignorados para esta câmera (cooldown por câmera)
+- `camera_status` — `STARTING`, `OK`, `UNAVAILABLE` ou `ERROR`
+- `last_error`, `last_error_at` e `restart_attempts` para diagnóstico remoto via MQTT
 
 Consequência:
 
@@ -91,6 +101,7 @@ Consequência:
 - o trigger global (ENTER/GPIO/token Pico global) faz fan-out para câmeras sem token dedicado;
 - câmeras com `pico_trigger_token` só disparam quando o token dedicado é recebido;
 - o lock evita sobreposição de build; o cooldown evita cliques acidentais em sequência.
+- câmera indisponível não aborta o edge; o trigger é ignorado para ela e o supervisor continua tentando restabelecer FFmpeg.
 
 ## Queue and filesystem model
 
@@ -119,7 +130,7 @@ Camada opcional e isolada do pipeline principal:
 
 Ponto de integração:
 
-- bootstrap em `main.py` após iniciar câmeras e workers;
+- bootstrap em `main.py` antes de iniciar FFmpeg, para publicar estado mesmo quando a câmera falha;
 - `DeviceConfigService` fica separado de `CommandDispatcher` para não transformar config remota em command/control arbitrário;
 - falhas do broker não derrubam captura, trigger nem worker;
 - payload é derivado de snapshot barato do runtime, sem dependência circular com a fila.

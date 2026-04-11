@@ -56,10 +56,6 @@ _state_lock = threading.Lock()
 _connection_state: str = "hotspot"   # hotspot | connecting | connected | failed
 _connection_error: str = ""
 
-# Interface WiFi detectada na inicialização
-_WIFI_IFACE: str = _detect_wifi_interface()
-_HOTSPOT_DOWN_SCRIPT = Path(__file__).parent / "hotspot_down.sh"
-
 
 def _detect_wifi_interface() -> str:
     try:
@@ -73,6 +69,11 @@ def _detect_wifi_interface() -> str:
         if (path / "wireless").is_dir():
             return path.name
     return ""
+
+
+# Interface WiFi detectada na inicialização
+_WIFI_IFACE: str = _detect_wifi_interface()
+_HOTSPOT_DOWN_SCRIPT = Path(__file__).parent / "hotspot_down.sh"
 
 
 def _set_state(state: str, error: str = "") -> None:

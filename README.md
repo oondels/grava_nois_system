@@ -621,7 +621,7 @@ Observações:
 
 ### Objetivo
 
-Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura.
+Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, garantindo publicação de status mesmo com falha total de hardware. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE` e reiniciadas automaticamente por um supervisor em background com backoff exponencial.
 
 ### Variáveis principais
 
@@ -676,7 +676,12 @@ Exemplo de payload:
   "health": {
     "camera_count": 2,
     "online_cameras": 2,
-    "trigger_source": "pico"
+    "trigger_source": "pico",
+    "failed_clips_count": 0,
+    "upload_failed_count": 0,
+    "disk_free_bytes": 12345678901,
+    "disk_total_bytes": 31457280000,
+    "storage_status": "OK"
   }
 }
 ```
@@ -752,7 +757,12 @@ Exemplo de payload:
     "online_cameras": 2,
     "trigger_source": "pico",
     "gpio_enabled": false,
-    "pico_enabled": true
+    "pico_enabled": true,
+    "failed_clips_count": 0,
+    "upload_failed_count": 1,
+    "disk_free_bytes": 12345678901,
+    "disk_total_bytes": 31457280000,
+    "storage_status": "OK"
   },
   "cameras": [
     {
@@ -761,7 +771,11 @@ Exemplo de payload:
       "source_type": "rtsp",
       "queue_size": 1,
       "capture_busy": false,
-      "ffmpeg_alive": true
+      "ffmpeg_alive": true,
+      "camera_status": "OK",
+      "last_error": "",
+      "last_error_at": "",
+      "restart_attempts": 0
     },
     {
       "camera_id": "cam02",
@@ -769,7 +783,11 @@ Exemplo de payload:
       "source_type": "rtsp",
       "queue_size": 0,
       "capture_busy": false,
-      "ffmpeg_alive": true
+      "ffmpeg_alive": false,
+      "camera_status": "UNAVAILABLE",
+      "last_error": "Câmera RTSP não acessível após tentativas configuradas",
+      "last_error_at": "2026-04-05T19:10:25+00:00",
+      "restart_attempts": 3
     }
   ],
   "runtime": {
@@ -998,10 +1016,19 @@ Exemplo de resposta publicada na fase 1:
 - `last_seen`
 - `queue_size`
 - `health`
+- `health.failed_clips_count`
+- `health.upload_failed_count`
+- `health.disk_free_bytes`
+- `health.disk_total_bytes`
+- `health.storage_status`
+- `cameras[].camera_status`
+- `cameras[].last_error`
+- `cameras[].restart_attempts`
 
 ### Garantias desta fase
 
 - MQTT é opcional e isolado do fluxo de replay
+- MQTT inicia antes das câmeras para permitir status degradado mesmo com hardware indisponível
 - `presence` usa retained message e `last will`
 - heartbeats não executam comandos
 - qualquer comando recebido em `commands/in` é rejeitado explicitamente
@@ -1224,7 +1251,8 @@ python3 main.py
 
 **Sintomas:**
 - "Câmera não acessível após 10 tentativas"
-- "Nenhum segmento capturado — encerrando"
+- `camera_status=UNAVAILABLE` no payload MQTT
+- triggers para essa câmera são ignorados até o supervisor restabelecer FFmpeg
 
 **Diagnóstico:**
 
@@ -1255,6 +1283,8 @@ export GN_RTSP_URL=rtsp://admin:senha@192.168.1.100:554/cam/realmonitor
 # 3. Verificar firewall
 sudo ufw allow 554/tcp
 ```
+
+Comportamento esperado: a falha de câmera não derruba o edge. O processo principal permanece vivo, MQTT continua publicando presença/state quando o broker está acessível e o supervisor tenta reiniciar FFmpeg com backoff exponencial.
 
 ### 2. GPIO Não Funciona
 
@@ -1527,7 +1557,8 @@ api_client.finalize_clip_uploaded(
 - ✅ Worker de processamento com retry
 - ✅ Marca d'água local no modo normal
 - ✅ Upload via URL assinada
-- ✅ Health check RTSP com retry automático
+- ✅ Startup de câmera não-fatal com supervisor/retry de FFmpeg
+- ✅ MQTT antes das câmeras para status degradado de hardware
 - ✅ Modo leve para hardware limitado
 - ✅ Sistema de logging estruturado
 - ✅ Cliente de API centralizado

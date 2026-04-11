@@ -57,6 +57,7 @@ class CaptureFfmpegCommandTests(unittest.TestCase):
             clean_env = {k: v for k, v in os.environ.items() if k not in self._CONTROLLED_VARS}
             clean_env["GN_LOG_DIR"] = str(base / "logs")
             clean_env["GN_FFMPEG_STARTUP_CHECK_SEC"] = "0.1"
+            clean_env["GN_CONFIG_PATH"] = str(base / "missing_config.json")
             clean_env.update(env)
 
             with patch.dict(os.environ, clean_env, clear=True), \

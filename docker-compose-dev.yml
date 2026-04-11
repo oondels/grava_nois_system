@@ -12,13 +12,14 @@ services:
     working_dir: /usr/src/app
     shm_size: 512m
 
-    # Health check: verifica se FFmpeg está rodando corretamente
+    # Health check: verifica se o processo principal Python está vivo
+    # (câmeras podem estar em modo degradado sem derrubar o container)
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f ffmpeg || exit 1"]
+      test: ["CMD-SHELL", "pgrep -f 'python.*main' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s  # Aguarda 60s antes de começar health checks (tempo para câmera inicializar)
+      start_period: 60s  # Aguarda o runtime inicializar antes de começar health checks
 
     volumes:
       - ./.env:/usr/src/app/.env:ro

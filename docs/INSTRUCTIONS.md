@@ -60,7 +60,7 @@ O sistema agora possui um mecanismo de retry automático para evitar falhas quan
 
 - **`GN_LOG_DIR`**: Diretório para logs do FFmpeg (padrão: `/usr/src/app/logs`)
   - Logs detalhados facilitam debug de problemas de conexão
-  - Verifique `logs/ffmpeg.log` para diagnóstico
+  - Verifique `logs/ffmpeg_<camera_id>.log` para diagnóstico
 
 ---
 
@@ -125,8 +125,8 @@ Para acompanhar logs em tempo real:
 # Logs do container Docker
 docker logs -f grava_nois_system
 
-# Logs do FFmpeg (para debug de conexão com câmera)
-tail -f logs/ffmpeg.log
+# Logs do FFmpeg por camera (para debug de conexão com câmera)
+tail -f logs/ffmpeg_cam01.log
 
 # Verificar health do container
 docker ps  # Coluna STATUS deve mostrar "healthy" após ~60s
@@ -143,10 +143,10 @@ Durante o boot, você verá mensagens do health check RTSP:
 [rtsp-check] Aguardando 5s antes de tentar novamente...
 [rtsp-check] Tentativa 2/10...
 [rtsp-check] ✓ Câmera acessível em 192.168.68.104:554!
-[ffmpeg] Logs sendo salvos em: /usr/src/app/logs/ffmpeg.log
+[ffmpeg] Logs sendo salvos em: /usr/src/app/logs/ffmpeg_cam01.log
 ```
 
-Se após 10 tentativas (50s) a câmera não estiver acessível, o container será reiniciado automaticamente pelo Docker.
+Se a câmera não estiver acessível, o container permanece vivo, publica status degradado quando MQTT estiver disponível e o supervisor tenta reiniciar o FFmpeg em background.
 
 ---
 
@@ -157,7 +157,7 @@ Se após 10 tentativas (50s) a câmera não estiver acessível, o container ser�
 **Causa**: Sistema não conseguiu conectar à câmera RTSP ou FFmpeg não iniciou corretamente.
 
 **Solução**:
-1. Verifique logs do FFmpeg: `tail -f logs/ffmpeg.log`
+1. Verifique logs do FFmpeg: `tail -f logs/ffmpeg_cam01.log`
 2. Confirme que a câmera está ligada e acessível na rede
 3. Teste conectividade manual: `nc -zv <IP_CAMERA> 554`
 4. Verifique se `GN_RTSP_URL` está correta no `.env`
@@ -165,20 +165,20 @@ Se após 10 tentativas (50s) a câmera não estiver acessível, o container ser�
 
 ### Problema: Container reiniciando constantemente
 
-**Causa**: Health check falhando (FFmpeg não está rodando).
+**Causa**: o processo principal Python está encerrando ou falhando antes de manter o runtime ativo.
 
 **Solução**:
 1. Verifique logs: `docker logs grava_nois_system`
-2. Confirme que `GN_RTSP_URL` está descomentada e correta
-3. Verifique logs do FFmpeg em `logs/ffmpeg.log`
+2. Confirme que `.env`/`config.json` carregam sem erro fatal
+3. Verifique logs do FFmpeg em `logs/ffmpeg_cam01.log`
 4. Teste conectividade com a câmera manualmente
 
 ### Problema: Perda de energia - sistema não reconecta
 
 **Solução**: O sistema agora possui retry automático implementado. Após queda de energia:
 - O container aguarda até 60s antes de começar health checks
-- Tenta conectar à câmera 10 vezes com intervalo de 5s
-- Se falhar, reinicia automaticamente e tenta novamente
+- Tenta conectar à câmera conforme `GN_RTSP_MAX_RETRIES` e timeouts configurados
+- Se falhar, marca a câmera como indisponível e tenta novamente pelo supervisor
 - Configure `GN_RTSP_MAX_RETRIES` para mais tentativas se necessário
 
 ---

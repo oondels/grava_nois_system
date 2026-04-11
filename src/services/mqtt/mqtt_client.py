@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import ssl
 import threading
 from collections.abc import Callable
@@ -29,6 +30,9 @@ class MQTTClient:
         self._connected = threading.Event()
         self._lock = threading.Lock()
         self._started = False
+        self._handler_queue: queue.Queue[tuple[MQTTMessageHandler, str, bytes]] = queue.Queue()
+        self._handler_thread: threading.Thread | None = None
+        self._handler_stop = threading.Event()
         self._client = self._build_client()
 
     @property
@@ -67,6 +71,7 @@ class MQTTClient:
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
+        client.reconnect_delay_set(min_delay=1, max_delay=120)
         return client
 
     def configure_last_will(self, topic: str, payload: dict[str, Any], *, retain: bool) -> None:
@@ -79,6 +84,18 @@ class MQTTClient:
             retain=retain,
         )
 
+    def _handler_worker(self) -> None:
+        """Consome mensagens MQTT enfileiradas e executa handlers fora do loop Paho."""
+        while not self._handler_stop.is_set():
+            try:
+                handler, topic, payload = self._handler_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                handler(topic, payload)
+            except Exception as exc:
+                mqtt_logger.exception("Erro no handler MQTT para %s: %s", topic, exc)
+
     def start(self) -> bool:
         if not self._client:
             return False
@@ -86,6 +103,11 @@ class MQTTClient:
             if self._started:
                 return True
             try:
+                self._handler_stop.clear()
+                self._handler_thread = threading.Thread(
+                    target=self._handler_worker, daemon=True, name="mqtt-handler",
+                )
+                self._handler_thread.start()
                 self._client.connect_async(
                     host=self.config.host,
                     port=self.config.port,
@@ -103,6 +125,7 @@ class MQTTClient:
                 return True
             except Exception as exc:
                 mqtt_logger.exception("Falha ao iniciar cliente MQTT: %s", exc)
+                self._handler_stop.set()
                 return False
 
     def stop(self) -> None:
@@ -111,6 +134,9 @@ class MQTTClient:
         with self._lock:
             if not self._started:
                 return
+            self._handler_stop.set()
+            if self._handler_thread is not None:
+                self._handler_thread.join(timeout=2.0)
             try:
                 self._client.disconnect()
             except Exception as exc:
@@ -216,7 +242,4 @@ class MQTTClient:
         if handler is None:
             mqtt_logger.debug("Mensagem MQTT sem handler: topic=%s", topic)
             return
-        try:
-            handler(topic, payload)
-        except Exception as exc:
-            mqtt_logger.exception("Erro no handler MQTT para %s: %s", topic, exc)
+        self._handler_queue.put((handler, topic, payload))

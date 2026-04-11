@@ -83,6 +83,25 @@ def _calc_start_number(buffer_dir: Path) -> int:
     return (max(nums) + 1) if nums else 0
 
 
+def _sanitize_cmd_for_log(cmd: list[str]) -> str:
+    """Remove credenciais RTSP de comandos para log seguro."""
+    sanitized = []
+    for arg in cmd:
+        if "rtsp://" in arg.lower():
+            parsed = urlparse(arg)
+            if parsed.username or parsed.password:
+                host_port = f"{parsed.hostname}:{parsed.port or 554}"
+                clean = parsed._replace(netloc=f"***:***@{host_port}")
+                from urllib.parse import urlunparse
+
+                sanitized.append(urlunparse(clean))
+            else:
+                sanitized.append(arg)
+        else:
+            sanitized.append(arg)
+    return " ".join(sanitized)
+
+
 def _tail_file(path: Path, max_lines: int = 20) -> str:
     try:
         with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -323,7 +342,7 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         log_file.write(f"\n{'='*80}\n")
         log_file.write(f"[{timestamp}] Iniciando FFmpeg\n")
-        log_file.write(f"Comando: {' '.join(cmd)}\n")
+        log_file.write(f"Comando: {_sanitize_cmd_for_log(cmd)}\n")
         log_file.write(f"{'='*80}\n\n")
         log_file.flush()
 

@@ -325,7 +325,7 @@ grava_nois_system/
 │       └── highlight_*.error.txt
 │
 ├── logs/                         # Logs do sistema
-│   └── ffmpeg.log                # Output do FFmpeg
+│   └── ffmpeg_<camera_id>.log    # Output sanitizado do FFmpeg por camera
 │
 └── files/                        # Assets
     └── replay_grava_nois.png     # Watermark
@@ -434,15 +434,14 @@ grava_nois_system/
 ## Modos de Operação
 
 ### Light Mode (GN_LIGHT_MODE=1)
-- **Sem watermark** e **sem thumbnail**
-- Upload direto do vídeo da fila
-- Menor uso de CPU/disco
+- Aplica watermark com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
+- Mantém upload do arquivo final processado
+- Menor uso de CPU/disco que o modo HQ
 - Ideal para Raspberry Pi 3B/4B com recursos limitados
 
 ### Modo Completo (GN_LIGHT_MODE=0)
 - Aplica watermark no centro
-- Pode gerar thumbnail (opcional)
-- Reencoda vídeo com H.264 CRF 20
+- Reencoda vídeo com H.264 usando `GN_HQ_CRF` + `GN_HQ_PRESET`
 - Maior qualidade visual, porém mais pesado
 
 ---
@@ -480,7 +479,7 @@ grava_nois_system/
 4. Sistema aguarda pós-buffer (3 seg no modo RTSP)
 5. Concatena 9 segmentos (6 pré + 3 pós) em `.mp4`
 6. Enfileira para `queue_raw/` com sidecar JSON
-7. Worker processa: **Light Mode** → sem watermark
+7. Worker processa: **Light Mode** → watermark com encode leve
 8. Registra metadados no backend → recebe `upload_url`
 9. Calcula SHA256 e faz PUT para storage
 10. Notifica backend (finalize) → validação OK
@@ -524,8 +523,8 @@ grava_nois_system/
 # 1. Logs do sistema
 docker logs grava_nois_system
 
-# 2. Logs do FFmpeg
-tail -f logs/ffmpeg.log
+# 2. Logs do FFmpeg por camera
+tail -f logs/ffmpeg_cam01.log
 
 # 3. Teste manual de conectividade
 nc -zv <IP_CAMERA> 554

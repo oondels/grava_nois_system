@@ -2,12 +2,14 @@
 
 ## 1. Capture bootstrap
 
-Para cada `CaptureConfig`:
+O bootstrap de captura é resiliente e não deve bloquear MQTT/presença. Para cada `CaptureConfig`:
 
 1. limpa buffer antigo;
 2. cria diretórios necessários;
-3. inicia FFmpeg;
-4. inicia `SegmentBuffer`.
+3. tenta iniciar FFmpeg;
+4. se FFmpeg iniciar, cria `SegmentBuffer` e marca `camera_status=OK`;
+5. se FFmpeg falhar, marca `camera_status=UNAVAILABLE`, mantém o edge vivo e deixa o supervisor tentar novamente com backoff;
+6. inicia um supervisor por câmera para monitorar `proc.poll()` e reiniciar FFmpeg quando necessário.
 
 Entradas possíveis:
 
@@ -32,6 +34,8 @@ O `SegmentBuffer`:
 - indexa segmentos disponíveis;
 - mantém janela deslizante;
 - remove arquivos excedentes do buffer.
+
+Quando a câmera está indisponível (`proc=None`, processo encerrado ou `segbuf=None`), triggers para aquela câmera são ignorados com warning. Isso evita build sem segmentos e mantém os demais módulos operando.
 
 ## 3. Trigger flow
 
@@ -174,4 +178,5 @@ As rotas protegidas por HMAC são:
 - locks `.lock` devem ser removidos no `finally`;
 - `attempts` deve refletir o estado real de retry;
 - `build_highlight()` não deve correr em paralelo para a mesma câmera;
+- `build_highlight()` só deve ser chamado para câmera com FFmpeg vivo e `SegmentBuffer` ativo;
 - a fila continua sendo filesystem-based, não DB-based.

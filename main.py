@@ -11,6 +11,7 @@ import select
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import subprocess
 import threading
 import queue
 from dataclasses import dataclass, field
@@ -43,10 +44,14 @@ load_dotenv()
 @dataclass
 class CameraRuntime:
     cfg: CaptureConfig
-    proc: object
-    segbuf: SegmentBuffer
+    proc: subprocess.Popen | None = None
+    segbuf: SegmentBuffer | None = None
     capture_lock: threading.Lock = field(default_factory=threading.Lock)
     _cooldown_until: float = field(default=0.0)
+    camera_status: str = "STARTING"
+    last_error: str = ""
+    last_error_at: str = ""
+    restart_attempts: int = 0
 
 
 def _trigger_fan_out(
@@ -59,6 +64,9 @@ def _trigger_fan_out(
 
     def _process_one(rt: CameraRuntime) -> None:
         cfg = rt.cfg
+        if rt.proc is None or rt.proc.poll() is not None or rt.segbuf is None:
+            logger.warning(f"[{cfg.camera_id}][{trigger_id}] câmera indisponível – skipping")
+            return
         if not rt.capture_lock.acquire(blocking=False):
             logger.info(f"[{cfg.camera_id}][{trigger_id}] busy – skipping")
             return
@@ -141,6 +149,60 @@ def _serial_line_is_trigger(line: str, token: str) -> bool:
     return bool(normalized_line) and normalized_line == normalized_token
 
 
+def _camera_supervisor(
+    rt: CameraRuntime,
+    stop_evt: threading.Event,
+    max_backoff: float = 300.0,
+) -> None:
+    """Background thread that monitors and restarts FFmpeg for a camera."""
+    backoff = 5.0
+    while not stop_evt.is_set():
+        needs_start = rt.proc is None or rt.proc.poll() is not None
+        if not needs_start:
+            backoff = 5.0
+            if stop_evt.wait(5.0):
+                break
+            continue
+
+        if rt.camera_status == "OK":
+            rt.camera_status = "ERROR"
+            rt.last_error = "FFmpeg encerrou inesperadamente"
+            rt.last_error_at = datetime.now(timezone.utc).isoformat()
+            logger.warning(
+                f"[{rt.cfg.camera_id}] FFmpeg morreu, tentando reiniciar em {backoff:.0f}s"
+            )
+
+        if stop_evt.wait(backoff):
+            break
+
+        rt.restart_attempts += 1
+        logger.info(f"[{rt.cfg.camera_id}] Tentativa de restart #{rt.restart_attempts}")
+
+        try:
+            if rt.segbuf is not None:
+                try:
+                    rt.segbuf.stop(join_timeout=2)
+                except Exception:
+                    pass
+
+            clear_buffer(rt.cfg)
+            proc = start_ffmpeg(rt.cfg)
+            segbuf = SegmentBuffer(rt.cfg)
+            segbuf.start()
+            rt.proc = proc
+            rt.segbuf = segbuf
+            rt.camera_status = "OK"
+            rt.last_error = ""
+            backoff = 5.0
+            logger.info(f"[{rt.cfg.camera_id}] Câmera reiniciada com sucesso")
+        except Exception as e:
+            rt.camera_status = "UNAVAILABLE"
+            rt.last_error = str(e)
+            rt.last_error_at = datetime.now(timezone.utc).isoformat()
+            logger.error(f"[{rt.cfg.camera_id}] Falha no restart: {e}")
+            backoff = min(backoff * 2, max_backoff)
+
+
 def main() -> int:
     base = Path(__file__).resolve().parent
 
@@ -164,14 +226,124 @@ def main() -> int:
     camera_cfgs = load_capture_configs(base=base, seg_time=seg_time_env)
     logger.info(f"Câmeras ativas: {len(camera_cfgs)}")
 
+    # --- Declarações antecipadas para snapshot MQTT ---
     runtimes: list[CameraRuntime] = []
+    stop_evt = threading.Event()
+    trigger_source = resolve_trigger_source(logger=logger)
+    logger.info(f"Fonte de trigger físico selecionada: {trigger_source}")
+    gpio_enabled = False
+    pico_enabled = False
+
+    # --- MQTT: inicia ANTES das câmeras para publicar status mesmo com falha de hardware ---
+    device_id = (
+        (
+            os.getenv("DEVICE_ID")
+            or os.getenv("GN_DEVICE_ID")
+            or os.getenv("GN_MQTT_CLIENT_ID")
+            or ""
+        ).strip()
+    )
+    client_id = (os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID") or "").strip()
+    venue_id = (os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID") or "").strip()
+
+    mqtt_config = load_mqtt_config()
+    mqtt_client = MQTTClient(mqtt_config)
+    mqtt_presence: DevicePresenceService | None = None
+    mqtt_dispatcher: CommandDispatcher | None = None
+    mqtt_config_service: DeviceConfigService | None = None
+
+    if mqtt_config.enabled and not device_id:
+        mqtt_logger.warning(
+            "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID não foi configurado; presença será ignorada"
+        )
+    elif mqtt_config.enabled:
+        def _runtime_snapshot_provider() -> dict[str, object]:
+            snapshot = build_runtime_snapshot(
+                runtimes=runtimes,
+                light_mode=light_mode,
+                dev_mode=dev_mode,
+                trigger_source=trigger_source,
+            )
+            snapshot["health"]["gpio_enabled"] = gpio_enabled
+            snapshot["health"]["pico_enabled"] = pico_enabled
+            return snapshot
+
+        try:
+            mqtt_presence = DevicePresenceService(
+                mqtt_client,
+                mqtt_config,
+                device_id=device_id,
+                client_id=client_id,
+                venue_id=venue_id,
+                runtime_snapshot_provider=_runtime_snapshot_provider,
+            )
+            mqtt_dispatcher = CommandDispatcher(
+                mqtt_client,
+                device_id=device_id,
+                command_in_topic=mqtt_config.topic_for(device_id, "commands/in"),
+                command_out_topic=mqtt_config.topic_for(device_id, "commands/out"),
+            )
+            mqtt_config_service = DeviceConfigService(
+                mqtt_client,
+                device_id=device_id,
+                client_id=client_id,
+                venue_id=venue_id,
+                desired_topic=mqtt_config.topic_for(device_id, "config/desired"),
+                reported_topic=mqtt_config.topic_for(device_id, "config/reported"),
+                request_topic=mqtt_config.topic_for(device_id, "config/request"),
+                state_topic=mqtt_config.topic_for(device_id, "config/state"),
+                device_secret=(
+                    os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
+                ),
+                agent_version=mqtt_config.agent_version,
+            )
+            if startup_config_report is not None:
+                mqtt_config_service.queue_startup_report(startup_config_report)
+        except ValueError as exc:
+            mqtt_presence = None
+            mqtt_dispatcher = None
+            mqtt_config_service = None
+            mqtt_logger.warning(
+                "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID é inválido para tópico (%s); presença será ignorada",
+                exc,
+            )
+        else:
+            if mqtt_presence.start():
+                mqtt_dispatcher.start()
+                mqtt_config_service.start()
+            elif mqtt_config.enabled:
+                mqtt_logger.warning(
+                    "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
+                )
+
+    # --- Startup de câmeras: não-fatal, com supervisor em background ---
     for cfg in camera_cfgs:
         clear_buffer(cfg)
         cfg.ensure_dirs()
-        proc = start_ffmpeg(cfg)
-        segbuf = SegmentBuffer(cfg)
-        segbuf.start()
-        runtimes.append(CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf))
+        rt = CameraRuntime(cfg=cfg)
+        try:
+            proc = start_ffmpeg(cfg)
+            segbuf = SegmentBuffer(cfg)
+            segbuf.start()
+            rt.proc = proc
+            rt.segbuf = segbuf
+            rt.camera_status = "OK"
+        except Exception as e:
+            logger.error(f"[{cfg.camera_id}] Falha no startup da câmera: {e}")
+            rt.camera_status = "UNAVAILABLE"
+            rt.last_error = str(e)
+            rt.last_error_at = datetime.now(timezone.utc).isoformat()
+        runtimes.append(rt)
+
+    # Supervisor: monitora e reinicia câmeras em background com backoff
+    supervisor_threads: list[threading.Thread] = []
+    for rt in runtimes:
+        t = threading.Thread(
+            target=_camera_supervisor, args=(rt, stop_evt), daemon=True,
+            name=f"supervisor-{rt.cfg.camera_id}",
+        )
+        t.start()
+        supervisor_threads.append(t)
 
     max_workers = op_cfg.triggers.max_workers if op_cfg.triggers.max_workers is not None else len(runtimes)
     trigger_executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
@@ -197,8 +369,7 @@ def main() -> int:
     wm_margin = op_cfg.processing.watermark.margin
     wm_opacity = op_cfg.processing.watermark.opacity
     wm_rel_width = op_cfg.processing.watermark.relative_width
-    primary_runtime = runtimes[0]
-    primary_cfg = primary_runtime.cfg
+    primary_cfg = camera_cfgs[0] if camera_cfgs else None
 
     # inicia 1 worker por câmera (cada um varre apenas sua queue_dir isolada)
     workers: list[ProcessingWorker] = []
@@ -214,24 +385,15 @@ def main() -> int:
             max_attempts=worker_max_attempts,
             wm_margin=wm_margin,
             wm_opacity=wm_opacity,
-            wm_rel_width=wm_rel_width,  # largura da marca d'água relativa ao vídeo. Ex: 0.11 = 11%
+            wm_rel_width=wm_rel_width,
             light_mode=light_mode,
         )
         worker.start()
         workers.append(worker)
         logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
 
-    mqtt_config = load_mqtt_config()
-    mqtt_client = MQTTClient(mqtt_config)
-    mqtt_presence: DevicePresenceService | None = None
-    mqtt_dispatcher: CommandDispatcher | None = None
-    mqtt_config_service: DeviceConfigService | None = None
-
     # --- Disparo por ENTER/GPIO/Pico ---
     trigger_q: queue.Queue[str] = queue.Queue()
-    stop_evt = threading.Event()
-    trigger_source = resolve_trigger_source(logger=logger)
-    logger.info(f"Fonte de trigger físico selecionada: {trigger_source}")
 
     # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
     gpio_cooldown_sec = op_cfg.triggers.gpio.cooldown_seconds
@@ -242,8 +404,6 @@ def main() -> int:
 
     pico_trigger_token = op_cfg.triggers.pico.global_token or "BTN_REPLAY"
     pico_serial_port: str | None = None
-    gpio_enabled = False
-    pico_enabled = False
 
     # Mapa de roteamento: token Pico dedicado → handler de câmera específica.
     # Câmeras sem pico_trigger_token participam apenas do fan-out global.
@@ -265,21 +425,17 @@ def main() -> int:
             token_map[_token.strip().upper()] = _make_handler(_rt)
 
     def _stdin_listener():
-        # Bloqueia em input(); cada ENTER gera um trigger.
         try:
             while not stop_evt.is_set():
                 try:
                     input()
                 except EOFError:
-                    # Sem stdin disponível; encerra listener.
                     break
                 except KeyboardInterrupt:
-                    # Propaga interrupção para o laço principal via stop_evt.
                     stop_evt.set()
                     break
                 trigger_q.put("enter")
         except Exception as e:
-            # Loga e encerra o listener sem derrubar o serviço.
             logger.exception(f"Erro no listener de stdin: {e}")
 
     stdin_t = threading.Thread(target=_stdin_listener, daemon=True)
@@ -306,7 +462,7 @@ def main() -> int:
 
         if gpio_pin is not None:
             try:
-                import pigpio, subprocess
+                import pigpio
 
                 debounce_ms = op_cfg.triggers.gpio.debounce_ms
 
@@ -314,7 +470,6 @@ def main() -> int:
                     p = pigpio.pi()
                     if not p.connected:
                         try:
-                            # Tenta iniciar o daemon sem sudo, então reconecta
                             subprocess.Popen(
                                 ["pigpiod"],
                                 stdout=subprocess.DEVNULL,
@@ -332,7 +487,6 @@ def main() -> int:
                         "pigpiod não está acessível. Rode 'pigpiod' e tente novamente"
                     )
                 else:
-                    # Configura pino como entrada com pull-up; botão ao GND.
                     pi.set_mode(gpio_pin, pigpio.INPUT)
                     pi.set_pull_up_down(gpio_pin, pigpio.PUD_UP)
 
@@ -340,7 +494,6 @@ def main() -> int:
 
                     def on_edge(gpio, level, tick):
                         nonlocal last_ts
-                        # Considera borda de descida (pressionado)
                         if level == 0:
                             now = time.time()
                             if (now - last_ts) * 1000.0 < debounce_ms:
@@ -348,7 +501,6 @@ def main() -> int:
                             last_ts = now
                             trigger_q.put("gpio")
 
-                    # Use FALLING_EDGE para já filtrar nível
                     cb = pi.callback(gpio_pin, pigpio.FALLING_EDGE, on_edge)
                     gpio_enabled = True
                     logger.info(
@@ -422,10 +574,8 @@ def main() -> int:
                                 continue
                             line_upper = line.upper()
                             if line_upper in token_map:
-                                # Token dedicado a uma câmera: roteia diretamente.
                                 token_map[line_upper]()
                             elif _serial_line_is_trigger(line, pico_trigger_token):
-                                # Token global: enfileira fan-out.
                                 logger.info(
                                     f"[Pico] Token '{line_upper}' → fan-out global"
                                 )
@@ -440,85 +590,13 @@ def main() -> int:
         else:
             logger.warning("Trigger Pico selecionado, mas nenhuma porta serial foi detectada")
 
-    device_id = (
-        (
-            os.getenv("DEVICE_ID")
-            or os.getenv("GN_DEVICE_ID")
-            or os.getenv("GN_MQTT_CLIENT_ID")
-            or ""
-        ).strip()
-    )
-    client_id = (os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID") or "").strip()
-    venue_id = (os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID") or "").strip()
-
-    if mqtt_config.enabled and not device_id:
-        mqtt_logger.warning(
-            "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID não foi configurado; presença será ignorada"
-        )
-    elif mqtt_config.enabled:
-        def _runtime_snapshot_provider() -> dict[str, object]:
-            snapshot = build_runtime_snapshot(
-                runtimes=runtimes,
-                light_mode=light_mode,
-                dev_mode=dev_mode,
-                trigger_source=trigger_source,
-            )
-            snapshot["health"]["gpio_enabled"] = gpio_enabled
-            snapshot["health"]["pico_enabled"] = pico_enabled
-            return snapshot
-
-        try:
-            mqtt_presence = DevicePresenceService(
-                mqtt_client,
-                mqtt_config,
-                device_id=device_id,
-                client_id=client_id,
-                venue_id=venue_id,
-                runtime_snapshot_provider=_runtime_snapshot_provider,
-            )
-            mqtt_dispatcher = CommandDispatcher(
-                mqtt_client,
-                device_id=device_id,
-                command_in_topic=mqtt_config.topic_for(device_id, "commands/in"),
-                command_out_topic=mqtt_config.topic_for(device_id, "commands/out"),
-            )
-            mqtt_config_service = DeviceConfigService(
-                mqtt_client,
-                device_id=device_id,
-                client_id=client_id,
-                venue_id=venue_id,
-                desired_topic=mqtt_config.topic_for(device_id, "config/desired"),
-                reported_topic=mqtt_config.topic_for(device_id, "config/reported"),
-                request_topic=mqtt_config.topic_for(device_id, "config/request"),
-                state_topic=mqtt_config.topic_for(device_id, "config/state"),
-                device_secret=(
-                    os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
-                ),
-                agent_version=mqtt_config.agent_version,
-            )
-            if startup_config_report is not None:
-                mqtt_config_service.queue_startup_report(startup_config_report)
-        except ValueError as exc:
-            mqtt_presence = None
-            mqtt_dispatcher = None
-            mqtt_config_service = None
-            mqtt_logger.warning(
-                "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID é inválido para tópico (%s); presença será ignorada",
-                exc,
-            )
+    if primary_cfg is not None:
+        if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:
+            capture_desc = f"{primary_cfg.pre_segments} seg + {primary_cfg.post_segments} seg"
         else:
-            if mqtt_presence.start():
-                mqtt_dispatcher.start()
-                mqtt_config_service.start()
-            elif mqtt_config.enabled:
-                mqtt_logger.warning(
-                    "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
-                )
-
-    if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:
-        capture_desc = f"{primary_cfg.pre_segments} seg + {primary_cfg.post_segments} seg"
+            capture_desc = f"{primary_cfg.pre_seconds}s + {primary_cfg.post_seconds}s"
     else:
-        capture_desc = f"{primary_cfg.pre_seconds}s + {primary_cfg.post_seconds}s"
+        capture_desc = "N/A"
 
     trigger_hints: list[str] = []
     if gpio_enabled and gpio_pin_env:
@@ -534,9 +612,9 @@ def main() -> int:
     logger.info(prompt)
 
     try:
-        while not stop_evt.is_set():  # Verifica se o evento foi acionado (Botao)
+        while not stop_evt.is_set():
             try:
-                trig = trigger_q.get(timeout=0.3)  # Procura triggers
+                trig = trigger_q.get(timeout=0.3)
             except queue.Empty:
                 continue
 
@@ -574,7 +652,6 @@ def main() -> int:
     except KeyboardInterrupt:
         logger.info("Encerrando...")
     finally:
-        # Sinaliza para todos os loops/threads que devem encerrar.
         stop_evt.set()
         if mqtt_dispatcher is not None:
             try:
@@ -593,28 +670,26 @@ def main() -> int:
                 pass
         try:
             if cb is not None:
-                # Cancela o callback do GPIO (para de receber eventos do botão).
                 cb.cancel()
         except Exception:
-            # Ignora falhas durante o desligamento.
             pass
         try:
             if pi is not None:
-                # Fecha a conexão com o daemon pigpio (não mata o pigpiod).
                 pi.stop()
         except Exception:
-            # Ignora falhas durante o desligamento.
             pass
-        # Para a thread do SegmentBuffer e espera até 2s para concluir.
         for runtime in runtimes:
-            runtime.segbuf.stop(join_timeout=2)
+            if runtime.segbuf is not None:
+                try:
+                    runtime.segbuf.stop(join_timeout=2)
+                except Exception:
+                    pass
         for runtime in runtimes:
-            try:
-                # Solicita término do processo ffmpeg (libera o dispositivo de vídeo).
-                runtime.proc.terminate()
-            except Exception:
-                # Ignora falhas durante o desligamento.
-                pass
+            if runtime.proc is not None:
+                try:
+                    runtime.proc.terminate()
+                except Exception:
+                    pass
         for worker in workers:
             try:
                 worker.stop()

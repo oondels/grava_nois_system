@@ -1,10 +1,10 @@
 # Grava Nóis — Capture MVP
 
-> Objetivo: capturar replays com pré/pós-buffer, gerar um highlight, enfileirar para tratamento (marca d’água + thumbnail + metadados) para rodar em Raspberry Pi.
+> Objetivo: capturar replays com pré/pós-buffer, gerar um highlight, enfileirar para tratamento local e upload posterior, mantendo o edge resiliente a falhas de câmera, rede e backend.
 
-- **Arquivos principais**: `video_core.py` (núcleo) e `capture_service.py` (serviço + worker)
+- **Arquivos principais**: `main.py`, `src/video/*`, `src/workers/processing_worker.py` e `src/services/mqtt/*`
 - **Dependências**: Python 3.10+, FFmpeg/ffprobe
-- **Fluxo**: _Captura contínua_ → _Highlight on-demand_ → _Fila_ → _Watermark + Thumbnail_ → _Registro no backend (URL assinada)_
+- **Fluxo**: _MQTT/status_ → _Captura contínua_ → _Highlight on-demand_ → _Fila local_ → _Watermark_ → _Registro no backend_ → _Upload por URL assinada_
 
 ---
 
@@ -24,10 +24,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-# (MoviePy não é necessário: watermark/thumbnail implementados com ffmpeg)
+# (MoviePy não é necessário: watermark implementado com ffmpeg)
 
 export GN_GPIO_PIN=17                 # ou mantenha no .env
-python3 capture_service.py            # ENTER ou botão no BCM 17 dispara
+python3 main.py                       # ENTER ou botão no BCM 17/Pico dispara
 ```
 
 Detalhes completos estão nas seções “Como rodar” e “GPIO (botão físico)” abaixo.
@@ -35,17 +35,20 @@ Detalhes completos estão nas seções “Como rodar” e “GPIO (botão físic
 Modo leve (recomendado no Raspberry Pi 3B/1GB):
 
 ```
-export GN_LIGHT_MODE=1               # pular watermark/thumbnail, upload direto
-python3 capture_service.py
+export GN_LIGHT_MODE=1               # encode mais leve para watermark/processamento
+python3 main.py
 ```
 
 ## 1) Visão Geral do Fluxo
 
 ```
-[ Câmera /dev/video0 ]
+[ MQTT Presence/State ]
        │
        ▼
-FFmpeg (segmentos de 1s)  →  /tmp/recorded_videos/buffer%06d.mp4
+[ Câmera RTSP ou /dev/video0 ]
+       │
+       ▼
+FFmpeg (segmentos de 1s)  →  /dev/shm/grn_buffer/buffer%06d.ts
        │       ▲
        │       └── Thread indexadora (SegmentBuffer)
        │
@@ -56,9 +59,9 @@ ENTER/GPIO → build_highlight() concatena os últimos (pré+pos) → recorded_c
                                ▼
                      Worker varredura (ProcessingWorker)
                                │
-        add_image_watermark()  │  generate_thumbnail()
-             ▼                 │         ▼
-       highlights_wm/  ◄────┴─────────┘
+        add_image_watermark()
+             ▼
+       highlights_wm/
              │
              ├── POST /api/videos/metadados → URL assinada
              └── (próx.) uploader usa URL → storage
@@ -66,24 +69,21 @@ ENTER/GPIO → build_highlight() concatena os últimos (pré+pos) → recorded_c
 
 **Diretórios (por padrão):**
 
-- `buffer_dir`: `/tmp/recorded_videos` — segmentos de 1s do FFmpeg.
+- `buffer_dir`: `/dev/shm/grn_buffer` ou `GN_BUFFER_DIR` — segmentos de 1s do FFmpeg.
 - `clips_dir`: `./recorded_clips` — _highlights_ gerados na hora do clique.
 - `queue_dir`: `./queue_raw` — fila de processamento (entrada do worker).
-- `highlights_wm/` — saída final do worker (com watermark + thumbnail).
+- `highlights_wm/` — saída final do worker com watermark.
 - `failed_clips/` — entrada que falhou após retentativas.
 
 ### 1.1) Fonte de vídeo (RTSP x V4L2)
 
-O código atual está configurado para fonte **RTSP (câmera dedicada)** dentro de `start_ffmpeg()` em `video_core.py`.
+O código atual resolve fontes em `src/config/settings.py` e inicia captura em `src/video/capture.py`.
 
-- Para RTSP, edite a URL dentro do array `ffmpeg_cmd` (já ativo no código):
+- Para RTSP, configure `GN_RTSP_URL`, `GN_RTSP_URLS`, `GN_CAMERAS_JSON` ou `config.json`.
 
-  - Linha com `-i` → `rtsp://<user>:<pass>@<host>:<port>/cam/realmonitor?channel=1&subtype=0`
-  - Ajuste credenciais/host/porta conforme sua câmera.
+- Para usar câmera local (V4L2, ex.: `/dev/video0`), deixe fontes RTSP vazias ou configure `sourceType=v4l2`.
 
-- Para usar a câmera local (V4L2, ex.: `/dev/video0`), use o bloco comentado “Old -> Camera do notebook” no mesmo método, e comente o bloco RTSP. O campo `CaptureConfig.device` é respeitado nesse modo.
-
-Observação: `stdout`/`stderr` do FFmpeg estão direcionados para `DEVNULL` para reduzir ruído; habilite logs se necessário.
+Observação: `stdout`/`stderr` do FFmpeg vão para `logs/ffmpeg_<camera_id>.log`, com credenciais RTSP sanitizadas.
 
 ---
 
@@ -105,13 +105,14 @@ Observação: `stdout`/`stderr` do FFmpeg estão direcionados para `DEVNULL` par
    ```
 
 3. **Estruture os arquivos** no mesmo diretório:
-   - `video_core.py`
-   - `capture_service.py`
+   - `main.py`
+   - `src/video/`
+   - `src/workers/`
    - `files/grava-nois.png` (logo para a marca d’água)
 4. **Execute**:
 
    ```
-   python3 capture_service.py
+   python3 main.py
    ```
 
 5. **Gerar highlight**: pressione **ENTER/GPIO**. O sistema concatena **40s antes** + **10s depois** (ajustável) e enfileira para o worker.
@@ -120,13 +121,12 @@ Observação: `stdout`/`stderr` do FFmpeg estão direcionados para `DEVNULL` par
 
 ### 2.1) Fluxo concreto (passo a passo)
 
-1. Recorder (FFmpeg) grava segmentos `buffer%06d.mp4` em `buffer_dir` a cada `seg_time` segundo(s).
+1. Recorder (FFmpeg) grava segmentos `buffer%06d.ts` em `buffer_dir` a cada `seg_time` segundo(s).
 2. `SegmentBuffer` (thread) indexa e mantém apenas os últimos `max_buffer_seconds / seg_time` segmentos, removendo excedentes do disco.
 3. Ao pressionar ENTER, `build_highlight()` aguarda `post_seconds`, seleciona `pre_seconds + post_seconds` de segmentos, cria `to_concat_*.txt` e concatena com `ffmpeg -f concat -c copy` para `clips_dir/highlight_*.mp4`.
 4. `enqueue_clip()` move o highlight para `queue_dir` e grava sidecar JSON com metadados de `ffprobe` e hash `sha256`.
 5. `ProcessingWorker` varre `queue_dir` periodicamente, faz lock com `.lock`, e para cada item:
    - Aplica watermark com ffmpeg para um `*.wm_tmp.mp4` e faz `replace()` atômico para `highlights_wm/highlight_*.mp4`.
-   - Gera `highlights_wm/highlight_*.jpg` (thumbnail).
    - Atualiza o JSON na fila com `status="watermarked"`, caminhos de saída e `meta_wm` (ffprobe do arquivo final).
    - Envia POST `GN_API_BASE/api/videos/metadados` com metadados do arquivo final; salva a resposta no sidecar em `remote_registration`.
    - Remove o `.mp4` original da fila (o `.json` permanece como registro de processamento).
@@ -160,7 +160,6 @@ Após o worker, o JSON recebe:
   "status": "watermarked",
   "updated_at": "2025-08-17T19:51:10Z",
   "wm_path": "/.../highlights_wm/highlight_...mp4",
-  "thumbnail_path": "/.../highlights_wm/highlight_....jpg",
   "meta_wm": { "codec": "h264", "width": 1280, "height": 720, "fps": 30, "duration_sec": 50.0 }
 }
 ```
@@ -176,19 +175,19 @@ Após o worker, o JSON recebe:
 
 ---
 
-## 5) Documentação de Código — `video_core.py`
+## 5) Documentação de Código — módulos atuais
 
-### `CaptureConfig` (dataclass)
+### `CaptureConfig` (`src/config/settings.py`)
 
 - **Campos**:
-  - `buffer_dir: Path` — onde ficam os segmentos `buffer%06d.mp4`.
+  - `buffer_dir: Path` — onde ficam os segmentos `buffer%06d.ts`.
   - `clips_dir: Path` — onde nasce o highlight após concat.
   - `queue_dir: Path` — fila para processamento (entrada do worker).
   - `device: str = "/dev/video0"` — dispositivo V4L2.
   - `seg_time: int = 1` — segundos por segmento.
-  - `pre_seconds: int = 40`, `post_seconds: int = 10` — janela do highlight.
-  - `scan_interval: float = 0.5` — período da indexação.
-  - `max_buffer_seconds: int = 80` — retenção máxima no disco.
+  - `pre_segments` e `post_segments` — janela do highlight para RTSP.
+  - `scan_interval` — período da indexação.
+  - `max_buffer_seconds` — retenção máxima no disco.
 - **Propriedades/Métodos**:
   - `max_segments` — `max(1, max_buffer_seconds/seg_time)`.
   - `ensure_dirs()` — cria `buffer_dir`, `clips_dir`, `queue_dir`.
@@ -207,7 +206,7 @@ Calcula o próximo número inicial para `-segment_start_number` com base nos arq
 - Logs detalhados de cada tentativa (sucesso/falha)
 - Configurável via `GN_RTSP_MAX_RETRIES` e `GN_RTSP_TIMEOUT`
 
-**Propósito**: Resolver problema de inicialização quando Docker inicia antes da câmera estar pronta (ex: após queda de energia).
+**Propósito**: diagnosticar disponibilidade inicial da câmera. Falha nessa etapa não deve derrubar o edge; `main.py` marca a câmera como `UNAVAILABLE` e o supervisor tenta novamente em background.
 
 **Retorno**: `True` se câmera acessível, `False` caso contrário.
 
@@ -216,13 +215,13 @@ Calcula o próximo número inicial para `-segment_start_number` com base nos arq
 Inicia o FFmpeg em modo segmentado com:
 
 - **Health check RTSP (NOVO)**: Antes de iniciar FFmpeg, verifica conectividade com câmera via `check_rtsp_connectivity()`
-- Aguarda até 50s (configurável) pela câmera estar disponível
-- Se câmera não estiver acessível, lança `RuntimeError` com mensagens de diagnóstico detalhadas
+- Usa tentativas e timeout configuráveis pela configuração operacional
+- Se câmera não estiver acessível, lança `RuntimeError` para o chamador marcar estado degradado
 - `f v4l2 -i /dev/video0` (modo V4L2) ou `rtsp://...` (modo RTSP)
 - H.264 `ultrafast` + `zerolatency`
 - `force_key_frames expr:gte(t,n_forced*seg_time)`
 - `f segment -segment_time seg_time -reset_timestamps 1`
-- **Logging robusto (NOVO)**: stdout/stderr do FFmpeg salvos em `logs/ffmpeg.log` (não mais `/dev/null`)
+- **Logging robusto**: stdout/stderr do FFmpeg salvos em `logs/ffmpeg_<camera_id>.log`
 
 **Retorno**: `Popen` do processo do FFmpeg.
 
@@ -269,16 +268,16 @@ Gera uma imagem `.jpg` (meio do vídeo ou tempo específico) usando ffmpeg (`-ss
 
 ---
 
-## 6) Documentação de Código — `capture_service.py`
+## 6) Documentação de Código — runtime atual
 
 ### `ProcessingWorker`
 
-Worker de varredura de diretório para aplicar watermark e gerar thumbnail. Em modo leve, faz upload direto do vídeo sem pós-processamento.
+Worker de varredura de diretório para preparar e enviar highlights. Em modo leve, mantém watermark, mas usa parâmetros de encode mais leves (`GN_LM_CRF`/`GN_LM_PRESET`).
 
 **`__init__(queue_dir, out_wm_dir, failed_dir, watermark_path, scan_interval=1.5, max_attempts=3, wm_margin=24, wm_opacity=0.6, wm_rel_width=0.2, *, light_mode=False)`**
 
 - **queue_dir**: pasta de entrada (`queue_raw/`).
-- **out_wm_dir**: pasta de saída com watermark (`highlights_wm/`). Ignorada quando `light_mode=True`.
+- **out_wm_dir**: pasta de saída com watermark (`highlights_wm/`) usada nos modos normal e leve.
 - **failed_dir**: pasta para falhas definitivas (`failed_clips/`).
 - **watermark_path**: caminho do PNG da logo.
 - **scan_interval**: período da varredura.
@@ -298,8 +297,8 @@ Worker de varredura de diretório para aplicar watermark e gerar thumbnail. Em m
 
 **`_process_one(mp4, meta_path)`**:
 
-- Modo normal: aplica watermark (centro) e gera thumbnail; atualiza sidecar (`status="watermarked"`, caminhos e `meta_wm`).
-- Modo leve: atualiza sidecar para `status="ready_for_upload"` e faz upload diretamente do `mp4` da fila (sem reencode/thumbnail). Após sucesso, notifica o backend e remove o arquivo da fila.
+- Modo normal: aplica watermark com encode HQ; atualiza sidecar (`status="watermarked"`, caminhos e `meta_wm`).
+- Modo leve: aplica watermark com encode mais leve; após sucesso, registra/upload/finaliza no backend e remove artefatos locais.
 
 **`_handle_failure(mp4, meta_path, err)`**:
 
@@ -307,11 +306,14 @@ Worker de varredura de diretório para aplicar watermark e gerar thumbnail. Em m
 - Se `attempts >= max_attempts` move mp4/json para `failed_dir` e registra `.error.txt`.
 - Caso contrário, mantém na fila com `status="queued_retry"` e aplica _backoff_ simples.
 
-### `main() -> int`
+### `main.main() -> int`
 
 - Monta `CaptureConfig` e cria diretórios.
-- Inicia FFmpeg + `SegmentBuffer`.
-- Inicia `ProcessingWorker`.
+- Inicializa MQTT/presença/config antes de iniciar câmeras, quando habilitado.
+- Tenta iniciar FFmpeg + `SegmentBuffer` por câmera sem abortar o processo em caso de falha.
+- Marca câmera indisponível como `camera_status=UNAVAILABLE` e mantém status MQTT ativo.
+- Inicia supervisor por câmera para retry/backoff de FFmpeg.
+- Inicia `ProcessingWorker` por câmera.
 - Loop principal: **ENTER** → `build_highlight()` → `enqueue_clip()`.
 - Finalização: `stop()`/`terminate()` com `try/finally`.
 
@@ -343,7 +345,7 @@ pigpiod                        # inicia o daemon (sem sudo)
 export GN_GPIO_PIN=17          # pino BCM
 export GN_GPIO_DEBOUNCE_MS=300 # opcional
 export GN_GPIO_COOLDOWN_SEC=120 # opcional; padrão 120
-python3 capture_service.py
+python3 main.py
 ```
 
 Se `pigpio`/`pigpiod` não estiver disponível, o serviço continua funcionando apenas com ENTER.
@@ -354,7 +356,7 @@ Se `pigpio`/`pigpiod` não estiver disponível, o serviço continua funcionando 
 
 - ✅ **GPIO**: botão físico implementado (pigpio) — dispara `build_highlight()`.
 - ✅ **Uploader**: worker implementado com URL pré-assinada do backend.
-- ✅ **Health check RTSP**: retry automático para evitar falhas de inicialização.
+- ✅ **Supervisor de câmera**: falha de FFmpeg não derruba o edge; retry em background.
 - ✅ **Logging robusto**: FFmpeg logs salvos em arquivo para debug.
 - **Logs estruturados**: logging em JSON e contadores de sucesso/falha.
 - **Watchdog**: substituir varredura por eventos de filesystem para reduzir latência.
@@ -384,8 +386,8 @@ Se `pigpio`/`pigpiod` não estiver disponível, o serviço continua funcionando 
 # 1. Verificar logs do sistema
 docker logs grava_nois_system
 
-# 2. Verificar logs do FFmpeg
-tail -f logs/ffmpeg.log
+# 2. Verificar logs do FFmpeg por câmera
+tail -f logs/ffmpeg_cam01.log
 
 # 3. Testar conectividade TCP com câmera
 nc -zv <IP_CAMERA> 554
@@ -394,11 +396,11 @@ nc -zv <IP_CAMERA> 554
 docker ps  # Coluna STATUS deve mostrar "healthy"
 ```
 
-**Solução implementada** (v2.0+): O sistema agora possui retry automático:
-- Aguarda até 50s (10 tentativas × 5s) pela câmera estar disponível
-- Logs detalhados de cada tentativa de conexão
-- Docker reinicia automaticamente se FFmpeg falhar
-- Health check com período de inicialização de 60s
+**Solução implementada**: O sistema agora possui startup não-fatal e supervisor:
+- falha de câmera vira `camera_status=UNAVAILABLE` no MQTT;
+- logs detalhados registram cada tentativa de conexão;
+- o supervisor tenta reiniciar FFmpeg com backoff;
+- o healthcheck Docker mede o processo Python, não FFmpeg.
 
 **Ajustar configuração** (se necessário):
 ```bash
@@ -419,7 +421,7 @@ MVP interno do projeto **Grava Nóis**. Uso restrito ao time até formalização
 
 ## 11) Integração com Backend (registro de metadados)
 
-Após a geração de watermark e thumbnail, o worker executa uma requisição para registrar a intenção de criar o clipe (sem fazer upload do vídeo).
+Após a geração do arquivo final com watermark, o worker executa uma requisição para registrar a intenção de criar o clipe (sem fazer upload do vídeo nessa etapa).
 
 - Endpoint: `POST {API_BASE}/api/videos/metadados`
 - Requisição: JSON com metadados principais do arquivo final (`file_name`, `size_bytes`, `sha256`, `mime_type`, `meta` com `{codec,width,height,fps,duration_sec}`, além de `pre_seconds`/`post_seconds`).

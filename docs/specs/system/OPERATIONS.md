@@ -8,10 +8,16 @@ No startup, o serviço:
 
 - carrega env;
 - resolve câmeras ativas;
-- limpa buffer local;
-- inicia FFmpeg e `SegmentBuffer` por câmera;
+- inicializa MQTT antes das câmeras, quando habilitado e com `DEVICE_ID` válido;
+- publica presença/heartbeat/state em modo degradado mesmo que nenhuma câmera suba;
+- limpa buffer local por câmera;
+- tenta iniciar FFmpeg e `SegmentBuffer` por câmera sem abortar o processo em caso de falha;
+- marca câmeras indisponíveis com `camera_status=UNAVAILABLE` e erro sanitizado no snapshot MQTT;
+- inicia supervisor por câmera em background para reiniciar FFmpeg com backoff;
 - inicia um `ProcessingWorker` por câmera;
 - inicializa listeners de ENTER/GPIO/Pico.
+
+Falha de hardware de câmera, rede do broker ou API não deve ser condição bloqueante do runtime principal. O container deve permanecer vivo enquanto o processo Python estiver executando; saúde de câmera é reportada por payload MQTT e logs.
 
 ## Shutdown behavior
 
@@ -31,6 +37,7 @@ Práticas:
 - truncar assinatura HMAC;
 - não expor `DEVICE_SECRET`;
 - sanitizar `upload_url`/URLs assinadas antes de persistir respostas de backend em sidecars de retry;
+- sanitizar credenciais RTSP antes de gravar comandos FFmpeg em `logs/ffmpeg_<camera_id>.log`;
 - registrar contexto suficiente para retry e auditoria local.
 - manter `mqtt.log` separado para heartbeat/presença e evitar ruído em `app.log`.
 
@@ -70,6 +77,7 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - geracao real de mp4 final a partir da camera configurada, sem Docker, quando `GN_RUN_CAMERA_INTEGRATION=1`.
 - composição mobile/vertical do FFmpeg.
 - bootstrap e payload mínimo de presença MQTT.
+- startup resiliente com MQTT antes das câmeras e câmera não-fatal.
 - bloqueio explícito de command/control na fase 1.
 - validação, persistência pending/applied e reports da configuração remota.
 
@@ -80,8 +88,8 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - conectividade com backend afeta retry e descarte;
 - o worker é sensível a sidecars inconsistentes;
 - há `.pyc` em `tests/__pycache__` e `src/__pycache__` no workspace, mas não fazem parte do contrato de runtime;
-- existe `docker-compose.yml` no repositório do system com mudança local não relacionada, então commits devem ser isolados.
 - MQTT pode ficar habilitado sem broker disponível; isso deve degradar para warning/log e seguir com o pipeline principal.
+- câmera pode ficar `UNAVAILABLE` no boot; o supervisor tenta reiniciar FFmpeg sem exigir restart do container.
 - remote config depende de `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura; sem segredo, mensagens `config/desired` são rejeitadas.
 
 ## Audit cautions

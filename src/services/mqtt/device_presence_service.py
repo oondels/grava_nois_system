@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from src.config.settings import MQTTConfig
@@ -99,6 +101,13 @@ class DevicePresenceService:
         payload = self.build_presence_payload(status="online")
         self.mqtt_client.publish_json(self._heartbeat_topic, payload, retain=False)
 
+    def _safe_snapshot(self) -> dict[str, Any]:
+        try:
+            return self.runtime_snapshot_provider()
+        except Exception:
+            mqtt_logger.exception("Falha ao obter runtime snapshot; usando fallback vazio")
+            return {"queue_size": 0, "health": {}, "cameras": [], "runtime": {}}
+
     def build_presence_payload(
         self,
         *,
@@ -106,7 +115,7 @@ class DevicePresenceService:
         disconnect_reason: str | None = None,
     ) -> dict[str, Any]:
         now = self._now_iso()
-        snapshot = self.runtime_snapshot_provider()
+        snapshot = self._safe_snapshot()
         payload = {
             "device_id": self.device_id,
             "client_id": self.client_id,
@@ -127,7 +136,7 @@ class DevicePresenceService:
 
     def build_state_payload(self) -> dict[str, Any]:
         now = self._now_iso()
-        snapshot = self.runtime_snapshot_provider()
+        snapshot = self._safe_snapshot()
         return {
             "device_id": self.device_id,
             "client_id": self.client_id,
@@ -146,8 +155,11 @@ class DevicePresenceService:
         interval = max(5, self.config.heartbeat_interval_sec)
         mqtt_logger.info("Heartbeat MQTT iniciado com intervalo de %ss", interval)
         while not self._stop.wait(interval):
-            self.publish_heartbeat()
-            self.publish_state()
+            try:
+                self.publish_heartbeat()
+                self.publish_state()
+            except Exception:
+                mqtt_logger.exception("Erro no ciclo de heartbeat MQTT")
 
     @staticmethod
     def _now_iso() -> str:
@@ -165,8 +177,14 @@ def build_runtime_snapshot(
     total_queue_size = 0
 
     for runtime in runtimes:
-        queue_size = sum(1 for _ in runtime.cfg.queue_dir.glob("*.mp4"))
+        try:
+            queue_size = sum(1 for _ in runtime.cfg.queue_dir.glob("*.mp4"))
+        except Exception:
+            queue_size = 0
         total_queue_size += queue_size
+        ffmpeg_alive = (
+            runtime.proc is not None and runtime.proc.poll() is None
+        )
         cameras.append(
             {
                 "camera_id": runtime.cfg.camera_id,
@@ -174,9 +192,43 @@ def build_runtime_snapshot(
                 "source_type": runtime.cfg.source_type,
                 "queue_size": queue_size,
                 "capture_busy": runtime.capture_lock.locked(),
-                "ffmpeg_alive": runtime.proc.poll() is None,
+                "ffmpeg_alive": ffmpeg_alive,
+                "camera_status": getattr(runtime, "camera_status", "UNKNOWN"),
+                "last_error": getattr(runtime, "last_error", ""),
+                "last_error_at": getattr(runtime, "last_error_at", ""),
+                "restart_attempts": getattr(runtime, "restart_attempts", 0),
             }
         )
+
+    # --- Métricas de fila e armazenamento ---
+    base_dir = Path(__file__).resolve().parent.parent.parent.parent
+    failed_clips_count = 0
+    upload_failed_count = 0
+    try:
+        failed_dir = base_dir / "failed_clips"
+        if failed_dir.is_dir():
+            failed_clips_count = sum(1 for _ in failed_dir.glob("*.mp4"))
+        upload_failed_dir = failed_dir / "upload_failed"
+        if upload_failed_dir.is_dir():
+            upload_failed_count = sum(1 for _ in upload_failed_dir.glob("*.mp4"))
+    except Exception:
+        pass
+
+    disk_free_bytes = 0
+    disk_total_bytes = 0
+    storage_status = "UNKNOWN"
+    try:
+        usage = shutil.disk_usage(base_dir)
+        disk_free_bytes = usage.free
+        disk_total_bytes = usage.total
+        if disk_free_bytes < 200_000_000:
+            storage_status = "CRITICAL"
+        elif disk_free_bytes < 1_000_000_000:
+            storage_status = "LOW_SPACE"
+        else:
+            storage_status = "OK"
+    except Exception:
+        pass
 
     return {
         "queue_size": total_queue_size,
@@ -184,6 +236,11 @@ def build_runtime_snapshot(
             "camera_count": len(runtimes),
             "online_cameras": sum(1 for cam in cameras if cam["ffmpeg_alive"]),
             "trigger_source": trigger_source,
+            "failed_clips_count": failed_clips_count,
+            "upload_failed_count": upload_failed_count,
+            "disk_free_bytes": disk_free_bytes,
+            "disk_total_bytes": disk_total_bytes,
+            "storage_status": storage_status,
         },
         "cameras": cameras,
         "runtime": {

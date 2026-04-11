@@ -105,8 +105,12 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 
 - MQTT deve poder ser desligado integralmente por configuração;
 - indisponibilidade do broker não pode interromper captura, trigger, worker ou retry local;
+- falha de câmera, FFmpeg, backend, S3 ou internet não pode impedir publicação de status MQTT quando o broker estiver acessível;
+- MQTT deve iniciar antes das câmeras para reportar `UNAVAILABLE`/`ERROR` em vez de deixar o device invisível;
 - `presence` deve distinguir `online`, `offline` limpo e `offline` por queda abrupta via `last will`;
 - `heartbeat` deve atualizar `last_seen` sem gerar ruído excessivo de log;
+- `heartbeat` deve sobreviver a exceções de snapshot e publicar fallback seguro quando necessário;
+- `state` deve expor saúde por câmera (`camera_status`, `ffmpeg_alive`, `restart_attempts`) e métricas de fila/storage;
 - `mqtt.log` deve ser separado do `app.log`;
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
 - `device_id` usado em tópicos MQTT deve rejeitar separadores de nível e wildcards (`/`, `+`, `#`);

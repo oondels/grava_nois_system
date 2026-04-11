@@ -148,6 +148,9 @@ Observações:
 
 - `last will` marca `offline` quando a conexão cai abruptamente;
 - o edge continua operando sem broker;
+- o cliente MQTT usa reconexão explícita com backoff do Paho (`reconnect_delay_set(min_delay=1, max_delay=120)`);
+- mensagens recebidas são despachadas para uma thread dedicada de handlers, evitando I/O síncrono no loop Paho;
+- heartbeat e state são protegidos contra exceções no snapshot provider;
 - a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.
 - o `device_id` usado no namespace `grn/devices/{device_id}/...` deve ser um único nível de tópico; valores com `/`, `+`, `#` ou byte nulo são rejeitados na montagem do tópico e fazem apenas a presença MQTT ser ignorada.
 
@@ -161,7 +164,7 @@ Exemplos rápidos por tópico:
   - payload típico: mesmo envelope base de presença com `status=online`
 - `state`
   - tópico: `grn/devices/edge-test-01/state`
-  - payload típico: envelope expandido com `cameras[]` e `runtime`
+  - payload típico: envelope expandido com `cameras[]`, `runtime`, `camera_status`, `restart_attempts` e métricas de storage/fila (`failed_clips_count`, `upload_failed_count`, `disk_free_bytes`, `storage_status`)
 - `events`
   - tópico reservado para eventos operacionais futuros; fase 1 não publica nele
 - `alerts`
