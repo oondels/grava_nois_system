@@ -826,6 +826,16 @@ def _validate_allowlist(value: Any, path: tuple[str, ...] = ()) -> list[str]:
     return errors
 
 
+def _sanitize_rtsp_url_for_mqtt(url: str | None) -> str | None:
+    """Strip inline credentials from RTSP URLs before MQTT publication."""
+    if not url or not isinstance(url, str):
+        return url
+    stripped = url.strip()
+    if stripped.startswith("rtsp://") and "@" in stripped.split("://", 1)[1].split("/", 1)[0]:
+        return "[CREDENTIALS_IN_ENV]"
+    return url
+
+
 def _requires_restart(current: dict[str, Any], desired: dict[str, Any]) -> bool:
     for restart_path in _RESTART_PATHS:
         if _has_path(desired, restart_path) and _get_by_path(
@@ -935,7 +945,7 @@ def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, A
                 "name": camera.name,
                 "enabled": camera.enabled,
                 "sourceType": camera.source_type,
-                "rtspUrl": camera.rtsp_url,
+                "rtspUrl": _sanitize_rtsp_url_for_mqtt(camera.rtsp_url),
                 "picoTriggerToken": camera.pico_trigger_token,
                 "preSegments": camera.pre_segments,
                 "postSegments": camera.post_segments,

@@ -225,6 +225,10 @@ Estados reportados:
 
 O backend continua sendo a fonte de verdade futura para desired/applied config. MQTT é apenas canal de entrega e reporte.
 
+### Sanitização de dados publicados
+
+Antes de publicar `config.state` ou `config.reported` via MQTT, o edge sanitiza URLs RTSP que contenham credenciais inline (`rtsp://user:pass@host`), substituindo por `[CREDENTIALS_IN_ENV]`. Isso protege contra configs legadas que tenham sido configuradas manualmente com credenciais em texto plano no `config.json`.
+
 ---
 
 ## Migração de instalações existentes
