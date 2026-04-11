@@ -12,7 +12,7 @@
 #   ./env_to_config.sh .env config.json       # explícito
 #   ./env_to_config.sh .env /tmp/cfg.json     # saída alternativa
 #   ./env_to_config.sh .env config.json --dry-run  # só exibe, não grava
-#   sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/config.json
+#   sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.json
 #
 # O que este script faz:
 #   - Lê variáveis operacionais do .env e gera config.json equivalente
@@ -80,13 +80,13 @@ fi
 
 if [[ "$ENV_FILE" == "$DEFAULT_ENV_FILE" && ! -f "$ENV_FILE" && -f "$LEGACY_ENV_FILE" ]]; then
     ENV_FILE="$LEGACY_ENV_FILE"
-    OUTPUT_FILE="/opt/.grn/config/config.json"
+    OUTPUT_FILE="/opt/.grn/config/runtime/config.json"
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "ERRO: arquivo de ambiente não encontrado: $ENV_FILE" >&2
     echo "Dica: copie .env.example para .env e configure antes de executar." >&2
-    echo "Em devices legados, tente: sudo $0 /opt/.grn/config/.env /opt/.grn/config/config.json" >&2
+    echo "Em devices legados, tente: sudo $0 /opt/.grn/config/.env /opt/.grn/config/runtime/config.json" >&2
     exit 1
 fi
 
@@ -206,6 +206,13 @@ def _bool(key: str, default: bool, *aliases: str) -> bool:
     val = _str(key, "", *aliases)
     if not val:
         return default
+    return val.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _nullable_bool(key: str, *aliases: str):
+    val = _str(key, "", *aliases)
+    if not val:
+        return None
     return val.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
@@ -446,6 +453,13 @@ max_workers = _int_or_none("GN_TRIGGER_MAX_WORKERS")
 
 # fps pode ser string vazia (sem filtro)
 fps_raw = env.get("GN_RTSP_FPS", "").strip()
+rtsp_profile_raw = _str("GN_RTSP_PROFILE", "").strip().lower()
+rtsp_profile = rtsp_profile_raw or None
+if rtsp_profile not in {None, "hq", "compatible"}:
+    warnings.append(
+        f"GN_RTSP_PROFILE inválido ({rtsp_profile_raw!r}) — usando null para inferência automática"
+    )
+    rtsp_profile = None
 
 # ---------------------------------------------------------------------------
 # Monta config dict
@@ -461,12 +475,15 @@ config: dict = {
             "maxRetries":            _int("GN_RTSP_MAX_RETRIES", 10),
             "timeoutSeconds":        _int("GN_RTSP_TIMEOUT", 5),
             "startupCheckSeconds":   max(0.1, _float("GN_FFMPEG_STARTUP_CHECK_SEC", 1.0)),
-            "reencode":              _bool("GN_RTSP_REENCODE", True),
+            "profile":               rtsp_profile,
+            "reencode":              _nullable_bool("GN_RTSP_REENCODE"),
             "fps":                   fps_raw,
             "gop":                   max(1, _int("GN_RTSP_GOP", 25)),
             "preset":                _str("GN_RTSP_PRESET", "veryfast") or "veryfast",
             "crf":                   _int_range("GN_RTSP_CRF", 23, 0, 51),
             "useWallclockTimestamps":_bool("GN_RTSP_USE_WALLCLOCK", False),
+            "lowLatencyInput":       _bool("GN_RTSP_LOW_LATENCY_INPUT", False),
+            "lowDelayCodecFlags":    _bool("GN_RTSP_LOW_DELAY_CODEC_FLAGS", False),
         },
         "v4l2": {
             "device":    "/dev/video0",
@@ -490,10 +507,12 @@ config: dict = {
     "processing": {
         "lightMode":      _bool("GN_LIGHT_MODE", False),
         "maxAttempts":    max(1, _int("GN_MAX_ATTEMPTS", 3)),
-        "mobileFormat":   _bool("MOBILE_FORMAT", True),
         "verticalFormat": _bool("VERTICAL_FORMAT", True),
+        "hqCrf":          _int_range("GN_HQ_CRF", 18, 0, 51),
+        "hqPreset":       _str("GN_HQ_PRESET", "medium") or "medium",
+        "lmCrf":          _int_range("GN_LM_CRF", 26, 0, 51),
+        "lmPreset":       _str("GN_LM_PRESET", "veryfast") or "veryfast",
         "watermark": {
-            "preset":        _str("GN_WM_PRESET", "veryfast") or "veryfast",
             "relativeWidth": max(0.01, _float("GN_WM_REL_WIDTH", 0.18)),
             "opacity":       max(0.0, min(1.0, _float("GN_WM_OPACITY", 0.8))),
             "margin":        _int_range("GN_WM_MARGIN", 24, 0, 500),
@@ -565,6 +584,7 @@ if dry_run:
 # Grava o arquivo
 # ---------------------------------------------------------------------------
 output_path = Path(output_file)
+output_path.parent.mkdir(parents=True, exist_ok=True)
 
 if output_path.exists():
     backup_path = output_path.with_suffix(".json.bak")
@@ -595,7 +615,7 @@ if has_env_refs:
 if str(output_path) != "config.json":
     print(f"  {step_no}. Se o arquivo não estiver na raiz runtime do container, monte-o no")
     print("     compose e defina GN_CONFIG_PATH para o path visto dentro do container.")
-    print("     Ex: GN_CONFIG_PATH=/usr/src/app/config.json")
+    print("     Ex: GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json")
     step_no += 1
     print(f"  {step_no}. Reinicie o serviço: docker compose restart")
 else:

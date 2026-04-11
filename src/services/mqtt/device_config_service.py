@@ -122,7 +122,6 @@ _RESTART_PATHS = {
     ("triggers", "gpio", "pin"),
     ("processing", "lightMode"),
     ("processing", "maxAttempts"),
-    ("processing", "mobileFormat"),
     ("processing", "verticalFormat"),
     ("mqtt", "enabled"),
     ("mqtt", "broker"),

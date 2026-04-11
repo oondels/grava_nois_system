@@ -91,8 +91,9 @@ Duas opções:
 
 ## Localização e override do arquivo
 
-- **Padrão**: `config.json` na raiz do projeto (mesmo diretório de `main.py`).
+- **Padrão local**: `config.json` na raiz do projeto (mesmo diretório de `main.py`).
 - **Override**: defina `GN_CONFIG_PATH=/caminho/para/config.json` no env.
+- **Docker provisionado**: monte o diretorio persistente de config como volume gravavel e defina `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`. O `.env` deve continuar montado separadamente como somente leitura.
 
 Se o arquivo não existir, o sistema opera com valores de env e defaults — sem erro.
 
@@ -214,6 +215,8 @@ Persistência local:
 - `config.state.json`: metadata local de versão/hash/status;
 - `config.json`: só é sobrescrito por escrita atômica após validação completa e quando a mudança não exige restart.
 
+Em Docker, os quatro arquivos acima devem compartilhar o mesmo diretorio persistente e gravavel. Montar apenas `config.json` como arquivo `:ro` quebra a promoção de configurações remotas e impede a persistência correta de pending/state/backup.
+
 Estados reportados:
 
 - `applied`: configuração promovida para `config.json`;
@@ -245,7 +248,7 @@ Alternativa para devices legados com `.env` já preenchido:
 Em hosts provisionados pelo `grava_nois_config`, informe os paths explicitamente:
 
 ```bash
-sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/config.json
+sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.json
 ```
 
 O script converte apenas parâmetros operacionais não sensíveis. Segredos, identidade,

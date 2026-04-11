@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-04-11
+
+### Fixed
+- `env_to_config.sh`: conversor local passa a gerar o contrato atual de `config.json`, removendo campos legados `processing.mobileFormat` e `processing.watermark.preset`.
+- `DeviceConfigService`: removido resíduo `processing.mobileFormat` da lista de paths que exigem restart.
+- `.dockerignore`: artefatos reais de configuração runtime (`config.json`, pending/state/backup e backup local) deixam de entrar no contexto de build.
+
+### Changed
+- Documentacao passa a recomendar `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json` com diretorio de config persistente e gravavel em Docker.
+
 ## 2026-04-07
 
 ### Added

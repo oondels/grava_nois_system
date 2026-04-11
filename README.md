@@ -399,11 +399,12 @@ Para converter um `.env` legado em `config.json` operacional:
 
 Em devices provisionados pelo `grava_nois_config`, use explicitamente os paths do host:
 ```bash
-sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/config.json
+sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.json
 ```
 
 - Documentação completa: [`docs/specs/system/CONFIGURATION.md`](docs/specs/system/CONFIGURATION.md)
 - Override de path: `GN_CONFIG_PATH=/caminho/para/config.json`
+- Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
 
 **Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
 
@@ -1006,6 +1007,7 @@ Exemplo de resposta publicada na fase 1:
 - qualquer comando recebido em `commands/in` é rejeitado explicitamente
 - configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`
 - `config.json` é atualizado por escrita atômica e mantém `config.backup.json` quando promovido
+- `config.json`, `config.pending.json`, `config.state.json` e `config.backup.json` precisam ficar no mesmo diretorio persistente e gravavel quando o edge roda em Docker
 
 ### Câmera V4L2 (Local)
 

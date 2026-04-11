@@ -40,6 +40,13 @@ __pycache__/
 .env
 .env.*
 
+# ── Configuração runtime gerenciada (montada por volume no device) ───────────
+/config.json
+/config.pending.json
+/config.state.json
+/config.backup.json
+/config.json.bak
+
 # ── Orquestração (não necessária dentro do container) ────────────────────────
 docker-compose.yml
 Dockerfile
