@@ -425,7 +425,7 @@ GN_RTSP_URL=rtsp://user:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype
 
 # Múltiplas câmeras via JSON (opcional; tem prioridade sobre GN_RTSP_URLS)
 # Cada câmera pode declarar pico_trigger_token para roteamento direto de botão → câmera
-# GN_CAMERAS_JSON=[{"id":"cam01","name":"Quadra 1","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q1"},{"id":"cam02","name":"Quadra 2","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q2"}]
+# GN_CAMERAS_JSON=[{"id":"cam01","name":"Quadra 1","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_1"},{"id":"cam02","name":"Quadra 2","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_2"}]
 
 # Health check (opcional)
 GN_RTSP_MAX_RETRIES=10          # Tentativas de conexão (padrão: 10)
@@ -508,8 +508,8 @@ GN_PICO_TRIGGER_TOKEN=BTN_REPLAY
 
 ```bash
 GN_CAMERAS_JSON='[
-  {"id":"cam_quadra1","name":"Quadra 1","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q1"},
-  {"id":"cam_quadra2","name":"Quadra 2","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_Q2"}
+  {"id":"cam_quadra1","name":"Quadra 1","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_1"},
+  {"id":"cam_quadra2","name":"Quadra 2","rtsp_url":"rtsp://...","enabled":true,"pico_trigger_token":"BTN_2"}
 ]'
 GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado)
 ```

@@ -278,14 +278,14 @@ Exemplo com token dedicado por câmera:
     "name": "Quadra 1",
     "rtsp_url": "rtsp://user:pass@192.168.1.101:554/stream",
     "enabled": true,
-    "pico_trigger_token": "BTN_Q1"
+    "pico_trigger_token": "BTN_1"
   },
   {
     "id": "cam_quadra2",
     "name": "Quadra 2",
     "rtsp_url": "rtsp://user:pass@192.168.1.102:554/stream",
     "enabled": true,
-    "pico_trigger_token": "BTN_Q2"
+    "pico_trigger_token": "BTN_2"
   }
 ]
 ```

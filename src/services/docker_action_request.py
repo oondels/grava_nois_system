@@ -69,25 +69,33 @@ class DockerActionRequestService:
             )
             return True
 
-        payload = {
-            "schema_version": 1,
-            "request_id": str(uuid.uuid4()),
-            "requested_at": datetime.now(timezone.utc).isoformat(),
-            "source": "pico",
-            "action": action,
-            "token": normalized,
-            "pid": os.getpid(),
-        }
-        self.request_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.request_path.with_name(f".{self.request_path.name}.tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-        tmp_path.replace(self.request_path)
-        self._log(
-            "warning",
-            "Acao Docker via Pico solicitada: %s (request_id=%s)",
-            action,
-            payload["request_id"],
-        )
+        try:
+            payload = {
+                "schema_version": 1,
+                "request_id": str(uuid.uuid4()),
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "source": "pico",
+                "action": action,
+                "token": normalized,
+                "pid": os.getpid(),
+            }
+            self.request_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.request_path.with_name(f".{self.request_path.name}.tmp")
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            tmp_path.replace(self.request_path)
+            self._log(
+                "warning",
+                "Acao Docker via Pico solicitada: %s (request_id=%s)",
+                action,
+                payload["request_id"],
+            )
+        except Exception as exc:
+            self._log(
+                "error",
+                "Falha ao registrar acao Docker via Pico em %s: %s",
+                self.request_path,
+                exc,
+            )
         return True
 
     def _action_for_token(self, token: str) -> str | None:

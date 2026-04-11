@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.services.docker_action_request import DockerActionRequestService
 
@@ -68,6 +69,22 @@ class DockerActionRequestServiceTests(unittest.TestCase):
             )
 
             self.assertFalse(service.handle_token("BTN_REPLAY"))
+
+    def test_write_failure_is_consumed_without_raising(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            request_path = Path(tmp) / "docker-action.request.json"
+            service = DockerActionRequestService(
+                enabled=True,
+                request_path=request_path,
+                pull_token="PULL_DOCKER",
+                restart_token="RESTART_DOCKER",
+            )
+
+            with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+                handled = service.handle_token("PULL_DOCKER")
+
+            self.assertTrue(handled)
+            self.assertFalse(request_path.exists())
 
 
 if __name__ == "__main__":

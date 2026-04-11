@@ -16,7 +16,9 @@ def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> Came
     cfg.camera_id = camera_id
     cfg.pico_trigger_token = pico_trigger_token
     segbuf = MagicMock()
-    return CameraRuntime(cfg=cfg, proc=MagicMock(), segbuf=segbuf)
+    proc = MagicMock()
+    proc.poll.return_value = None
+    return CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf, camera_status="OK")
 
 
 class TriggerFanOutTests(unittest.TestCase):
@@ -91,7 +93,7 @@ class TriggerFanOutTests(unittest.TestCase):
 class PicoTokenRoutingTests(unittest.TestCase):
     def test_dedicated_token_triggers_only_matching_camera(self) -> None:
         """Token mapeado → dispara apenas a câmera correspondente, não as demais."""
-        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_1")
         rt2 = _make_runtime("cam02")
         called_ids: list[str] = []
 
@@ -108,21 +110,21 @@ class PicoTokenRoutingTests(unittest.TestCase):
 
     def test_global_fanout_skips_cameras_with_dedicated_token(self) -> None:
         """Token global → fan-out dispara apenas câmeras sem token dedicado."""
-        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_1")
         rt2 = _make_runtime("cam02")  # sem token dedicado
         targets = _get_fanout_targets([rt1, rt2])
         self.assertEqual([rt.cfg.camera_id for rt in targets], ["cam02"])
 
     def test_global_fanout_all_cameras_when_all_have_tokens(self) -> None:
         """Quando todas as câmeras têm token, fan-out global dispara todas (fallback de debug)."""
-        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
-        rt2 = _make_runtime("cam02", pico_trigger_token="BTN_Q2")
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_1")
+        rt2 = _make_runtime("cam02", pico_trigger_token="BTN_2")
         targets = _get_fanout_targets([rt1, rt2])
         self.assertEqual(len(targets), 2)
 
     def test_unknown_token_does_not_trigger_any_camera(self) -> None:
         """Token desconhecido → nenhuma câmera dispara, sem levantar exceção."""
-        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_Q1")
+        rt1 = _make_runtime("cam01", pico_trigger_token="BTN_1")
         rt2 = _make_runtime("cam02")
         called_ids: list[str] = []
 
@@ -131,7 +133,7 @@ class PicoTokenRoutingTests(unittest.TestCase):
             return None
 
         # Simula o roteamento: token desconhecido não está em token_map nem é global token
-        token_map = {"BTN_Q1": lambda: None}  # cam01 handler (not calling build_highlight here)
+        token_map = {"BTN_1": lambda: None}  # cam01 handler (not calling build_highlight here)
         unknown_token = "BTN_UNKNOWN"
         # Unknown token: not in token_map, not global → nenhuma ação
         dispatched = unknown_token in token_map
