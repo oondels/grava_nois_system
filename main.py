@@ -413,6 +413,11 @@ def main() -> int:
         if _token:
             def _make_handler(rt: CameraRuntime) -> Callable[[], None]:
                 def _handler() -> None:
+                    if not is_within_business_hours():
+                        logger.warning(
+                            f"[Pico][{rt.cfg.camera_id}] Token dedicado ignorado: fora do horário de funcionamento"
+                        )
+                        return
                     tid = uuid.uuid4().hex[:8]
                     logger.info(
                         f"[Pico] Token '{rt.cfg.pico_trigger_token}' → câmera '{rt.cfg.camera_id}' (dedicado)"
