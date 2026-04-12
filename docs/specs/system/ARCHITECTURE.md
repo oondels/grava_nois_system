@@ -32,7 +32,7 @@ Bootstrap em [`main.py`](../../../main.py):
 5. tenta iniciar FFmpeg por câmera (não-fatal: falha marca `camera_status=UNAVAILABLE`);
 6. inicia supervisor por câmera em background (retry com backoff exponencial);
 7. inicia `ProcessingWorker` por câmera;
-8. resolve trigger source e listeners;
+8. resolve trigger source e listeners; quando Pico serial é aberto, envia `GRN_STARTED` para handshake/LED;
 9. orquestra trigger fan-out até shutdown.
 
 ### Resiliência de startup
@@ -79,7 +79,7 @@ Bootstrap em [`main.py`](../../../main.py):
 ### Utilities
 
 - `logger.py`
-- `pico.py`
+- `pico.py` — descoberta de porta; a comunicação serial bidirecional é orquestrada em `main.py`
 - `device.py`
 - `time_utils.py`
 

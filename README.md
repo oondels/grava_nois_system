@@ -514,11 +514,17 @@ GN_CAMERAS_JSON='[
 GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado)
 ```
 
+Comunicação bidirecional com o Pico:
+- **Edge → Pico:** ao abrir a serial, o edge envia `GRN_STARTED` para sinalizar que o runtime está operacional. O Pico acende o LED e responde `ACK_GRN_STARTED`.
+- **Pico → Edge:** tokens de botão, Docker e trigger são enviados pelo firmware.
+- Após `PULL_DOCKER`/`RESTART_DOCKER`, o LED apaga e só reacende quando o novo container enviar `GRN_STARTED`.
+
 Lógica de roteamento ao receber um token pela serial:
-1. Token de manutenção Docker (`PULL_DOCKER`/`RESTART_DOCKER`) → grava uma solicitação em `runtime_config` para o host executar via systemd
-2. Token está no mapa dedicado → dispara só a câmera correspondente
-3. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
-4. Token desconhecido → `warning` no log, listener continua sem interrupção
+1. `ACK_GRN_STARTED` → log info, ignorado (confirmação do handshake)
+2. Token de manutenção Docker (`PULL_DOCKER`/`RESTART_DOCKER`) → grava uma solicitação em `runtime_config` para o host executar via systemd
+3. Token está no mapa dedicado → dispara só a câmera correspondente
+4. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
+5. Token desconhecido → `warning` no log, listener continua sem interrupção
 
 Tokens de manutenção Docker:
 

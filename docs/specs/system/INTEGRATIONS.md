@@ -214,9 +214,13 @@ Canonical string:
 ### Pico serial
 
 - descoberta automática por `/dev/serial/by-id`, `/dev/ttyACM*`, `/dev/ttyUSB*`;
+- ao abrir a porta serial com sucesso, o edge envia `GRN_STARTED` ao Pico para sinalizar que o runtime está operacional; o Pico responde com `ACK_GRN_STARTED` e acende o LED;
+- o LED do Pico indica que o edge está iniciado e comunicando pela serial — não garante que câmera, MQTT ou API estejam todos OK;
+- após `PULL_DOCKER`/`RESTART_DOCKER`, o firmware apaga o LED; o novo container reenvia `GRN_STARTED` ao iniciar;
 - token global configurável por `GN_PICO_TRIGGER_TOKEN` (fan-out para câmeras sem token dedicado);
 - cada câmera em `GN_CAMERAS_JSON` pode declarar `pico_trigger_token` próprio — quando recebido, dispara apenas aquela câmera sem acionar as demais;
 - tokens `GN_PICO_DOCKER_PULL_TOKEN` e `GN_PICO_DOCKER_RESTART_TOKEN` são consumidos antes dos tokens de câmera para criar uma solicitação de manutenção Docker no `runtime_config`;
+- `ACK_GRN_STARTED` recebido do Pico é logado como info e ignorado (não dispara câmera nem Docker);
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
 O edge não usa Docker socket. A execução real de `pull/up` ou `restart` é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`.

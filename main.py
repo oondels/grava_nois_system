@@ -41,6 +41,27 @@ from src.workers.processing_worker import ProcessingWorker
 
 load_dotenv()
 
+# Comando enviado ao Pico quando a serial é aberta para sinalizar que o edge está operacional.
+# O firmware responde com ACK_GRN_STARTED e acende o LED.
+PICO_STARTED_COMMAND = "GRN_STARTED"
+PICO_ACK_STARTED = "ACK_GRN_STARTED"
+
+
+def _send_pico_command(fd: int, command: str, _logger: object | None = None) -> bool:
+    """Write a command to the Pico serial fd. Returns True on success."""
+    log = _logger or logger
+    payload = f"{command.strip()}\n".encode("utf-8")
+    try:
+        os.write(fd, payload)
+        log.info("[Pico] Comando enviado: %s", command)
+        return True
+    except BlockingIOError:
+        log.warning("[Pico] Serial ocupada ao enviar comando: %s", command)
+        return False
+    except OSError as exc:
+        log.error("[Pico] Falha ao enviar comando %s: %s", command, exc)
+        return False
+
 
 @dataclass
 class CameraRuntime:
@@ -538,13 +559,15 @@ def main() -> int:
                 try:
                     fd = os.open(
                         pico_serial_port,
-                        os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY,
+                        os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY,
                     )
                 except OSError as e:
                     logger.error(
                         f"Falha ao abrir porta serial do Pico ({pico_serial_port}): {e}"
                     )
                     return
+
+                _send_pico_command(fd, PICO_STARTED_COMMAND)
 
                 buffer = b""
                 with os.fdopen(fd, "rb", buffering=0) as serial_stream:
@@ -580,6 +603,9 @@ def main() -> int:
                             if not line:
                                 continue
                             line_upper = line.upper()
+                            if line_upper == PICO_ACK_STARTED:
+                                logger.info("[Pico] Recebido ACK_GRN_STARTED — LED aceso no Pico")
+                                continue
                             if docker_action_requests.handle_token(line_upper):
                                 continue
                             if line_upper in token_map:

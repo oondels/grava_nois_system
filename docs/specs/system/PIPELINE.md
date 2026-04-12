@@ -57,6 +57,7 @@ Antes do build:
 1. o trigger pode passar por janela horária local;
 2. GPIO/Pico respeitam cooldown por câmera (`_cooldown_until`);
 3. o evento é roteado conforme o tipo:
+   - **ACK Pico** (`ACK_GRN_STARTED`): confirmação do handshake iniciado pelo edge; é logado e ignorado, sem disparar câmera nem ação Docker;
    - **Token Pico dedicado** (`pico_trigger_token` da câmera): dispara apenas a câmera correspondente;
    - **Token Pico global** (`GN_PICO_TRIGGER_TOKEN`) ou ENTER/GPIO: fan-out para câmeras sem token dedicado (fallback: todas, se todas tiverem token);
    - **Token desconhecido**: ignorado com `warning`, listener não interrompe.
