@@ -279,11 +279,13 @@ def _camera_supervisor(
     max_backoff: float = 300.0,
 ) -> None:
     """Background thread that monitors and restarts FFmpeg for a camera."""
-    backoff = 5.0
+    retry_delay = 5.0
+    next_start_delay = 0.0
     while not stop_evt.is_set():
         needs_start = rt.proc is None or rt.proc.poll() is not None
         if not needs_start:
-            backoff = 5.0
+            retry_delay = 5.0
+            next_start_delay = 0.0
             if stop_evt.wait(5.0):
                 break
             continue
@@ -293,14 +295,15 @@ def _camera_supervisor(
             rt.last_error = "FFmpeg encerrou inesperadamente"
             rt.last_error_at = datetime.now(timezone.utc).isoformat()
             logger.warning(
-                f"[{rt.cfg.camera_id}] FFmpeg morreu, tentando reiniciar em {backoff:.0f}s"
+                f"[{rt.cfg.camera_id}] FFmpeg morreu, tentando reiniciar em {retry_delay:.0f}s"
             )
+            next_start_delay = retry_delay
 
-        if stop_evt.wait(backoff):
+        if stop_evt.wait(next_start_delay):
             break
 
         rt.restart_attempts += 1
-        logger.info(f"[{rt.cfg.camera_id}] Tentativa de restart #{rt.restart_attempts}")
+        logger.info(f"[{rt.cfg.camera_id}] Tentativa de start/restart #{rt.restart_attempts}")
 
         try:
             if rt.segbuf is not None:
@@ -317,14 +320,16 @@ def _camera_supervisor(
             rt.segbuf = segbuf
             rt.camera_status = "OK"
             rt.last_error = ""
-            backoff = 5.0
+            retry_delay = 5.0
+            next_start_delay = 0.0
             logger.info(f"[{rt.cfg.camera_id}] Câmera reiniciada com sucesso")
         except Exception as e:
             rt.camera_status = "UNAVAILABLE"
             rt.last_error = str(e)
             rt.last_error_at = datetime.now(timezone.utc).isoformat()
             logger.error(f"[{rt.cfg.camera_id}] Falha no restart: {e}")
-            backoff = min(backoff * 2, max_backoff)
+            next_start_delay = retry_delay
+            retry_delay = min(retry_delay * 2, max_backoff)
 
 
 def main() -> int:
@@ -440,34 +445,11 @@ def main() -> int:
                     "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
                 )
 
-    # --- Startup de câmeras: não-fatal, com supervisor em background ---
+    # --- Estado de câmeras: cria runtimes sem bloquear o bootstrap em RTSP/FFmpeg ---
     for cfg in camera_cfgs:
         clear_buffer(cfg)
         cfg.ensure_dirs()
-        rt = CameraRuntime(cfg=cfg)
-        try:
-            proc = start_ffmpeg(cfg)
-            segbuf = SegmentBuffer(cfg)
-            segbuf.start()
-            rt.proc = proc
-            rt.segbuf = segbuf
-            rt.camera_status = "OK"
-        except Exception as e:
-            logger.error(f"[{cfg.camera_id}] Falha no startup da câmera: {e}")
-            rt.camera_status = "UNAVAILABLE"
-            rt.last_error = str(e)
-            rt.last_error_at = datetime.now(timezone.utc).isoformat()
-        runtimes.append(rt)
-
-    # Supervisor: monitora e reinicia câmeras em background com backoff
-    supervisor_threads: list[threading.Thread] = []
-    for rt in runtimes:
-        t = threading.Thread(
-            target=_camera_supervisor, args=(rt, stop_evt), daemon=True,
-            name=f"supervisor-{rt.cfg.camera_id}",
-        )
-        t.start()
-        supervisor_threads.append(t)
+        runtimes.append(CameraRuntime(cfg=cfg))
 
     max_workers = op_cfg.triggers.max_workers if op_cfg.triggers.max_workers is not None else len(runtimes)
     trigger_executor = ThreadPoolExecutor(max_workers=max(1, max_workers))
@@ -495,7 +477,21 @@ def main() -> int:
     wm_rel_width = op_cfg.processing.watermark.relative_width
     primary_cfg = camera_cfgs[0] if camera_cfgs else None
 
-    # inicia 1 worker por câmera (cada um varre apenas sua queue_dir isolada)
+    # --- Disparo por ENTER/GPIO/Pico: inicia antes das câmeras para sinalizar runtime básico ---
+    trigger_q: queue.Queue[str] = queue.Queue()
+
+    # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
+    gpio_cooldown_sec = op_cfg.triggers.gpio.cooldown_seconds
+
+    # Câmeras que participam do fan-out global (sem token Pico dedicado).
+    # Se todas tiverem token dedicado, o fan-out global ainda dispara todas (fallback de debug).
+    _fanout_runtimes = _get_fanout_targets(runtimes)
+
+    pico_trigger_token = op_cfg.triggers.pico.global_token or "BTN_REPLAY"
+    docker_action_requests = DockerActionRequestService.from_env(logger=logger)
+    pico_serial_port: str | None = None
+
+    # Workers são iniciados antes dos triggers para qualquer clipe gerado já ter fila ativa.
     workers: list[ProcessingWorker] = []
     for rt in runtimes:
         cfg = rt.cfg
@@ -515,20 +511,6 @@ def main() -> int:
         worker.start()
         workers.append(worker)
         logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
-
-    # --- Disparo por ENTER/GPIO/Pico ---
-    trigger_q: queue.Queue[str] = queue.Queue()
-
-    # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
-    gpio_cooldown_sec = op_cfg.triggers.gpio.cooldown_seconds
-
-    # Câmeras que participam do fan-out global (sem token Pico dedicado).
-    # Se todas tiverem token dedicado, o fan-out global ainda dispara todas (fallback de debug).
-    _fanout_runtimes = _get_fanout_targets(runtimes)
-
-    pico_trigger_token = op_cfg.triggers.pico.global_token or "BTN_REPLAY"
-    docker_action_requests = DockerActionRequestService.from_env(logger=logger)
-    pico_serial_port: str | None = None
 
     # Mapa de roteamento: token Pico dedicado → handler de câmera específica.
     # Câmeras sem pico_trigger_token participam apenas do fan-out global.
@@ -730,6 +712,17 @@ def main() -> int:
             pico_enabled = True
         else:
             logger.warning("Trigger Pico selecionado, mas nenhuma porta serial foi detectada")
+
+    # Supervisores fazem a primeira tentativa de câmera em background.
+    # Assim MQTT e Pico/LED não dependem de câmera ligada ou RTSP acessível.
+    supervisor_threads: list[threading.Thread] = []
+    for rt in runtimes:
+        t = threading.Thread(
+            target=_camera_supervisor, args=(rt, stop_evt), daemon=True,
+            name=f"supervisor-{rt.cfg.camera_id}",
+        )
+        t.start()
+        supervisor_threads.append(t)
 
     if primary_cfg is not None:
         if primary_cfg.pre_segments is not None and primary_cfg.post_segments is not None:

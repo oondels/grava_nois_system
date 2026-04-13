@@ -29,15 +29,15 @@ Bootstrap em [`main.py`](../../../main.py):
 2. resolve configuração operacional efetiva (`config.json` -> env legado -> defaults);
 3. cria `CaptureConfig` por câmera;
 4. **inicia MQTT (presence, dispatcher, config service) antes das câmeras**;
-5. tenta iniciar FFmpeg por câmera (não-fatal: falha marca `camera_status=UNAVAILABLE`);
-6. inicia supervisor por câmera em background (retry com backoff exponencial);
-7. inicia `ProcessingWorker` por câmera;
-8. resolve trigger source e listeners; quando Pico serial é aberto, reenvia `GRN_STARTED` até receber `ACK_GRN_STARTED` para handshake/LED;
+5. cria `CameraRuntime` por câmera sem abrir RTSP/FFmpeg;
+6. inicia `ProcessingWorker` por câmera;
+7. resolve trigger source e listeners; quando Pico serial é aberto, reenvia `GRN_STARTED` até receber `ACK_GRN_STARTED` para handshake/LED;
+8. inicia supervisor por câmera em background; a primeira tentativa de FFmpeg ocorre no supervisor, sem bloquear MQTT/Pico;
 9. orquestra trigger fan-out até shutdown.
 
 ### Resiliência de startup
 
-- Falha de câmera não aborta o processo; MQTT publica estado degradado.
+- Falha de câmera não aborta o processo; MQTT e Pico/LED iniciam antes das tentativas RTSP/FFmpeg.
 - Supervisor monitora `proc.poll()` e reinicia FFmpeg com backoff (5s..300s).
 - Heartbeat MQTT protegido contra exceções no snapshot provider.
 - Trigger fan-out verifica disponibilidade da câmera antes de disparar.

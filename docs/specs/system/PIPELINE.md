@@ -2,14 +2,15 @@
 
 ## 1. Capture bootstrap
 
-O bootstrap de captura é resiliente e não deve bloquear MQTT/presença. Para cada `CaptureConfig`:
+O bootstrap de captura é resiliente e não deve bloquear MQTT/presença nem o handshake Pico/LED. Para cada `CaptureConfig`:
 
 1. limpa buffer antigo;
 2. cria diretórios necessários;
-3. tenta iniciar FFmpeg;
-4. se FFmpeg iniciar, cria `SegmentBuffer` e marca `camera_status=OK`;
-5. se FFmpeg falhar, marca `camera_status=UNAVAILABLE`, mantém o edge vivo e deixa o supervisor tentar novamente com backoff;
-6. inicia um supervisor por câmera para monitorar `proc.poll()` e reiniciar FFmpeg quando necessário.
+3. cria `CameraRuntime` com `camera_status=STARTING`, sem abrir RTSP/FFmpeg no thread principal;
+4. inicia listeners de trigger, incluindo Pico serial e handshake `GRN_STARTED` -> `ACK_GRN_STARTED`;
+5. inicia um supervisor por câmera em background;
+6. o supervisor faz a primeira tentativa de FFmpeg, cria `SegmentBuffer` e marca `camera_status=OK`;
+7. se FFmpeg falhar, marca `camera_status=UNAVAILABLE`, mantém o edge vivo e tenta novamente com backoff.
 
 Entradas possíveis:
 

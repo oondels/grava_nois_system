@@ -639,7 +639,7 @@ Observações:
 
 ### Objetivo
 
-Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, garantindo publicação de status mesmo com falha total de hardware. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE` e reiniciadas automaticamente por um supervisor em background com backoff exponencial.
+Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE` e reiniciadas automaticamente por um supervisor em background com backoff exponencial.
 
 ### Variáveis principais
 
@@ -1577,6 +1577,7 @@ api_client.finalize_clip_uploaded(
 - ✅ Upload via URL assinada
 - ✅ Startup de câmera não-fatal com supervisor/retry de FFmpeg
 - ✅ MQTT antes das câmeras para status degradado de hardware
+- ✅ Pico/LED antes das câmeras para sinalização local mesmo sem RTSP
 - ✅ Modo leve para hardware limitado
 - ✅ Sistema de logging estruturado
 - ✅ Cliente de API centralizado
