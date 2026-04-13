@@ -49,6 +49,7 @@ PICO_ACK_STARTED = "ACK_GRN_STARTED"
 
 def _send_pico_command(fd: int, command: str, _logger: object | None = None) -> bool:
     """Write a command to the Pico serial fd. Returns True on success."""
+    logger.info(f"Enviando comando para Pico selecionada: {fd} → {command!r}")
     log = _logger or logger
     payload = f"{command.strip()}\n".encode("utf-8")
     try:
@@ -566,7 +567,7 @@ def main() -> int:
                         f"Falha ao abrir porta serial do Pico ({pico_serial_port}): {e}"
                     )
                     return
-
+                
                 _send_pico_command(fd, PICO_STARTED_COMMAND)
 
                 buffer = b""
