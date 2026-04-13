@@ -515,9 +515,9 @@ GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado
 ```
 
 Comunicação bidirecional com o Pico:
-- **Edge → Pico:** ao abrir a serial, o edge envia `GRN_STARTED` para sinalizar que o runtime está operacional. O Pico acende o LED e responde `ACK_GRN_STARTED`.
+- **Edge → Pico:** ao abrir a serial, o edge envia `GRN_STARTED` para sinalizar que o runtime está operacional. O envio é repetido até o Pico responder `ACK_GRN_STARTED`; o ACK é a confirmação real de que o Pico recebeu o comando e acendeu o LED.
 - **Pico → Edge:** tokens de botão, Docker e trigger são enviados pelo firmware.
-- Após `PULL_DOCKER`/`RESTART_DOCKER`, o LED apaga e só reacende quando o novo container enviar `GRN_STARTED`.
+- Após `PULL_DOCKER`/`RESTART_DOCKER`, o LED apaga e só reacende quando o novo container reenviar `GRN_STARTED` e receber `ACK_GRN_STARTED`.
 
 Lógica de roteamento ao receber um token pela serial:
 1. `ACK_GRN_STARTED` → log info, ignorado (confirmação do handshake)

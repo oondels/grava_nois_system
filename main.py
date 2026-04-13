@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 import select
+import termios
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -45,23 +46,123 @@ load_dotenv()
 # O firmware responde com ACK_GRN_STARTED e acende o LED.
 PICO_STARTED_COMMAND = "GRN_STARTED"
 PICO_ACK_STARTED = "ACK_GRN_STARTED"
+PICO_STARTED_INITIAL_DELAY_SEC = 0.8
+PICO_STARTED_RETRY_DELAYS_SEC = (0.25, 0.5, 1.0, 2.0, 5.0)
+PICO_STARTED_WARNING_INTERVAL_SEC = 10.0
 
 
-def _send_pico_command(fd: int, command: str, _logger: object | None = None) -> bool:
-    """Write a command to the Pico serial fd. Returns True on success."""
-    logger.info(f"Enviando comando para Pico selecionada: {fd} → {command!r}")
+def _configure_pico_serial(fd: int, _logger: object | None = None) -> None:
+    """Best-effort serial setup for USB CDC devices across Linux hosts."""
+    log = _logger or logger
+    try:
+        attrs = termios.tcgetattr(fd)
+        attrs[0] = 0  # iflag: no input translations
+        attrs[1] = 0  # oflag: no output translations
+        attrs[3] = 0  # lflag: non-canonical, no echo
+        attrs[2] |= termios.CLOCAL | termios.CREAD
+        if hasattr(termios, "HUPCL"):
+            attrs[2] &= ~termios.HUPCL
+        attrs[6][termios.VMIN] = 0
+        attrs[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception as exc:
+        log.warning("[Pico] Não foi possível configurar modo serial: %s", exc)
+
+
+def _send_pico_command(
+    fd: int,
+    command: str,
+    _logger: object | None = None,
+    write_timeout_sec: float = 0.2,
+) -> bool:
+    """Write a command to the Pico serial fd. Returns True only if all bytes were accepted."""
     log = _logger or logger
     payload = f"{command.strip()}\n".encode("utf-8")
+    offset = 0
     try:
-        os.write(fd, payload)
-        log.info("[Pico] Comando enviado: %s", command)
+        while offset < len(payload):
+            _, writable, _ = select.select([], [fd], [], write_timeout_sec)
+            if not writable:
+                return False
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                return False
+            offset += written
         return True
     except BlockingIOError:
-        log.warning("[Pico] Serial ocupada ao enviar comando: %s", command)
         return False
     except OSError as exc:
         log.error("[Pico] Falha ao enviar comando %s: %s", command, exc)
         return False
+
+
+@dataclass
+class PicoStartedHandshake:
+    """Retries GRN_STARTED until the Pico confirms with ACK_GRN_STARTED."""
+
+    command: str = PICO_STARTED_COMMAND
+    ack_received: bool = False
+    attempts: int = 0
+    next_send_at: float = 0.0
+    retry_delay: float = PICO_STARTED_RETRY_DELAYS_SEC[0]
+    first_attempt_at: float | None = None
+    last_warning_at: float = 0.0
+
+    def mark_ack(self) -> None:
+        self.ack_received = True
+
+    def maybe_send(
+        self,
+        fd: int,
+        now: float | None = None,
+        _logger: object | None = None,
+    ) -> bool:
+        if self.ack_received:
+            return False
+
+        log = _logger or logger
+        current = time.monotonic() if now is None else now
+        if current < self.next_send_at:
+            return False
+
+        self.attempts += 1
+        if self.first_attempt_at is None:
+            self.first_attempt_at = current
+        sent = _send_pico_command(fd, self.command, _logger=log)
+        if sent:
+            log.info(
+                "[Pico] %s escrito na serial; aguardando %s (tentativa=%s)",
+                self.command,
+                PICO_ACK_STARTED,
+                self.attempts,
+            )
+
+        ack_wait_elapsed = (
+            current - self.first_attempt_at if self.first_attempt_at is not None else 0.0
+        )
+        should_warn = (
+            self.attempts > 1
+            and ack_wait_elapsed >= PICO_STARTED_WARNING_INTERVAL_SEC
+            and (
+                self.last_warning_at == 0.0
+                or current - self.last_warning_at >= PICO_STARTED_WARNING_INTERVAL_SEC
+            )
+        )
+        if should_warn:
+            log.warning(
+                "[Pico] %s ainda sem ACK; reenviando (tentativa=%s)",
+                self.command,
+                self.attempts,
+            )
+            self.last_warning_at = current
+
+        self.next_send_at = current + self.retry_delay
+        next_delay_index = min(
+            len(PICO_STARTED_RETRY_DELAYS_SEC) - 1,
+            PICO_STARTED_RETRY_DELAYS_SEC.index(self.retry_delay) + 1,
+        )
+        self.retry_delay = PICO_STARTED_RETRY_DELAYS_SEC[next_delay_index]
+        return sent
 
 
 @dataclass
@@ -567,15 +668,18 @@ def main() -> int:
                         f"Falha ao abrir porta serial do Pico ({pico_serial_port}): {e}"
                     )
                     return
-                
-                _send_pico_command(fd, PICO_STARTED_COMMAND)
+
+                _configure_pico_serial(fd, _logger=logger)
+                time.sleep(PICO_STARTED_INITIAL_DELAY_SEC)
 
                 buffer = b""
+                started_handshake = PicoStartedHandshake()
                 with os.fdopen(fd, "rb", buffering=0) as serial_stream:
                     logger.info(
                         f"Listener Pico serial ativo em {pico_serial_port} (token={pico_trigger_token!r})"
                     )
                     while not stop_evt.is_set():
+                        started_handshake.maybe_send(fd, _logger=logger)
                         try:
                             ready, _, _ = select.select([serial_stream], [], [], 0.3)
                         except Exception as e:
@@ -605,6 +709,7 @@ def main() -> int:
                                 continue
                             line_upper = line.upper()
                             if line_upper == PICO_ACK_STARTED:
+                                started_handshake.mark_ack()
                                 logger.info("[Pico] Recebido ACK_GRN_STARTED — LED aceso no Pico")
                                 continue
                             if docker_action_requests.handle_token(line_upper):
