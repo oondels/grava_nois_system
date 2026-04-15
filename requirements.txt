@@ -2,4 +2,5 @@ pigpio==1.78
 paho-mqtt==2.1.0
 python-dotenv==1.1.1
 requests==2.31.0
+cryptography==44.0.3
 # RPi.GPIO==0.7.1

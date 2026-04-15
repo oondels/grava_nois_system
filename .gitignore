@@ -3,6 +3,7 @@ venv/
 __pycache__/
 .env
 .env.p*
+.env.bak*
 venv/
 .vscode
 *.json

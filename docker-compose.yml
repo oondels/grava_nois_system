@@ -10,6 +10,7 @@ services:
       - .env
     environment:
       GN_CONFIG_PATH: /usr/src/app/runtime_config/config.json
+      GN_HOST_ENV_PATH: /usr/src/app/host_config/.env
     working_dir: /usr/src/app
     shm_size: 512m
 
@@ -24,6 +25,7 @@ services:
 
     volumes:
       - ./.env:/usr/src/app/.env:ro
+      - .:/usr/src/app/host_config:rw  # Expõe diretório do host para leitura/escrita do .env via admin
       - ./runtime_config:/usr/src/app/runtime_config
       - ./files:/usr/src/app/files:ro
       - ./recorded_clips:/usr/src/app/recorded_clips

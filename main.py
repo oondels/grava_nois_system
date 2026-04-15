@@ -26,6 +26,7 @@ from src.services.mqtt.device_config_service import (
     DeviceConfigService,
     apply_pending_config_on_startup,
 )
+from src.services.mqtt.device_env_service import DeviceEnvService
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
@@ -380,6 +381,7 @@ def main() -> int:
     mqtt_presence: DevicePresenceService | None = None
     mqtt_dispatcher: CommandDispatcher | None = None
     mqtt_config_service: DeviceConfigService | None = None
+    mqtt_env_service: DeviceEnvService | None = None
 
     if mqtt_config.enabled and not device_id:
         mqtt_logger.warning(
@@ -426,12 +428,26 @@ def main() -> int:
                 ),
                 agent_version=mqtt_config.agent_version,
             )
+            mqtt_env_service = DeviceEnvService(
+                mqtt_client,
+                device_id=device_id,
+                client_id=client_id,
+                venue_id=venue_id,
+                request_topic=mqtt_config.topic_for(device_id, "env/request"),
+                desired_topic=mqtt_config.topic_for(device_id, "env/desired"),
+                reported_topic=mqtt_config.topic_for(device_id, "env/reported"),
+                device_secret=(
+                    os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
+                ),
+                agent_version=mqtt_config.agent_version,
+            )
             if startup_config_report is not None:
                 mqtt_config_service.queue_startup_report(startup_config_report)
         except ValueError as exc:
             mqtt_presence = None
             mqtt_dispatcher = None
             mqtt_config_service = None
+            mqtt_env_service = None
             mqtt_logger.warning(
                 "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID é inválido para tópico (%s); presença será ignorada",
                 exc,
@@ -440,6 +456,7 @@ def main() -> int:
             if mqtt_presence.start():
                 mqtt_dispatcher.start()
                 mqtt_config_service.start()
+                mqtt_env_service.start()
             elif mqtt_config.enabled:
                 mqtt_logger.warning(
                     "Serviço MQTT não iniciou; captura e worker seguirão operando normalmente"
