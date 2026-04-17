@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-04-13
+
+### Added
+- Serviço MQTT `DeviceEnvService` para gerenciamento remoto de .env admin-only.
+- Topicos MQTT: `env/request`, `env/desired`, `env/reported` com envelope criptografado AES-256-GCM.
+- Helper `env_envelope.py` para criptografia/descriptografia de envelope de .env com HKDF-SHA256.
+- Backup atomico de .env antes de sobrescrever (`.env.bak.grn.<timestamp>`).
+- Escrita atomica com `chmod 600` para proteger .env.
+- Suporte a `restart_after_apply` para agendar restart do container apos aplicar .env.
+- Auditoria dedicada em `env_audit.log` sem valores sensiveis.
+- Testes unitarios completos e testes cruzados de compatibilidade TS/Python.
+
+### Changed
+- `requirements.txt`: adicionada dependencia `cryptography==44.0.3` para AES-256-GCM e HKDF.
+- `main.py`: inicializa `DeviceEnvService` junto com os demais servicos MQTT.
+
 ## 2026-04-11
 
 ### Added
