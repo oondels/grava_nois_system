@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-04-17
+
+### Changed
+- `DeviceEnvService`: `restart_after_apply=true` passa a solicitar `restart_container` ao runner Docker do host (`source=admin_env`), permitindo que o host regenere `config.json` antes do recreate.
+- `env_to_config.sh` e `.env.example`: `VERTICAL_FORMAT` passa a default `0`, alinhado ao loader e ao `config.example.json`, evitando crop 9:16 acidental em configs geradas.
+- `.env.example`: `GN_RTSP_FPS` passa a default vazio para preservar a cadencia original quando nao houver necessidade explicita de filtro `fps`.
+- Documentacao de RTSP/qualidade atualizada para diferenciar `hq` passthrough, `compatible` com reencode, watermark final e tradeoffs de CRF/preset.
+
 ## 2026-04-16
 
 ### Changed

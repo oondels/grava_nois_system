@@ -172,6 +172,7 @@ def build_runtime_snapshot(
     light_mode: bool,
     dev_mode: bool,
     trigger_source: str,
+    camera_stale_after_sec: float = 10.0,
 ) -> dict[str, Any]:
     cameras: list[dict[str, Any]] = []
     total_queue_size = 0
@@ -185,6 +186,27 @@ def build_runtime_snapshot(
         ffmpeg_alive = (
             runtime.proc is not None and runtime.proc.poll() is None
         )
+        diagnostics = None
+        if getattr(runtime, "segbuf", None) is not None:
+            try:
+                diagnostics = runtime.segbuf.diagnostics(
+                    stale_after_sec=camera_stale_after_sec
+                )
+            except Exception:
+                diagnostics = None
+        buffer_status = (
+            diagnostics.buffer_status
+            if diagnostics is not None
+            else ("NO_BUFFER" if getattr(runtime, "segbuf", None) is None else "UNKNOWN")
+        )
+        buffer_fresh = diagnostics.buffer_fresh if diagnostics is not None else False
+        effective_camera_status = (
+            "OK"
+            if ffmpeg_alive and buffer_fresh
+            else getattr(runtime, "camera_status", "UNKNOWN")
+        )
+        if not ffmpeg_alive or not buffer_fresh:
+            effective_camera_status = "UNAVAILABLE"
         cameras.append(
             {
                 "camera_id": runtime.cfg.camera_id,
@@ -193,10 +215,15 @@ def build_runtime_snapshot(
                 "queue_size": queue_size,
                 "capture_busy": runtime.capture_lock.locked(),
                 "ffmpeg_alive": ffmpeg_alive,
-                "camera_status": getattr(runtime, "camera_status", "UNKNOWN"),
+                "camera_status": effective_camera_status,
                 "last_error": getattr(runtime, "last_error", ""),
                 "last_error_at": getattr(runtime, "last_error_at", ""),
                 "restart_attempts": getattr(runtime, "restart_attempts", 0),
+                "buffer_status": buffer_status,
+                "buffer_fresh": buffer_fresh,
+                "segment_age_sec": diagnostics.segment_age_sec if diagnostics else None,
+                "last_segment_at": diagnostics.last_segment_at if diagnostics else None,
+                "buffer_segment_count": diagnostics.segment_count if diagnostics else 0,
             }
         )
 
@@ -234,7 +261,9 @@ def build_runtime_snapshot(
         "queue_size": total_queue_size,
         "health": {
             "camera_count": len(runtimes),
-            "online_cameras": sum(1 for cam in cameras if cam["ffmpeg_alive"]),
+            "online_cameras": sum(
+                1 for cam in cameras if cam["ffmpeg_alive"] and cam["buffer_fresh"]
+            ),
             "trigger_source": trigger_source,
             "failed_clips_count": failed_clips_count,
             "upload_failed_count": upload_failed_count,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from src.config.settings import MQTTConfig
 from src.services.mqtt.device_presence_service import (
@@ -38,6 +39,15 @@ class _FakeRuntime:
         self.cfg = _FakeCfg(camera_id, queue_dir)
         self.proc = _FakeProc(alive=alive)
         self.capture_lock = _FakeLock(locked=busy)
+        self.segbuf = SimpleNamespace(
+            diagnostics=lambda stale_after_sec=10.0: SimpleNamespace(
+                buffer_status="FRESH" if alive else "STALE",
+                buffer_fresh=alive,
+                segment_age_sec=0.5 if alive else stale_after_sec + 1,
+                last_segment_at="2026-04-17T12:00:00+00:00",
+                segment_count=4 if alive else 0,
+            )
+        )
 
 
 class _FakeMQTTClient:
@@ -155,6 +165,10 @@ class DevicePresenceServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["health"]["online_cameras"], 1)
         self.assertEqual(snapshot["runtime"]["light_mode"], False)
         self.assertEqual(snapshot["runtime"]["dev_mode"], True)
+        self.assertEqual(snapshot["cameras"][0]["buffer_status"], "FRESH")
+        self.assertEqual(snapshot["cameras"][0]["buffer_fresh"], True)
+        self.assertEqual(snapshot["cameras"][1]["buffer_status"], "STALE")
+        self.assertEqual(snapshot["cameras"][1]["camera_status"], "UNAVAILABLE")
 
 
 if __name__ == "__main__":

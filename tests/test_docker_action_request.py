@@ -26,6 +26,7 @@ class DockerActionRequestServiceTests(unittest.TestCase):
             payload = json.loads(request_path.read_text())
             self.assertEqual(payload["schema_version"], 1)
             self.assertEqual(payload["action"], "pull_and_recreate")
+            self.assertEqual(payload["source"], "pico")
             self.assertEqual(payload["token"], "PULL_DOCKER")
 
     def test_restart_token_writes_request_file(self) -> None:
@@ -43,6 +44,25 @@ class DockerActionRequestServiceTests(unittest.TestCase):
             self.assertTrue(handled)
             payload = json.loads(request_path.read_text())
             self.assertEqual(payload["action"], "restart_container")
+            self.assertEqual(payload["source"], "pico")
+
+    def test_admin_env_restart_writes_request_file_without_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            request_path = Path(tmp) / "docker-action.request.json"
+            service = DockerActionRequestService(
+                enabled=True,
+                request_path=request_path,
+                pull_token="PULL_DOCKER",
+                restart_token="RESTART_DOCKER",
+            )
+
+            handled = service.request_action("restart_container", source="admin_env")
+
+            self.assertTrue(handled)
+            payload = json.loads(request_path.read_text())
+            self.assertEqual(payload["action"], "restart_container")
+            self.assertEqual(payload["source"], "admin_env")
+            self.assertNotIn("token", payload)
 
     def test_disabled_matching_token_is_consumed_without_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

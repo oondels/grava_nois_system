@@ -27,6 +27,7 @@ from src.services.mqtt.device_config_service import (
     apply_pending_config_on_startup,
 )
 from src.services.mqtt.device_env_service import DeviceEnvService
+from src.services.mqtt.capture_event_service import CaptureEventService
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
@@ -50,6 +51,7 @@ PICO_ACK_STARTED = "ACK_GRN_STARTED"
 PICO_STARTED_INITIAL_DELAY_SEC = 0.8
 PICO_STARTED_RETRY_DELAYS_SEC = (0.25, 0.5, 1.0, 2.0, 5.0)
 PICO_STARTED_WARNING_INTERVAL_SEC = 10.0
+CAMERA_STALE_AFTER_SEC = 10.0
 
 
 def _configure_pico_serial(fd: int, _logger: object | None = None) -> None:
@@ -179,18 +181,79 @@ class CameraRuntime:
     restart_attempts: int = 0
 
 
+def _camera_readiness(rt: CameraRuntime) -> dict[str, object]:
+    ffmpeg_alive = rt.proc is not None and rt.proc.poll() is None
+    if rt.segbuf is None:
+        buffer_status = "NO_BUFFER"
+        diagnostics = None
+    else:
+        diagnostics = rt.segbuf.diagnostics(stale_after_sec=CAMERA_STALE_AFTER_SEC)
+        buffer_status = diagnostics.buffer_status
+
+    ready = ffmpeg_alive and rt.segbuf is not None and buffer_status == "FRESH"
+    if ready:
+        rt.camera_status = "OK"
+        if rt.last_error.startswith("Buffer"):
+            rt.last_error = ""
+            rt.last_error_at = ""
+    else:
+        rt.camera_status = "UNAVAILABLE"
+        if not ffmpeg_alive:
+            reason = "FFmpeg indisponível"
+        elif rt.segbuf is None:
+            reason = "SegmentBuffer indisponível"
+        elif buffer_status == "STALE":
+            reason = "Buffer sem segmentos novos"
+        elif buffer_status == "EMPTY":
+            reason = "Buffer sem segmentos"
+        else:
+            reason = f"Buffer status={buffer_status}"
+        if rt.last_error != reason:
+            rt.last_error = reason
+            rt.last_error_at = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "ready": ready,
+        "ffmpeg_alive": ffmpeg_alive,
+        "buffer_status": buffer_status,
+        "segment_age_sec": diagnostics.segment_age_sec if diagnostics else None,
+        "last_segment_at": diagnostics.last_segment_at if diagnostics else None,
+        "buffer_segment_count": diagnostics.segment_count if diagnostics else 0,
+        "reason": rt.last_error,
+    }
+
+
 def _trigger_fan_out(
     runtimes: list[CameraRuntime],
     failed_dir_highlight: Path,
     executor: ThreadPoolExecutor,
     trigger_id: str,
+    *,
+    trigger_source: str = "unknown",
+    capture_event_service: CaptureEventService | None = None,
 ) -> None:
     """Dispatch trigger concurrently to all active cameras."""
 
     def _process_one(rt: CameraRuntime) -> None:
         cfg = rt.cfg
-        if rt.proc is None or rt.proc.poll() is not None or rt.segbuf is None:
-            logger.warning(f"[{cfg.camera_id}][{trigger_id}] câmera indisponível – skipping")
+        readiness = _camera_readiness(rt)
+        if not readiness["ready"]:
+            reason = str(readiness["reason"] or "camera_not_ready")
+            logger.warning(
+                f"[{cfg.camera_id}][{trigger_id}] câmera indisponível ({reason}) – skipping"
+            )
+            if capture_event_service is not None:
+                capture_event_service.publish_trigger_rejected(
+                    camera_id=cfg.camera_id,
+                    trigger_id=trigger_id,
+                    trigger_source=trigger_source,
+                    reason=reason,
+                    camera_status=rt.camera_status,
+                    ffmpeg_alive=bool(readiness["ffmpeg_alive"]),
+                    buffer_status=str(readiness["buffer_status"]),
+                    segment_age_sec=readiness["segment_age_sec"],  # type: ignore[arg-type]
+                    last_segment_at=readiness["last_segment_at"],  # type: ignore[arg-type]
+                )
             return
         if not rt.capture_lock.acquire(blocking=False):
             logger.info(f"[{cfg.camera_id}][{trigger_id}] busy – skipping")
@@ -244,6 +307,8 @@ def _trigger_single_camera(
     trigger_id: str,
     cooldown_sec: float,
     skip_cooldown: bool = False,
+    trigger_source: str = "unknown",
+    capture_event_service: CaptureEventService | None = None,
 ) -> None:
     """Trigger a single camera respecting its per-camera cooldown (unless skip_cooldown=True)."""
     if not skip_cooldown:
@@ -255,7 +320,14 @@ def _trigger_single_camera(
             )
             return
         rt._cooldown_until = now + cooldown_sec
-    _trigger_fan_out([rt], failed_dir_highlight, executor, trigger_id)
+    _trigger_fan_out(
+        [rt],
+        failed_dir_highlight,
+        executor,
+        trigger_id,
+        trigger_source=trigger_source,
+        capture_event_service=capture_event_service,
+    )
 
 
 def _get_fanout_targets(runtimes: list[CameraRuntime]) -> list[CameraRuntime]:
@@ -285,6 +357,7 @@ def _camera_supervisor(
     while not stop_evt.is_set():
         needs_start = rt.proc is None or rt.proc.poll() is not None
         if not needs_start:
+            _camera_readiness(rt)
             retry_delay = 5.0
             next_start_delay = 0.0
             if stop_evt.wait(5.0):
@@ -382,6 +455,7 @@ def main() -> int:
     mqtt_dispatcher: CommandDispatcher | None = None
     mqtt_config_service: DeviceConfigService | None = None
     mqtt_env_service: DeviceEnvService | None = None
+    capture_event_service: CaptureEventService | None = None
 
     if mqtt_config.enabled and not device_id:
         mqtt_logger.warning(
@@ -394,9 +468,12 @@ def main() -> int:
                 light_mode=light_mode,
                 dev_mode=dev_mode,
                 trigger_source=trigger_source,
+                camera_stale_after_sec=CAMERA_STALE_AFTER_SEC,
             )
             snapshot["health"]["gpio_enabled"] = gpio_enabled
             snapshot["health"]["pico_enabled"] = pico_enabled
+            if capture_event_service is not None:
+                capture_event_service.flush_outbox()
             return snapshot
 
         try:
@@ -440,6 +517,18 @@ def main() -> int:
                     os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
                 ),
                 agent_version=mqtt_config.agent_version,
+            )
+            capture_event_service = CaptureEventService(
+                mqtt_client,
+                topic=mqtt_config.topic_for(device_id, "capture/events"),
+                device_id=device_id,
+                client_id=client_id,
+                venue_id=venue_id,
+                device_secret=(
+                    os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
+                ),
+                agent_version=mqtt_config.agent_version,
+                outbox_dir=base / "runtime_config" / "capture_event_outbox",
             )
             if startup_config_report is not None:
                 mqtt_config_service.queue_startup_report(startup_config_report)
@@ -548,7 +637,9 @@ def main() -> int:
                     )
                     _trigger_single_camera(
                         rt, failed_dir_highlight, trigger_executor, tid, gpio_cooldown_sec,
-                        skip_cooldown=dev_mode
+                        skip_cooldown=dev_mode,
+                        trigger_source="pico",
+                        capture_event_service=capture_event_service,
                     )
                 return _handler
             token_map[_token.strip().upper()] = _make_handler(_rt)
@@ -798,7 +889,14 @@ def main() -> int:
                 continue
 
             trigger_id = uuid.uuid4().hex[:8]
-            _trigger_fan_out(fanout_targets, failed_dir_highlight, trigger_executor, trigger_id)
+            _trigger_fan_out(
+                fanout_targets,
+                failed_dir_highlight,
+                trigger_executor,
+                trigger_id,
+                trigger_source=trig,
+                capture_event_service=capture_event_service,
+            )
 
     except KeyboardInterrupt:
         logger.info("Encerrando...")

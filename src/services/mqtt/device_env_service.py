@@ -22,6 +22,7 @@ from typing import Any
 
 from src.security.env_envelope import open_env_envelope, seal_env_envelope
 from src.security.hmac import hmac_sha256_base64
+from src.services.docker_action_request import DockerActionRequestService
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
 from src.utils.logger import setup_logger
 
@@ -456,7 +457,19 @@ class DeviceEnvService:
 
         def _do_restart() -> None:
             _audit_log("env_restart_triggered", deviceId=self.device_id)
-            mqtt_logger.info("Executando restart do container...")
+            mqtt_logger.info("Solicitando recriacao do container via runner Docker do host...")
+            requested = DockerActionRequestService.from_env(
+                logger=mqtt_logger
+            ).request_action(
+                "restart_container",
+                source="admin_env",
+                fallback_on_failure=True,
+            )
+            if requested:
+                return
+            mqtt_logger.warning(
+                "Runner Docker indisponivel; aplicando fallback com TERM no PID 1"
+            )
             os.system("kill -TERM 1")  # noqa: S605 - PID 1 = init do container
 
         threading.Timer(3.0, _do_restart).start()

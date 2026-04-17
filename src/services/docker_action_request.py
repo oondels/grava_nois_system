@@ -57,14 +57,28 @@ class DockerActionRequestService:
         if not action:
             return False
 
+        return self.request_action(action, source="pico", token=normalized)
+
+    def request_action(
+        self,
+        action: str,
+        *,
+        source: str,
+        token: str | None = None,
+        fallback_on_failure: bool = False,
+    ) -> bool:
+        if action not in {"pull_and_recreate", "restart_container"}:
+            self._log("warning", "Acao Docker invalida ignorada: %s", action)
+            return False
+
         if not self.enabled:
-            self._log("warning", "Acao Docker via Pico ignorada: recurso desabilitado")
-            return True
+            self._log("warning", "Acao Docker ignorada: recurso desabilitado")
+            return not fallback_on_failure
 
         if self.request_path.exists():
             self._log(
                 "warning",
-                "Acao Docker via Pico ignorada: ja existe requisicao pendente em %s",
+                "Acao Docker ignorada: ja existe requisicao pendente em %s",
                 self.request_path,
             )
             return True
@@ -74,28 +88,31 @@ class DockerActionRequestService:
                 "schema_version": 1,
                 "request_id": str(uuid.uuid4()),
                 "requested_at": datetime.now(timezone.utc).isoformat(),
-                "source": "pico",
+                "source": source,
                 "action": action,
-                "token": normalized,
                 "pid": os.getpid(),
             }
+            if token:
+                payload["token"] = token
             self.request_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self.request_path.with_name(f".{self.request_path.name}.tmp")
             tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
             tmp_path.replace(self.request_path)
             self._log(
                 "warning",
-                "Acao Docker via Pico solicitada: %s (request_id=%s)",
+                "Acao Docker solicitada: %s source=%s (request_id=%s)",
                 action,
+                source,
                 payload["request_id"],
             )
         except Exception as exc:
             self._log(
                 "error",
-                "Falha ao registrar acao Docker via Pico em %s: %s",
+                "Falha ao registrar acao Docker em %s: %s",
                 self.request_path,
                 exc,
             )
+            return not fallback_on_failure
         return True
 
     def _action_for_token(self, token: str) -> str | None:

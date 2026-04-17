@@ -128,6 +128,7 @@ Publicações da fase 1:
 - `grn/devices/{device_id}/presence` (retained)
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
+- `grn/devices/{device_id}/capture/events`
 - `grn/devices/{device_id}/config/reported`
 - `grn/devices/{device_id}/config/state`
 
@@ -164,7 +165,11 @@ Exemplos rápidos por tópico:
   - payload típico: mesmo envelope base de presença com `status=online`
 - `state`
   - tópico: `grn/devices/edge-test-01/state`
-  - payload típico: envelope expandido com `cameras[]`, `runtime`, `camera_status`, `restart_attempts` e métricas de storage/fila (`failed_clips_count`, `upload_failed_count`, `disk_free_bytes`, `storage_status`)
+  - payload típico: envelope expandido com `cameras[]`, `runtime`, `camera_status`, `restart_attempts`, diagnóstico de buffer (`buffer_status`, `buffer_fresh`, `segment_age_sec`, `last_segment_at`) e métricas de storage/fila (`failed_clips_count`, `upload_failed_count`, `disk_free_bytes`, `storage_status`)
+- `capture/events`
+  - tópico: `grn/devices/edge-test-01/capture/events`
+  - payload típico: `type=capture.trigger_rejected`, `event_id`, `camera_id`, `trigger_source`, `reason`, `camera_status`, `buffer_status`, `occurred_at` e assinatura HMAC
+  - regra: publicado quando um trigger é recebido, mas a câmera/buffer não está apta a gerar clipe; impede falso positivo com segmento antigo
 - `events`
   - tópico reservado para eventos operacionais futuros; fase 1 não publica nele
 - `alerts`
@@ -223,7 +228,7 @@ Canonical string:
 - `ACK_GRN_STARTED` recebido do Pico é logado como info e ignorado (não dispara câmera nem Docker);
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
-O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. `PULL_DOCKER` executa pull e recriação por compose; `RESTART_DOCKER` executa recriação por compose sem pull, para reler `env_file` e aplicar mudanças de `.env`.
+O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. `PULL_DOCKER` executa pull e recriação por compose; `RESTART_DOCKER` executa recriação por compose sem pull, para reler `env_file` e aplicar mudanças de `.env`. Antes da recriação, o runner do host regenera o `config.json` runtime a partir do `.env`, evitando que uma edição admin fique mascarada por configuração operacional antiga.
 
 ## WiFi Provisioning (hotspot local)
 

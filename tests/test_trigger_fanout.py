@@ -5,6 +5,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.config.settings import CaptureConfig
@@ -16,6 +17,13 @@ def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> Came
     cfg.camera_id = camera_id
     cfg.pico_trigger_token = pico_trigger_token
     segbuf = MagicMock()
+    segbuf.diagnostics.return_value = SimpleNamespace(
+        buffer_status="FRESH",
+        buffer_fresh=True,
+        segment_age_sec=0.5,
+        last_segment_at="2026-04-17T12:00:00+00:00",
+        segment_count=10,
+    )
     proc = MagicMock()
     proc.poll.return_value = None
     return CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf, camera_status="OK")
@@ -88,6 +96,31 @@ class TriggerFanOutTests(unittest.TestCase):
         self.assertTrue(acquired)
         if acquired:
             rt.capture_lock.release()
+
+    def test_stale_buffer_is_skipped_and_event_is_published(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.segbuf.diagnostics.return_value = SimpleNamespace(
+            buffer_status="STALE",
+            buffer_fresh=False,
+            segment_age_sec=12.0,
+            last_segment_at="2026-04-17T12:00:00+00:00",
+            segment_count=10,
+        )
+        event_service = MagicMock()
+
+        with patch("main.build_highlight") as build_mock, \
+             ThreadPoolExecutor(max_workers=1) as exe:
+            _trigger_fan_out(
+                [rt],
+                Path("/tmp/failed"),
+                exe,
+                "stale-001",
+                trigger_source="pico",
+                capture_event_service=event_service,
+            )
+
+        build_mock.assert_not_called()
+        event_service.publish_trigger_rejected.assert_called_once()
 
 
 class PicoTokenRoutingTests(unittest.TestCase):
