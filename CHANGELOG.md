@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-04-16
+
+### Changed
+- Documentado que o token `RESTART_DOCKER` deve recriar o container via compose no host, sem pull de imagem, para reler `env_file` e aplicar alterações remotas no `.env`.
+- Documentado que o token `PULL_DOCKER` executa pull e recriação por compose, preservando `runtime_config` como volume persistente.
+
 ## 2026-04-13
 
 ### Added

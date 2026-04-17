@@ -131,10 +131,8 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             raise RuntimeError(
                 f"Câmera RTSP não acessível após {max_retries} tentativas. "
                 "Verifique:\n"
-                "  1. Se a câmera está ligada e conectada à rede\n"
-                "  2. Se o endereço IP e porta estão corretos em GN_RTSP_URL\n"
-                "  3. Se há conectividade de rede entre Raspberry e câmera\n"
-                "  4. Se o firewall não está bloqueando a porta RTSP (padrão: 554)"
+                "  1. Se a câmera está ligada e conectada à rede;\n"
+                "  2. Se o endereço IP está correto (Verificar no aplicativo da câmera);\n"
             )
 
     if use_rtsp:
