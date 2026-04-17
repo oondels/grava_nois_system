@@ -559,9 +559,9 @@ GN_HQ_PRESET=medium             # Preset do encode com watermark no modo normal
 GN_LM_CRF=26                    # CRF do encode com watermark no modo leve
 GN_LM_PRESET=veryfast           # Preset do encode com watermark no modo leve
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
-GN_WM_OPACITY=0.8               # Opacidade alvo da logo (limitada internamente a 70-85%)
+GN_WM_OPACITY=0.8               # Opacidade da logo (0.0 a 1.0)
 GN_WM_MARGIN=24                 # Margem vertical da safe zone
-VERTICAL_FORMAT=1               # Crop central 9:16 sem upscale forçado
+VERTICAL_FORMAT=0               # 1=crop central 9:16 sem upscale forçado
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
@@ -1118,6 +1118,23 @@ Para câmeras RTSP, especialmente em redes WiFi instáveis, existem várias opç
 - **Qualidade de Compressão** (`GN_RTSP_CRF`, `GN_RTSP_PRESET`)
 - **Limitação de Taxa de Frames** (`GN_RTSP_FPS`)
 - **Script de Teste Automático** (`./test_wallclock_quality.sh`)
+
+**Início rápido para qualidade máxima:**
+
+```bash
+# Evita reencode na captura; watermark final ainda reencoda para aplicar branding.
+GN_RTSP_PROFILE=hq \
+GN_RTSP_REENCODE=0 \
+GN_RTSP_FPS= \
+GN_RTSP_USE_WALLCLOCK=0 \
+GN_LIGHT_MODE=0 \
+GN_HQ_CRF=16 \
+GN_HQ_PRESET=slow \
+VERTICAL_FORMAT=0 \
+python main.py
+```
+
+Para esse perfil funcionar bem, configure a própria câmera com FPS fixo e GOP/I-frame interval de 1 segundo.
 
 **Início rápido para câmeras problemáticas:**
 
