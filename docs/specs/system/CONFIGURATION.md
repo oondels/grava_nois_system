@@ -94,8 +94,23 @@ Duas opções:
 - **Padrão local**: `config.json` na raiz do projeto (mesmo diretório de `main.py`).
 - **Override**: defina `GN_CONFIG_PATH=/caminho/para/config.json` no env.
 - **Docker provisionado**: monte o diretorio persistente de config como volume gravavel e defina `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`. O `.env` deve continuar montado separadamente como somente leitura.
+- **Gerenciamento admin de `.env`**: defina `GN_HOST_ENV_PATH` apontando para o `.env` real montado em volume gravável dentro do container. No compose gerenciado, o padrão é `/usr/src/app/host_config/.env`.
 
 Se o arquivo não existir, o sistema opera com valores de env e defaults — sem erro.
+
+Para o painel admin conseguir visualizar/editar `.env`, o path de `GN_HOST_ENV_PATH` precisa existir no container. Em teste local com `docker-compose.yml`, mantenha `.env` na raiz do repo e o volume `.:/usr/src/app/host_config:rw`. Em device provisionado pelo `grava_nois_config`, o setup monta `/opt/.grn/config:/usr/src/app/host_config:rw`.
+
+---
+
+## Gerenciamento remoto de `.env` via admin
+
+O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env` do host pelo app, usando MQTT e SSE:
+
+- `env/request`: backend solicita snapshot do `.env`;
+- `env/desired`: backend envia o novo conteúdo criptografado;
+- `env/reported`: edge responde snapshot, aplicação ou rejeição.
+
+O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
 
 ---
 

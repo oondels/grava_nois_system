@@ -125,6 +125,11 @@ class DeviceEnvService:
             bool(self.device_secret),
             self.mqtt_client.is_connected,
         )
+        if not self.env_path.exists():
+            mqtt_logger.warning(
+                "DeviceEnvService iniciado sem .env acessível em %s; sync admin retornará rejected até montar host_config/GN_HOST_ENV_PATH corretamente",
+                self.env_path,
+            )
         if not self._connect_listener_registered:
             self.mqtt_client.add_on_connect_listener(self._handle_mqtt_connect)
             self._connect_listener_registered = True

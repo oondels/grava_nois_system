@@ -405,6 +405,7 @@ sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.js
 - Documentação completa: [`docs/specs/system/CONFIGURATION.md`](docs/specs/system/CONFIGURATION.md)
 - Override de path: `GN_CONFIG_PATH=/caminho/para/config.json`
 - Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
+- Para gerenciamento admin de `.env`, monte o diretório que contém o `.env` em `/usr/src/app/host_config:rw` e defina `GN_HOST_ENV_PATH=/usr/src/app/host_config/.env`. Se esse arquivo não existir no container, o edge responderá `env.reported` com `status=rejected`.
 
 **Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
 
