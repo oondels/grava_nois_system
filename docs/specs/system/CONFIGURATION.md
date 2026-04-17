@@ -112,6 +112,8 @@ O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env`
 
 O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
 
+Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. No fluxo instalado pelo `grava_nois_config`, esse runner regenera `/opt/.grn/config/runtime/config.json` a partir de `/opt/.grn/config/.env` antes do `docker compose up -d --force-recreate --remove-orphans`. Identidade e segredos permanecem somente no `.env` e não são migrados para `config.json`.
+
 ---
 
 ## Formato e campos especiais

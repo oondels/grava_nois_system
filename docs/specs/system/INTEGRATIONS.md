@@ -228,7 +228,7 @@ Canonical string:
 - `ACK_GRN_STARTED` recebido do Pico é logado como info e ignorado (não dispara câmera nem Docker);
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
-O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. `PULL_DOCKER` executa pull e recriação por compose; `RESTART_DOCKER` executa recriação por compose sem pull, para reler `env_file` e aplicar mudanças de `.env`.
+O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. `PULL_DOCKER` executa pull e recriação por compose; `RESTART_DOCKER` executa recriação por compose sem pull, para reler `env_file` e aplicar mudanças de `.env`. Antes da recriação, o runner do host regenera o `config.json` runtime a partir do `.env`, evitando que uma edição admin fique mascarada por configuração operacional antiga.
 
 ## WiFi Provisioning (hotspot local)
 

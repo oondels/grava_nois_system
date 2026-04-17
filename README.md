@@ -536,7 +536,7 @@ GN_PICO_DOCKER_RESTART_TOKEN=RESTART_DOCKER
 GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
 ```
 
-O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --force-recreate --remove-orphans` ou `docker compose up -d --force-recreate --remove-orphans`. O `RESTART_DOCKER` recria o container para reler `env_file` e aplicar alterações no `.env`; não baixa imagem nova. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --force-recreate --remove-orphans` ou `docker compose up -d --force-recreate --remove-orphans`. Antes de recriar, o runner do host regenera `config.json` a partir do `.env`, preservando identidade e segredos somente no `.env`. O `RESTART_DOCKER` recria o container para reler `env_file` e aplicar alterações no `.env`; não baixa imagem nova. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
