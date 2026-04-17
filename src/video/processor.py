@@ -18,6 +18,8 @@ from src.video.buffer import SegmentBuffer
 
 load_dotenv()
 
+CAMERA_STALE_AFTER_SEC = 10.0
+
 
 def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
     logger.info("Botão apertado! Aguardando pós-buffer...")
@@ -32,6 +34,17 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
     else:
         wait_after = cfg.post_seconds
     time.sleep(max(0, wait_after) + 0.50)
+
+    diagnostics = segbuf.diagnostics(stale_after_sec=CAMERA_STALE_AFTER_SEC)
+    if not diagnostics.buffer_fresh:
+        logger.warning(
+            "[%s] Buffer não está fresco após trigger: status=%s age=%s count=%s",
+            cfg.camera_id,
+            diagnostics.buffer_status,
+            diagnostics.segment_age_sec,
+            diagnostics.segment_count,
+        )
+        return None
 
     # Calcula quantos segmentos de vídeo são necessários para cobrir o tempo total do highlight
     # (pré-buffer + pós-buffer). Como cada segmento tem duração cfg.seg_time, dividimos o tempo

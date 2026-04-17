@@ -640,7 +640,7 @@ Observações:
 
 ### Objetivo
 
-Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE` e reiniciadas automaticamente por um supervisor em background com backoff exponencial.
+Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE`; o supervisor só reinicia o FFmpeg quando o processo cai, enquanto buffer sem segmentos recentes apenas bloqueia o trigger, registra log e reporta evento MQTT.
 
 ### Variáveis principais
 
@@ -664,6 +664,7 @@ Observação:
 - `grn/devices/{device_id}/presence`
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
+- `grn/devices/{device_id}/capture/events`
 - `grn/devices/{device_id}/events`
 - `grn/devices/{device_id}/alerts`
 - `grn/devices/{device_id}/config/desired`
@@ -794,7 +795,12 @@ Exemplo de payload:
       "camera_status": "OK",
       "last_error": "",
       "last_error_at": "",
-      "restart_attempts": 0
+      "restart_attempts": 0,
+      "buffer_status": "FRESH",
+      "buffer_fresh": true,
+      "segment_age_sec": 0.5,
+      "last_segment_at": "2026-04-05T19:10:29+00:00",
+      "buffer_segment_count": 12
     },
     {
       "camera_id": "cam02",
@@ -806,7 +812,12 @@ Exemplo de payload:
       "camera_status": "UNAVAILABLE",
       "last_error": "Câmera RTSP não acessível após tentativas configuradas",
       "last_error_at": "2026-04-05T19:10:25+00:00",
-      "restart_attempts": 3
+      "restart_attempts": 3,
+      "buffer_status": "STALE",
+      "buffer_fresh": false,
+      "segment_age_sec": 18.2,
+      "last_segment_at": "2026-04-05T19:10:07+00:00",
+      "buffer_segment_count": 3
     }
   ],
   "runtime": {
@@ -816,6 +827,36 @@ Exemplo de payload:
   }
 }
 ```
+
+#### `grn/devices/{device_id}/capture/events`
+
+Evento assinado publicado quando um trigger é rejeitado por falta de câmera/buffer válido. O edge não gera clipe fantasma com segmentos antigos.
+
+```json
+{
+  "type": "capture.trigger_rejected",
+  "event_id": "f4b2d9c8-5f0d-4d7a-8b20-3e3f6f9f6d0a",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "camera_id": "cam02",
+  "trigger_id": "pico-cam02",
+  "trigger_source": "pico",
+  "reason": "Buffer sem segmentos novos",
+  "severity": "warning",
+  "occurred_at": "2026-04-05T19:10:30+00:00",
+  "camera_status": "UNAVAILABLE",
+  "ffmpeg_alive": true,
+  "buffer_status": "STALE",
+  "segment_age_sec": 18.2,
+  "last_segment_at": "2026-04-05T19:10:07+00:00",
+  "agent_version": "1.0.0-edge",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "<base64>"
+}
+```
+
+Se MQTT estiver indisponível, o evento é salvo em `runtime_config/capture_event_outbox/` e reenviado quando o heartbeat conseguir reconectar.
 
 #### `grn/devices/{device_id}/events`
 
