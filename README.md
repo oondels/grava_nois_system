@@ -640,7 +640,7 @@ Observações:
 
 ### Objetivo
 
-Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE`; o supervisor só reinicia o FFmpeg quando o processo cai, enquanto buffer sem segmentos recentes apenas bloqueia o trigger, registra log e reporta evento MQTT.
+Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE`; o supervisor reinicia o FFmpeg quando o processo cai ou quando o buffer fica sem segmentos recentes de forma persistente. Durante a indisponibilidade, triggers são bloqueados, logs registram o motivo e o evento MQTT é publicado.
 
 ### Variáveis principais
 

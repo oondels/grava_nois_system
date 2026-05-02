@@ -101,7 +101,7 @@ Consequência:
 - o trigger global (ENTER/GPIO/token Pico global) faz fan-out para câmeras sem token dedicado;
 - câmeras com `pico_trigger_token` só disparam quando o token dedicado é recebido;
 - o lock evita sobreposição de build; o cooldown evita cliques acidentais em sequência.
-- câmera indisponível não aborta o edge; o trigger é ignorado para ela e o supervisor continua tentando restabelecer FFmpeg.
+- câmera indisponível não aborta o edge; o trigger é ignorado para ela e o supervisor continua tentando restabelecer FFmpeg, inclusive quando o processo permanece vivo mas o buffer deixa de receber segmentos.
 
 ## Queue and filesystem model
 

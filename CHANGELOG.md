@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-05-02
+
+### Fixed
+- Supervisor de camera passa a reiniciar apenas o FFmpeg da camera quando o buffer fica `STALE`/`MISSING`/`UNKNOWN` de forma persistente, cobrindo o caso de processo vivo sem novos segmentos apos queda/religamento RTSP.
+- Healthcheck Docker deixa de depender de `pgrep`/`procps` e passa a verificar o processo principal via Python e `/proc/1/cmdline`, evitando falso `unhealthy` em imagens slim.
+
 ## 2026-04-17
 
 ### Changed
@@ -43,7 +49,7 @@
 ### Changed
 - **MQTT inicia antes das câmeras**: presença e heartbeat publicam status mesmo com falha total de hardware.
 - Startup de câmera não-fatal: falha em `start_ffmpeg()` marca câmera como `UNAVAILABLE` sem abortar o processo.
-- Healthcheck Docker mede liveness do processo Python (`pgrep -f 'python.*main'`) em vez de FFmpeg.
+- Healthcheck Docker mede liveness do processo Python em vez de FFmpeg.
 - `CameraRuntime.proc` e `.segbuf` agora são opcionais (`None` quando câmera indisponível).
 - Heartbeat MQTT protegido com try/except permanente; snapshot provider com fallback seguro.
 - Shutdown gracioso verifica `proc` e `segbuf` antes de chamar `terminate()`/`stop()`.

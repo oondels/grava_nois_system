@@ -52,6 +52,10 @@ PICO_STARTED_INITIAL_DELAY_SEC = 0.8
 PICO_STARTED_RETRY_DELAYS_SEC = (0.25, 0.5, 1.0, 2.0, 5.0)
 PICO_STARTED_WARNING_INTERVAL_SEC = 10.0
 CAMERA_STALE_AFTER_SEC = 10.0
+CAMERA_STALE_RESTART_AFTER_SEC = 30.0
+CAMERA_STALE_RESTART_CYCLES = 3
+CAMERA_STALE_RESTART_STATUSES = {"STALE", "MISSING", "UNKNOWN"}
+CAMERA_SUPERVISOR_INTERVAL_SEC = 5.0
 
 
 def _configure_pico_serial(fd: int, _logger: object | None = None) -> None:
@@ -346,23 +350,97 @@ def _serial_line_is_trigger(line: str, token: str) -> bool:
     return bool(normalized_line) and normalized_line == normalized_token
 
 
+def _terminate_ffmpeg_process(
+    rt: CameraRuntime,
+    *,
+    reason: str,
+    terminate_timeout: float = 5.0,
+) -> None:
+    proc = rt.proc
+    if proc is None:
+        return
+
+    if proc.poll() is not None:
+        rt.proc = None
+        return
+
+    logger.warning(f"[{rt.cfg.camera_id}] Encerrando FFmpeg para recuperar câmera: {reason}")
+    try:
+        proc.terminate()
+        proc.wait(timeout=terminate_timeout)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            f"[{rt.cfg.camera_id}] FFmpeg não encerrou em {terminate_timeout:.0f}s; forçando kill"
+        )
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception as exc:
+            logger.warning(f"[{rt.cfg.camera_id}] Falha ao finalizar FFmpeg com kill: {exc}")
+    except Exception as exc:
+        logger.warning(f"[{rt.cfg.camera_id}] Falha ao encerrar FFmpeg: {exc}")
+    finally:
+        rt.proc = None
+
+
 def _camera_supervisor(
     rt: CameraRuntime,
     stop_evt: threading.Event,
     max_backoff: float = 300.0,
+    stale_restart_after_sec: float = CAMERA_STALE_RESTART_AFTER_SEC,
+    stale_restart_cycles: int = CAMERA_STALE_RESTART_CYCLES,
+    poll_interval: float = CAMERA_SUPERVISOR_INTERVAL_SEC,
 ) -> None:
     """Background thread that monitors and restarts FFmpeg for a camera."""
     retry_delay = 5.0
     next_start_delay = 0.0
+    stale_since: float | None = None
+    stale_cycles = 0
     while not stop_evt.is_set():
         needs_start = rt.proc is None or rt.proc.poll() is not None
         if not needs_start:
-            _camera_readiness(rt)
-            retry_delay = 5.0
-            next_start_delay = 0.0
-            if stop_evt.wait(5.0):
-                break
-            continue
+            readiness = _camera_readiness(rt)
+            buffer_status = str(readiness.get("buffer_status") or "")
+            if buffer_status in CAMERA_STALE_RESTART_STATUSES:
+                now = time.monotonic()
+                if stale_since is None:
+                    stale_since = now
+                    stale_cycles = 1
+                    logger.warning(
+                        f"[{rt.cfg.camera_id}] Buffer {buffer_status} detectado; "
+                        "monitorando antes de reiniciar FFmpeg"
+                    )
+                else:
+                    stale_cycles += 1
+
+                stale_elapsed = now - stale_since
+                if (
+                    stale_elapsed >= stale_restart_after_sec
+                    or stale_cycles >= stale_restart_cycles
+                ):
+                    reason = (
+                        f"buffer {buffer_status} persistente por "
+                        f"{stale_elapsed:.0f}s/{stale_cycles} ciclos"
+                    )
+                    _terminate_ffmpeg_process(rt, reason=reason)
+                    needs_start = True
+                    next_start_delay = 0.0
+                    stale_since = None
+                    stale_cycles = 0
+                else:
+                    retry_delay = 5.0
+                    next_start_delay = 0.0
+                    if stop_evt.wait(poll_interval):
+                        break
+                    continue
+            else:
+                stale_since = None
+                stale_cycles = 0
+                retry_delay = 5.0
+                next_start_delay = 0.0
+                if stop_evt.wait(poll_interval):
+                    break
+                continue
 
         if rt.camera_status == "OK":
             rt.camera_status = "ERROR"

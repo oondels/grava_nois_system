@@ -11,6 +11,7 @@ O bootstrap de captura é resiliente e não deve bloquear MQTT/presença nem o h
 5. inicia um supervisor por câmera em background;
 6. o supervisor faz a primeira tentativa de FFmpeg, cria `SegmentBuffer` e marca `camera_status=OK`;
 7. se FFmpeg falhar, marca `camera_status=UNAVAILABLE`, mantém o edge vivo e tenta novamente com backoff.
+8. se FFmpeg continuar vivo mas o buffer ficar sem segmentos novos de forma persistente, o supervisor encerra apenas esse FFmpeg e entra no mesmo fluxo de restart/backoff.
 
 Entradas possíveis:
 
@@ -36,7 +37,7 @@ O `SegmentBuffer`:
 - mantém janela deslizante;
 - remove arquivos excedentes do buffer.
 
-Quando a câmera está indisponível (`proc=None`, processo encerrado ou `segbuf=None`) ou quando o último segmento está velho demais, triggers para aquela câmera são ignorados com warning. Isso evita build com segmentos antigos e mantém os demais módulos operando. A queda real do processo FFmpeg continua sendo tratada pelo supervisor; buffer stale por si só não reinicia o container nem força restart do sistema.
+Quando a câmera está indisponível (`proc=None`, processo encerrado ou `segbuf=None`) ou quando o último segmento está velho demais, triggers para aquela câmera são ignorados com warning. Isso evita build com segmentos antigos e mantém os demais módulos operando. A queda real do processo FFmpeg continua sendo tratada pelo supervisor; buffer stale persistente reinicia apenas o FFmpeg da câmera afetada, sem reiniciar o container nem forçar restart do sistema.
 
 ## 3. Trigger flow
 

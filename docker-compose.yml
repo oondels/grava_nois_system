@@ -17,7 +17,7 @@ services:
     # Health check: verifica se o processo principal Python está vivo
     # (câmeras podem estar em modo degradado sem derrubar o container)
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'python.*main' || exit 1"]
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_text(); sys.exit(0 if 'python' in cmd and 'main.py' in cmd else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3

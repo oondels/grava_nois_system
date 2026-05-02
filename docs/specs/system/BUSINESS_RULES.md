@@ -112,7 +112,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - `heartbeat` deve sobreviver a exceções de snapshot e publicar fallback seguro quando necessário;
 - `state` deve expor saúde por câmera (`camera_status`, `ffmpeg_alive`, `restart_attempts`, `buffer_status`, `buffer_fresh`, `segment_age_sec`, `last_segment_at`) e métricas de fila/storage;
 - trigger para câmera sem FFmpeg vivo, sem `SegmentBuffer` ou com buffer sem segmentos recentes não deve gerar clipe; deve registrar warning e publicar `capture.trigger_rejected` em `grn/devices/{device_id}/capture/events`;
-- buffer sem segmentos recentes não reinicia o container nem força restart do sistema; apenas muda o diagnóstico da câmera para `UNAVAILABLE` e bloqueia clipes fantasmas;
+- buffer sem segmentos recentes muda o diagnóstico da câmera para `UNAVAILABLE`, bloqueia clipes fantasmas e, se persistente, faz o supervisor reiniciar apenas o FFmpeg daquela câmera, sem reiniciar o container;
 - eventos `capture.trigger_rejected` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET`; se MQTT estiver indisponível, devem ficar em outbox local para reenvio;
 - `mqtt.log` deve ser separado do `app.log`;
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
