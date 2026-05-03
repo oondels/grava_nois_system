@@ -386,6 +386,7 @@ def _terminate_ffmpeg_process(
 def _camera_supervisor(
     rt: CameraRuntime,
     stop_evt: threading.Event,
+    capture_event_service: CaptureEventService | None = None,
     max_backoff: float = 300.0,
     stale_restart_after_sec: float = CAMERA_STALE_RESTART_AFTER_SEC,
     stale_restart_cycles: int = CAMERA_STALE_RESTART_CYCLES,
@@ -455,7 +456,37 @@ def _camera_supervisor(
             break
 
         rt.restart_attempts += 1
+        restart_reason = rt.last_error or "Iniciando FFmpeg"
+        pre_restart_readiness = {
+            "ffmpeg_alive": rt.proc is not None and rt.proc.poll() is None,
+            "buffer_status": "NO_BUFFER",
+            "segment_age_sec": None,
+            "last_segment_at": None,
+        }
+        if rt.segbuf is not None:
+            try:
+                diagnostics = rt.segbuf.diagnostics(
+                    stale_after_sec=CAMERA_STALE_AFTER_SEC
+                )
+                pre_restart_readiness["buffer_status"] = diagnostics.buffer_status
+                pre_restart_readiness["segment_age_sec"] = diagnostics.segment_age_sec
+                pre_restart_readiness["last_segment_at"] = diagnostics.last_segment_at
+            except Exception:
+                pre_restart_readiness["buffer_status"] = "UNKNOWN"
+        rt.camera_status = "RECONNECTING"
+        rt.last_error = restart_reason
+        rt.last_error_at = datetime.now(timezone.utc).isoformat()
         logger.info(f"[{rt.cfg.camera_id}] Tentativa de start/restart #{rt.restart_attempts}")
+        if capture_event_service is not None:
+            capture_event_service.publish_camera_reconnecting(
+                camera_id=rt.cfg.camera_id,
+                reason=restart_reason,
+                restart_attempts=rt.restart_attempts,
+                ffmpeg_alive=bool(pre_restart_readiness["ffmpeg_alive"]),
+                buffer_status=str(pre_restart_readiness["buffer_status"]),
+                segment_age_sec=pre_restart_readiness["segment_age_sec"],  # type: ignore[arg-type]
+                last_segment_at=pre_restart_readiness["last_segment_at"],  # type: ignore[arg-type]
+            )
 
         try:
             if rt.segbuf is not None:
@@ -475,11 +506,26 @@ def _camera_supervisor(
             retry_delay = 5.0
             next_start_delay = 0.0
             logger.info(f"[{rt.cfg.camera_id}] Câmera reiniciada com sucesso")
+            if capture_event_service is not None:
+                capture_event_service.publish_camera_reconnected(
+                    camera_id=rt.cfg.camera_id,
+                    reason="FFmpeg reiniciado com sucesso",
+                    restart_attempts=rt.restart_attempts,
+                )
         except Exception as e:
             rt.camera_status = "UNAVAILABLE"
             rt.last_error = str(e)
             rt.last_error_at = datetime.now(timezone.utc).isoformat()
             logger.error(f"[{rt.cfg.camera_id}] Falha no restart: {e}")
+            if capture_event_service is not None:
+                capture_event_service.publish_camera_restart_failed(
+                    camera_id=rt.cfg.camera_id,
+                    reason=str(e),
+                    restart_attempts=rt.restart_attempts,
+                    buffer_status=str(pre_restart_readiness["buffer_status"]),
+                    segment_age_sec=pre_restart_readiness["segment_age_sec"],  # type: ignore[arg-type]
+                    last_segment_at=pre_restart_readiness["last_segment_at"],  # type: ignore[arg-type]
+                )
             next_start_delay = retry_delay
             retry_delay = min(retry_delay * 2, max_backoff)
 
@@ -904,7 +950,9 @@ def main() -> int:
     supervisor_threads: list[threading.Thread] = []
     for rt in runtimes:
         t = threading.Thread(
-            target=_camera_supervisor, args=(rt, stop_evt), daemon=True,
+            target=_camera_supervisor,
+            args=(rt, stop_evt, capture_event_service),
+            daemon=True,
             name=f"supervisor-{rt.cfg.camera_id}",
         )
         t.start()

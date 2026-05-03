@@ -200,12 +200,13 @@ def build_runtime_snapshot(
             else ("NO_BUFFER" if getattr(runtime, "segbuf", None) is None else "UNKNOWN")
         )
         buffer_fresh = diagnostics.buffer_fresh if diagnostics is not None else False
+        runtime_camera_status = getattr(runtime, "camera_status", "UNKNOWN")
         effective_camera_status = (
-            "OK"
-            if ffmpeg_alive and buffer_fresh
-            else getattr(runtime, "camera_status", "UNKNOWN")
+            "OK" if ffmpeg_alive and buffer_fresh else runtime_camera_status
         )
-        if not ffmpeg_alive or not buffer_fresh:
+        if (
+            not ffmpeg_alive or not buffer_fresh
+        ) and runtime_camera_status not in {"STARTING", "RECONNECTING"}:
             effective_camera_status = "UNAVAILABLE"
         cameras.append(
             {

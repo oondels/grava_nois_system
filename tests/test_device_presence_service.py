@@ -35,10 +35,19 @@ class _FakeCfg:
 
 
 class _FakeRuntime:
-    def __init__(self, camera_id: str, queue_dir, *, alive: bool = True, busy: bool = False):
+    def __init__(
+        self,
+        camera_id: str,
+        queue_dir,
+        *,
+        alive: bool = True,
+        busy: bool = False,
+        camera_status: str | None = None,
+    ):
         self.cfg = _FakeCfg(camera_id, queue_dir)
         self.proc = _FakeProc(alive=alive)
         self.capture_lock = _FakeLock(locked=busy)
+        self.camera_status = camera_status or ("OK" if alive else "UNAVAILABLE")
         self.segbuf = SimpleNamespace(
             diagnostics=lambda stale_after_sec=10.0: SimpleNamespace(
                 buffer_status="FRESH" if alive else "STALE",
@@ -169,6 +178,30 @@ class DevicePresenceServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["cameras"][0]["buffer_fresh"], True)
         self.assertEqual(snapshot["cameras"][1]["buffer_status"], "STALE")
         self.assertEqual(snapshot["cameras"][1]["camera_status"], "UNAVAILABLE")
+
+    def test_build_runtime_snapshot_preserves_reconnecting_camera_status(self) -> None:
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_dir = Path(tmp) / "cam01"
+            queue_dir.mkdir()
+            snapshot = build_runtime_snapshot(
+                runtimes=[
+                    _FakeRuntime(
+                        "cam01",
+                        queue_dir,
+                        alive=False,
+                        camera_status="RECONNECTING",
+                    ),
+                ],
+                light_mode=False,
+                dev_mode=False,
+                trigger_source="pico",
+            )
+
+        self.assertEqual(snapshot["cameras"][0]["camera_status"], "RECONNECTING")
+        self.assertEqual(snapshot["cameras"][0]["buffer_status"], "STALE")
 
 
 if __name__ == "__main__":

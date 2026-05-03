@@ -75,6 +75,64 @@ class CameraSupervisorTests(unittest.TestCase):
         self.assertIs(rt.segbuf, new_segbuf)
         self.assertEqual(rt.camera_status, "OK")
 
+    def test_restart_attempt_publishes_reconnect_events(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.proc.poll.return_value = 1
+        rt.camera_status = "ERROR"
+        rt.last_error = "FFmpeg encerrou inesperadamente"
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        new_segbuf = MagicMock()
+        event_service = MagicMock()
+        stop_evt = threading.Event()
+
+        def fake_start_ffmpeg(cfg):
+            self.assertEqual(cfg.camera_id, "cam01")
+            stop_evt.set()
+            return new_proc
+
+        with patch("main.clear_buffer"), \
+             patch("main.start_ffmpeg", side_effect=fake_start_ffmpeg), \
+             patch("main.SegmentBuffer", return_value=new_segbuf):
+            _camera_supervisor(
+                rt,
+                stop_evt,
+                event_service,
+                poll_interval=0.01,
+            )
+
+        event_service.publish_camera_reconnecting.assert_called_once()
+        event_service.publish_camera_reconnected.assert_called_once_with(
+            camera_id="cam01",
+            reason="FFmpeg reiniciado com sucesso",
+            restart_attempts=1,
+        )
+
+    def test_restart_failure_publishes_failure_event(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.proc.poll.return_value = 1
+        rt.camera_status = "ERROR"
+        rt.last_error = "FFmpeg encerrou inesperadamente"
+        event_service = MagicMock()
+        stop_evt = threading.Event()
+
+        def fake_start_ffmpeg(cfg):
+            stop_evt.set()
+            raise RuntimeError("rtsp offline")
+
+        with patch("main.clear_buffer"), \
+             patch("main.start_ffmpeg", side_effect=fake_start_ffmpeg):
+            _camera_supervisor(
+                rt,
+                stop_evt,
+                event_service,
+                poll_interval=0.01,
+            )
+
+        event_service.publish_camera_reconnecting.assert_called_once()
+        event_service.publish_camera_restart_failed.assert_called_once()
+        self.assertEqual(rt.camera_status, "UNAVAILABLE")
+
     def test_transient_stale_buffer_does_not_restart_ffmpeg(self) -> None:
         rt = _make_runtime("cam01")
         stop_evt = threading.Event()

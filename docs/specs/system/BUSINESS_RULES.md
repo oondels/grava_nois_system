@@ -113,7 +113,8 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - `state` deve expor saúde por câmera (`camera_status`, `ffmpeg_alive`, `restart_attempts`, `buffer_status`, `buffer_fresh`, `segment_age_sec`, `last_segment_at`) e métricas de fila/storage;
 - trigger para câmera sem FFmpeg vivo, sem `SegmentBuffer` ou com buffer sem segmentos recentes não deve gerar clipe; deve registrar warning e publicar `capture.trigger_rejected` em `grn/devices/{device_id}/capture/events`;
 - buffer sem segmentos recentes muda o diagnóstico da câmera para `UNAVAILABLE`, bloqueia clipes fantasmas e, se persistente, faz o supervisor reiniciar apenas o FFmpeg daquela câmera, sem reiniciar o container;
-- eventos `capture.trigger_rejected` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET`; se MQTT estiver indisponível, devem ficar em outbox local para reenvio;
+- quando o supervisor tenta recuperar FFmpeg/câmera, o snapshot pode expor `camera_status=RECONNECTING` e deve publicar `camera.reconnecting`, `camera.reconnected` ou `camera.restart_failed` em `capture/events`;
+- eventos de `capture/events` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET`; se MQTT estiver indisponível, devem ficar em outbox local para reenvio;
 - `mqtt.log` deve ser separado do `app.log`;
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
 - `device_id` usado em tópicos MQTT deve rejeitar separadores de nível e wildcards (`/`, `+`, `#`);
