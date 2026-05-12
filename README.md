@@ -269,10 +269,11 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 2. publica presença retida em `grn/devices/{device_id}/presence`;
 3. publica heartbeat periódico em `grn/devices/{device_id}/heartbeat`;
 4. publica estado resumido em `grn/devices/{device_id}/state`;
-5. registra `last will` para marcar `offline` em queda abrupta;
-6. consome `config/desired` e `config/request` para configuração operacional remota segura;
-7. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
-8. mantém `commands/in` e `commands/out` reservados para a fase futura.
+5. publica diagnósticos assinados em `grn/devices/{device_id}/diagnostics/events`;
+6. registra `last will` para marcar `offline` em queda abrupta;
+7. consome `config/desired` e `config/request` para configuração operacional remota segura;
+8. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
+9. mantém `commands/in` e `commands/out` reservados para a fase futura.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
@@ -665,6 +666,7 @@ Observação:
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
 - `grn/devices/{device_id}/capture/events`
+- `grn/devices/{device_id}/diagnostics/events`
 - `grn/devices/{device_id}/events`
 - `grn/devices/{device_id}/alerts`
 - `grn/devices/{device_id}/config/desired`

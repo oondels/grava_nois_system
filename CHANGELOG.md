@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
+- `boot_id`, sequência de heartbeat e contadores de reconexão MQTT no payload de presença/state para auditoria remota.
+
+### Changed
+- Cliente MQTT registra motivo/timestamp da última desconexão e notifica listeners internos sem interromper o pipeline de captura.
+
 ## 2026-05-02
 
 ### Fixed

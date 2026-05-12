@@ -28,6 +28,7 @@ from src.services.mqtt.device_config_service import (
 )
 from src.services.mqtt.device_env_service import DeviceEnvService
 from src.services.mqtt.capture_event_service import CaptureEventService
+from src.services.mqtt.device_diagnostic_service import DeviceDiagnosticEventService
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
@@ -580,6 +581,8 @@ def main() -> int:
     mqtt_config_service: DeviceConfigService | None = None
     mqtt_env_service: DeviceEnvService | None = None
     capture_event_service: CaptureEventService | None = None
+    diagnostic_event_service: DeviceDiagnosticEventService | None = None
+    boot_id = str(uuid.uuid4())
 
     if mqtt_config.enabled and not device_id:
         mqtt_logger.warning(
@@ -596,6 +599,11 @@ def main() -> int:
             )
             snapshot["health"]["gpio_enabled"] = gpio_enabled
             snapshot["health"]["pico_enabled"] = pico_enabled
+            snapshot["runtime"]["boot_id"] = boot_id
+            snapshot["runtime"]["mqtt_connected"] = mqtt_client.is_connected
+            snapshot["runtime"]["mqtt_reconnect_count"] = mqtt_client.reconnect_count
+            snapshot["runtime"]["last_mqtt_disconnect_at"] = mqtt_client.last_disconnect_at
+            snapshot["runtime"]["last_mqtt_disconnect_reason"] = mqtt_client.last_disconnect_reason
             if capture_event_service is not None:
                 capture_event_service.flush_outbox()
             return snapshot
@@ -607,6 +615,7 @@ def main() -> int:
                 device_id=device_id,
                 client_id=client_id,
                 venue_id=venue_id,
+                boot_id=boot_id,
                 runtime_snapshot_provider=_runtime_snapshot_provider,
             )
             mqtt_dispatcher = CommandDispatcher(
@@ -654,6 +663,18 @@ def main() -> int:
                 agent_version=mqtt_config.agent_version,
                 outbox_dir=base / "runtime_config" / "capture_event_outbox",
             )
+            diagnostic_event_service = DeviceDiagnosticEventService(
+                mqtt_client,
+                topic=mqtt_config.topic_for(device_id, "diagnostics/events"),
+                device_id=device_id,
+                client_id=client_id,
+                venue_id=venue_id,
+                device_secret=(
+                    os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
+                ),
+                boot_id=boot_id,
+                agent_version=mqtt_config.agent_version,
+            )
             if startup_config_report is not None:
                 mqtt_config_service.queue_startup_report(startup_config_report)
         except ValueError as exc:
@@ -661,11 +682,13 @@ def main() -> int:
             mqtt_dispatcher = None
             mqtt_config_service = None
             mqtt_env_service = None
+            diagnostic_event_service = None
             mqtt_logger.warning(
                 "MQTT habilitado, mas DEVICE_ID/GN_DEVICE_ID é inválido para tópico (%s); presença será ignorada",
                 exc,
             )
         else:
+            diagnostic_event_service.start()
             if mqtt_presence.start():
                 mqtt_dispatcher.start()
                 mqtt_config_service.start()
@@ -1040,6 +1063,8 @@ def main() -> int:
                 pass
         if mqtt_presence is not None:
             try:
+                if diagnostic_event_service is not None:
+                    diagnostic_event_service.publish_shutdown_clean()
                 mqtt_presence.stop()
             except Exception:
                 pass

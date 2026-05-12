@@ -115,6 +115,7 @@ class DevicePresenceServiceTests(unittest.TestCase):
             device_id="edge-01",
             client_id="client-01",
             venue_id="venue-01",
+            boot_id="boot-01",
             runtime_snapshot_provider=lambda: {
                 "queue_size": 3,
                 "health": {"camera_count": 1},

@@ -129,6 +129,7 @@ Publicações da fase 1:
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
 - `grn/devices/{device_id}/capture/events`
+- `grn/devices/{device_id}/diagnostics/events`
 - `grn/devices/{device_id}/config/reported`
 - `grn/devices/{device_id}/config/state`
 
@@ -171,6 +172,11 @@ Exemplos rápidos por tópico:
   - payload típico: `type`, `event_id`, `camera_id`, `reason`, `camera_status`, `buffer_status`, `restart_attempts`, `occurred_at` e assinatura HMAC
   - tipos publicados: `capture.trigger_rejected`, `camera.reconnecting`, `camera.reconnected` e `camera.restart_failed`
   - regra: registra rejeição de trigger por câmera/buffer indisponível e ciclo operacional de reconexão do FFmpeg/câmera
+- `diagnostics/events`
+  - tópico: `grn/devices/edge-test-01/diagnostics/events`
+  - payload típico: `type`, `event_id`, `device_id`, `client_id`, `venue_id`, `boot_id`, `sequence`, `reason_code`, `occurred_at` e assinatura HMAC
+  - tipos publicados: `device.boot`, `device.shutdown_clean`, `mqtt.connected`, `mqtt.disconnected`, `network.probe_failed` e `api.probe_failed`
+  - regra: registra ciclo de vida e conectividade do edge para auditoria remota; payload não pode incluir secrets, tokens, credenciais MQTT ou URL RTSP com credenciais
 - `events`
   - tópico reservado para eventos operacionais futuros; fase 1 não publica nele
 - `alerts`
