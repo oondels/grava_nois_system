@@ -121,7 +121,8 @@ O sistema usa o filesystem como fila, lock e trilha de auditoria local.
 Camada opcional e isolada do pipeline principal:
 
 - cliente MQTT com reconexão controlada e `last will`;
-- publicação de `presence`, `heartbeat` e `state`;
+- publicação de `presence`, `heartbeat`, `state` e `diagnostics/events`;
+- `boot_id`, sequência e contadores de reconexão MQTT para correlação remota;
 - assinatura de `config/desired` em serviço dedicado para configuração operacional remota segura;
 - publicação de `config/reported` com resultado `applied`, `pending_restart` ou `rejected`;
 - logger dedicado em `mqtt.log`;
@@ -131,6 +132,7 @@ Camada opcional e isolada do pipeline principal:
 Ponto de integração:
 
 - bootstrap em `main.py` antes de iniciar FFmpeg, para publicar estado mesmo quando a câmera falha;
+- `DeviceDiagnosticEventService` assina eventos de ciclo de vida com `DEVICE_SECRET` sem expor segredo em log;
 - `DeviceConfigService` fica separado de `CommandDispatcher` para não transformar config remota em command/control arbitrário;
 - falhas do broker não derrubam captura, trigger nem worker;
 - payload é derivado de snapshot barato do runtime, sem dependência circular com a fila.

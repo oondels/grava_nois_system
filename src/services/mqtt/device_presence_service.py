@@ -26,6 +26,7 @@ class DevicePresenceService:
         device_id: str,
         client_id: str,
         venue_id: str,
+        boot_id: str,
         runtime_snapshot_provider: RuntimeSnapshotProvider,
     ):
         self.mqtt_client = mqtt_client
@@ -33,9 +34,11 @@ class DevicePresenceService:
         self.device_id = device_id
         self.client_id = client_id
         self.venue_id = venue_id
+        self.boot_id = boot_id
         self.runtime_snapshot_provider = runtime_snapshot_provider
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._heartbeat_seq = 0
         self._presence_topic = self.config.topic_for(self.device_id, "presence")
         self._heartbeat_topic = self.config.topic_for(self.device_id, "heartbeat")
         self._state_topic = self.config.topic_for(self.device_id, "state")
@@ -98,6 +101,7 @@ class DevicePresenceService:
         )
 
     def publish_heartbeat(self) -> None:
+        self._heartbeat_seq += 1
         payload = self.build_presence_payload(status="online")
         self.mqtt_client.publish_json(self._heartbeat_topic, payload, retain=False)
 
@@ -122,6 +126,8 @@ class DevicePresenceService:
             "venue_id": self.venue_id,
             "status": status,
             "agent_version": self.config.agent_version,
+            "boot_id": self.boot_id,
+            "heartbeat_seq": self._heartbeat_seq,
             "timestamp": now,
             "last_seen": now,
             "queue_size": snapshot.get("queue_size", 0),
@@ -143,6 +149,8 @@ class DevicePresenceService:
             "venue_id": self.venue_id,
             "status": "online",
             "agent_version": self.config.agent_version,
+            "boot_id": self.boot_id,
+            "heartbeat_seq": self._heartbeat_seq,
             "timestamp": now,
             "last_seen": now,
             "queue_size": snapshot.get("queue_size", 0),

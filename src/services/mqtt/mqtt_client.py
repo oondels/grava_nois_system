@@ -27,12 +27,16 @@ class MQTTClient:
         self.config = config
         self._subscriptions: dict[str, MQTTMessageHandler] = {}
         self._connect_listeners: list[Callable[[], None]] = []
+        self._disconnect_listeners: list[Callable[[str], None]] = []
         self._connected = threading.Event()
         self._lock = threading.Lock()
         self._started = False
         self._handler_queue: queue.Queue[tuple[MQTTMessageHandler, str, bytes]] = queue.Queue()
         self._handler_thread: threading.Thread | None = None
         self._handler_stop = threading.Event()
+        self.reconnect_count = 0
+        self.last_disconnect_at: str | None = None
+        self.last_disconnect_reason: str | None = None
         self._client = self._build_client()
 
     @property
@@ -203,10 +207,15 @@ class MQTTClient:
     def add_on_connect_listener(self, callback: Callable[[], None]) -> None:
         self._connect_listeners.append(callback)
 
+    def add_on_disconnect_listener(self, callback: Callable[[str], None]) -> None:
+        self._disconnect_listeners.append(callback)
+
     def _on_connect(self, client, _userdata, _flags, reason_code, _properties=None):
         code = getattr(reason_code, "value", reason_code)
         if code == 0:
             self._connected.set()
+            if self.last_disconnect_at:
+                self.reconnect_count += 1
             mqtt_logger.info("Conectado ao broker MQTT")
             for topic in self._subscriptions:
                 try:
@@ -230,10 +239,20 @@ class MQTTClient:
     def _on_disconnect(self, _client, _userdata, reason_code, _properties=None):
         code = getattr(reason_code, "value", reason_code)
         self._connected.clear()
+        reason = "clean_disconnect" if code in {0, None} else f"unexpected_disconnect_rc_{code}"
+        from datetime import datetime, timezone
+
+        self.last_disconnect_at = datetime.now(timezone.utc).isoformat()
+        self.last_disconnect_reason = reason
         if code in {0, None}:
             mqtt_logger.info("Cliente MQTT desconectado com limpeza")
         else:
             mqtt_logger.warning("Cliente MQTT desconectado inesperadamente: rc=%s", code)
+        for callback in self._disconnect_listeners:
+            try:
+                callback(reason)
+            except Exception as exc:
+                mqtt_logger.warning("Falha em listener pós-disconnect MQTT: %s", exc)
 
     def _on_message(self, _client, _userdata, msg):
         topic = getattr(msg, "topic", "")
