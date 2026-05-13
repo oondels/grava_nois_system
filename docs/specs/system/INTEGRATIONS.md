@@ -188,11 +188,11 @@ Exemplos rápidos por tópico:
 - `config/desired`
   - recebe envelope `config.desired` com `desired_config` completo, hash, expiração e assinatura HMAC
 - `config/reported`
-  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição e assinatura HMAC
+  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição, `last_applied_version`/`pending_version` e assinatura HMAC
 - `config/request`
   - recebe envelope `config.request` assinado para solicitar snapshot atual do edge
 - `config/state`
-  - publica envelope `config.state` com `reported_config`, `reported_hash`, `has_pending_restart`, `pending_version` e assinatura HMAC
+  - publica envelope `config.state` com `reported_config`, `reported_hash`, `has_pending_restart`, `last_applied_version`, `pending_version` e assinatura HMAC
 
 ## Request signing
 

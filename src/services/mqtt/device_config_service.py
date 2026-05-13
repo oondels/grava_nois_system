@@ -293,7 +293,18 @@ class DeviceConfigService:
         last_applied_version = int(state.get("lastAppliedVersion") or 0)
         pending_version = int(state.get("pendingVersion") or 0)
         if config_version <= last_applied_version:
-            raise RemoteConfigError("config_version antiga ou já aplicada")
+            reported_config, reported_hash = self._current_report_snapshot()
+            return _ReportResult(
+                status="rejected",
+                config_version=config_version,
+                correlation_id=correlation_id,
+                requires_restart=False,
+                reported_hash=reported_hash,
+                reported_config=reported_config,
+                rejection_reason="config_version antiga ou já aplicada",
+                last_applied_version=last_applied_version,
+                pending_version=_pending_version_or_none(state.get("pendingVersion")),
+            )
         if pending_version and config_version < pending_version:
             raise RemoteConfigError("config_version anterior à versão pendente")
 
@@ -394,6 +405,10 @@ class DeviceConfigService:
         }
         if result.reported_config is not None:
             payload["reported_config"] = result.reported_config
+        if result.last_applied_version is not None:
+            payload["last_applied_version"] = result.last_applied_version
+        if result.pending_version is not None:
+            payload["pending_version"] = result.pending_version
         if self.device_secret:
             payload["signature_version"] = _SIGNATURE_VERSION
             payload["signature"] = sign_reported_config_payload(
@@ -446,6 +461,7 @@ class DeviceConfigService:
         config_version = _coerce_config_version(config_snapshot.get("version"))
         reported_hash = hash_config(config_snapshot)
         state = self._load_state()
+        last_applied_version = _coerce_config_version(state.get("lastAppliedVersion"))
         pending_version = _pending_version_or_none(state.get("pendingVersion"))
         has_pending_restart = self.pending_path.exists() and pending_version is not None
         if self.pending_path.exists() and pending_version is None:
@@ -464,6 +480,7 @@ class DeviceConfigService:
             "reported_hash": reported_hash,
             "reported_at": reported_at,
             "has_pending_restart": has_pending_restart,
+            "last_applied_version": last_applied_version,
             "pending_version": pending_version,
             "agent_version": self.agent_version,
         }
@@ -549,6 +566,18 @@ class DeviceConfigService:
         except Exception:
             return {}
 
+    def _current_report_snapshot(self) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            config_snapshot = _build_state_snapshot_config(self.config_path)
+            _validate_remote_config(config_snapshot)
+            return config_snapshot, hash_config(config_snapshot)
+        except Exception as exc:
+            mqtt_logger.warning(
+                "Falha ao montar snapshot atual para report de rejeição: %s",
+                exc,
+            )
+            return None, None
+
     def _write_pending(self, config_data: dict[str, Any]) -> None:
         _atomic_write_json(self.pending_path, config_data)
 
@@ -578,6 +607,8 @@ class _ReportResult:
         reported_hash: str | None,
         reported_config: dict[str, Any] | None,
         rejection_reason: str | None,
+        last_applied_version: int | None = None,
+        pending_version: int | None = None,
     ):
         self.status = status
         self.config_version = config_version
@@ -586,6 +617,8 @@ class _ReportResult:
         self.reported_hash = reported_hash
         self.reported_config = reported_config
         self.rejection_reason = rejection_reason
+        self.last_applied_version = last_applied_version
+        self.pending_version = pending_version
 
 
 def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:

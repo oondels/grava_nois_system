@@ -452,7 +452,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (base / "config.state.json").write_text(
-                json.dumps({"pendingVersion": 3}),
+                json.dumps({"lastAppliedVersion": 2, "pendingVersion": 3}),
                 encoding="utf-8",
             )
             service = self._service(base, client)
@@ -461,6 +461,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
 
         state_payload = client.published[-1][1]
         self.assertTrue(state_payload["has_pending_restart"])
+        self.assertEqual(state_payload["last_applied_version"], 2)
         self.assertEqual(state_payload["pending_version"], 3)
 
     def test_hot_reload_update_ignores_unchanged_restart_fields(self) -> None:
@@ -551,20 +552,41 @@ class DeviceConfigServiceTests(unittest.TestCase):
     def test_rejects_old_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
+            client = _FakeMQTTClient()
+            (base / "config.json").write_text(
+                json.dumps(
+                    {
+                        **self._desired_config(),
+                        "version": 3,
+                        "updatedAt": "2026-04-08T12:00:00+00:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
             (base / "config.state.json").write_text(
                 json.dumps({"lastAppliedVersion": 3}),
                 encoding="utf-8",
             )
-            service = self._service(base)
+            service = self._service(base, client)
             payload = self._payload(
                 self._desired_config({"operationWindow": {"start": "08:00"}}),
                 version=2,
             )
 
-            with self.assertRaises(Exception) as ctx:
-                service.process_desired_config(payload)
+            result = service.process_desired_config(payload)
+            service.publish_report(result)
 
-        self.assertIn("antiga", str(ctx.exception))
+        report = client.published[-1][1]
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.config_version, 2)
+        self.assertEqual(result.correlation_id, "corr-01")
+        self.assertEqual(result.last_applied_version, 3)
+        self.assertEqual(report["status"], "rejected")
+        self.assertEqual(report["rejection_reason"], "config_version antiga ou já aplicada")
+        self.assertEqual(report["last_applied_version"], 3)
+        self.assertIn("reported_config", report)
+        self.assertEqual(report["reported_hash"], hash_config(report["reported_config"]))
+        self.assertEqual(report["signature_version"], "hmac-sha256-v1")
 
     def test_malformed_payload_still_publishes_signed_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

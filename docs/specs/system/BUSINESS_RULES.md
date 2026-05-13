@@ -132,6 +132,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - o report `config.reported` também é assinado com `DEVICE_SECRET`/`GN_DEVICE_SECRET` antes de ser enviado à API;
 - `config.request` válido deve gerar `config.state` assinado com snapshot sanitizado da configuração efetiva;
 - o edge publica `config.state` no boot para permitir bootstrap do `reportedConfig` persistido no backend;
+- `config.reported` e `config.state` devem expor `last_applied_version` para permitir que o backend rebaseie desired config quando o device rejeitar versão antiga;
 - `pending_version` no snapshot só pode ser inteiro quando houver pendência real; sem pendência, deve ser `null`;
 - o cálculo de `reported_hash` do snapshot deve normalizar `float` inteiros para manter compatibilidade de hash com o backend;
 - secrets, credenciais MQTT, tokens, `DEVICE_SECRET` e RTSP com `user:pass@` são rejeitados;

@@ -205,6 +205,8 @@ Contrato de saída:
 - `reported_hash`: hash aplicado ou pendente, quando houver
 - `reported_at`
 - `rejection_reason`: motivo sanitizado, quando houver rejeição
+- `last_applied_version`: última versão local aplicada em `config.state.json`, quando conhecida
+- `pending_version`: versão pendente local, quando houver `config.pending.json`
 - `agent_version`
 - `signature`: HMAC-SHA256 base64 do envelope reportado
 - `signature_version`: `hmac-sha256-v1`
@@ -221,6 +223,7 @@ Snapshot de sincronização (`config.state`):
 - saída: `grn/devices/{device_id}/config/state`
 - o edge publica `config.state` no boot e em resposta a `config.request`
 - `reported_config` deve refletir a configuração operacional efetiva sanitizada
+- `last_applied_version` expõe a última versão local aplicada para o backend recuperar divergência de versionamento
 - `has_pending_restart=false` implica `pending_version=null`
 - `has_pending_restart=true` implica `pending_version>=1`
 - antes do hash, o snapshot normaliza `float` inteiros (`1.0`, `300.0`, `120.0`) para `int`, preservando floats reais como `0.8`

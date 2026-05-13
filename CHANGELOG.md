@@ -5,9 +5,11 @@
 ### Added
 - Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
 - `boot_id`, sequência de heartbeat e contadores de reconexão MQTT no payload de presença/state para auditoria remota.
+- `config.reported` e `config.state` passam a expor `last_applied_version` e `pending_version` para reconciliação remota de versão.
 
 ### Changed
 - Cliente MQTT registra motivo/timestamp da última desconexão e notifica listeners internos sem interromper o pipeline de captura.
+- Rejeição de configuração por `config_version antiga ou já aplicada` agora é reportada via MQTT com `correlation_id`, versão local aplicada e snapshot efetivo quando disponível.
 
 ## 2026-05-02
 
