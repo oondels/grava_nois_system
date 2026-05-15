@@ -272,6 +272,8 @@ def add_image_watermark(
     - Se `vertical_format=True`: recorta o centro do vídeo para 9:16 (crop apenas,
       sem scale forçado). A resolução final é a do crop — sem upscale artificial.
     - Em `vertical_format`, a marca d'água é posicionada no topo central dentro da safe zone.
+    - Em modo horizontal com watermark secundária, o client_logo é posicionado no canto superior
+      esquerdo com `margin` de distância da quina; o logo principal permanece centralizado no rodapé.
     - Requer ffmpeg no PATH.
     """
     logger.info(
@@ -333,7 +335,9 @@ def add_image_watermark(
         f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm1]"
     )
 
-    # Se houver watermark secundária: logos lado a lado no mesmo eixo vertical
+    # Se houver watermark secundária (client_logo):
+    #   - modo vertical: logos lado a lado no centro (comportamento original)
+    #   - modo horizontal: client_logo no canto superior esquerdo
     final_video_label = "[v]"
     if secondary_wm_p is not None:
         pair_gap = max(8, int(margin) // 2)
@@ -341,20 +345,36 @@ def add_image_watermark(
         filt_parts.append(
             f"[2:v]scale={wm2_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm2]"
         )
-        filt_parts.append(
-            (
-                f"{input_video_label}[wm1]overlay="
-                f"x=(main_w-{pair_total_w})/2:"
-                f"y={overlay_y}[v1]"
+        if vertical_format:
+            filt_parts.append(
+                (
+                    f"{input_video_label}[wm1]overlay="
+                    f"x=(main_w-{pair_total_w})/2:"
+                    f"y={overlay_y}[v1]"
+                )
             )
-        )
-        filt_parts.append(
-            (
-                f"[v1][wm2]overlay="
-                f"x=(main_w-{pair_total_w})/2+{int(wm_w) + int(pair_gap)}:"
-                f"y={overlay_y}[v]"
+            filt_parts.append(
+                (
+                    f"[v1][wm2]overlay="
+                    f"x=(main_w-{pair_total_w})/2+{int(wm_w) + int(pair_gap)}:"
+                    f"y={overlay_y}[v]"
+                )
             )
-        )
+        else:
+            filt_parts.append(
+                (
+                    f"{input_video_label}[wm1]overlay="
+                    f"x=(main_w-overlay_w)/2:"
+                    f"y={overlay_y}[v1]"
+                )
+            )
+            filt_parts.append(
+                (
+                    f"[v1][wm2]overlay="
+                    f"x={int(margin)}:"
+                    f"y={int(margin)}[v]"
+                )
+            )
     else:
         filt_parts.append(
             f"{input_video_label}[wm1]overlay="
