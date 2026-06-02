@@ -73,4 +73,3 @@ Verifique o comando de watermark nos testes:
 ```bash
 python -m unittest tests.test_mobile_format
 ```
-

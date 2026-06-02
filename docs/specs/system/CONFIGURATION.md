@@ -243,7 +243,7 @@ Estados reportados:
 
 - `applied`: configuração promovida para `config.json`;
 - `pending_restart`: configuração validada e gravada em `config.pending.json`, mas exige restart/reload controlado;
-- `rejected`: payload rejeitado por schema, hash, expiração, assinatura, tenant/device divergente, versão antiga ou campo sensível.
+- `rejected`: payload rejeitado por schema, hash, expiração, assinatura, tenant/device divergente ou campo sensível.
 
 O backend continua sendo a fonte de verdade futura para desired/applied config. MQTT é apenas canal de entrega e reporte.
 

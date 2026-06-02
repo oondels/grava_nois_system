@@ -290,24 +290,6 @@ class DeviceConfigService:
         _validate_remote_config(desired_config)
 
         state = self._load_state()
-        last_applied_version = int(state.get("lastAppliedVersion") or 0)
-        pending_version = int(state.get("pendingVersion") or 0)
-        if config_version <= last_applied_version:
-            reported_config, reported_hash = self._current_report_snapshot()
-            return _ReportResult(
-                status="rejected",
-                config_version=config_version,
-                correlation_id=correlation_id,
-                requires_restart=False,
-                reported_hash=reported_hash,
-                reported_config=reported_config,
-                rejection_reason="config_version antiga ou já aplicada",
-                last_applied_version=last_applied_version,
-                pending_version=_pending_version_or_none(state.get("pendingVersion")),
-            )
-        if pending_version and config_version < pending_version:
-            raise RemoteConfigError("config_version anterior à versão pendente")
-
         current_config = self._load_current_config()
         requires_restart = payload.get("requires_restart")
         if requires_restart is None:
@@ -353,6 +335,7 @@ class DeviceConfigService:
                 reported_hash=desired_hash,
                 reported_config=None,
                 rejection_reason=None,
+                pending_version=config_version,
             )
 
         self._promote_pending(desired_config)
@@ -385,6 +368,7 @@ class DeviceConfigService:
             reported_hash=desired_hash,
             reported_config=desired_config,
             rejection_reason=None,
+            last_applied_version=config_version,
         )
 
     def publish_report(self, result: "_ReportResult") -> bool:
@@ -698,6 +682,7 @@ def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportR
             reported_hash=applied_hash,
             reported_config=pending_data,
             rejection_reason=None,
+            last_applied_version=applied_version,
         )
     except Exception as exc:
         mqtt_logger.warning("Falha ao promover config.pending.json no boot: %s", exc)
