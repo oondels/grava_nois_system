@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
+from datetime import datetime, timezone
 import threading
+import time
+from pathlib import Path
 from typing import Deque, List, Optional
 
 from src.config.settings import CaptureConfig
 from src.utils.logger import logger
+
+
+@dataclass(frozen=True)
+class SegmentBufferDiagnostics:
+    segment_count: int
+    last_segment: str | None
+    last_segment_at: str | None
+    segment_age_sec: float | None
+    buffer_status: str
+
+    @property
+    def buffer_fresh(self) -> bool:
+        return self.buffer_status == "FRESH"
 
 
 class SegmentBuffer:
@@ -28,6 +45,50 @@ class SegmentBuffer:
     def snapshot_last(self, n: int) -> List[str]:
         with self._lock:
             return list(self._segments)[-n:]
+
+    def diagnostics(self, *, stale_after_sec: float) -> SegmentBufferDiagnostics:
+        with self._lock:
+            segments = list(self._segments)
+
+        if not segments:
+            return SegmentBufferDiagnostics(
+                segment_count=0,
+                last_segment=None,
+                last_segment_at=None,
+                segment_age_sec=None,
+                buffer_status="EMPTY",
+            )
+
+        last_segment = segments[-1]
+        try:
+            last_path = Path(last_segment)
+            mtime = last_path.stat().st_mtime
+        except FileNotFoundError:
+            return SegmentBufferDiagnostics(
+                segment_count=len(segments),
+                last_segment=last_segment,
+                last_segment_at=None,
+                segment_age_sec=None,
+                buffer_status="MISSING",
+            )
+        except Exception:
+            return SegmentBufferDiagnostics(
+                segment_count=len(segments),
+                last_segment=last_segment,
+                last_segment_at=None,
+                segment_age_sec=None,
+                buffer_status="UNKNOWN",
+            )
+
+        age = max(0.0, time.time() - mtime)
+        status = "FRESH" if age <= stale_after_sec else "STALE"
+        return SegmentBufferDiagnostics(
+            segment_count=len(segments),
+            last_segment=last_segment,
+            last_segment_at=datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+            segment_age_sec=round(age, 3),
+            buffer_status=status,
+        )
 
     def _index_loop(self) -> None:
         while not self._stop.is_set():

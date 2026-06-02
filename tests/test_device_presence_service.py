@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from src.config.settings import MQTTConfig
 from src.services.mqtt.device_presence_service import (
@@ -34,10 +35,28 @@ class _FakeCfg:
 
 
 class _FakeRuntime:
-    def __init__(self, camera_id: str, queue_dir, *, alive: bool = True, busy: bool = False):
+    def __init__(
+        self,
+        camera_id: str,
+        queue_dir,
+        *,
+        alive: bool = True,
+        busy: bool = False,
+        camera_status: str | None = None,
+    ):
         self.cfg = _FakeCfg(camera_id, queue_dir)
         self.proc = _FakeProc(alive=alive)
         self.capture_lock = _FakeLock(locked=busy)
+        self.camera_status = camera_status or ("OK" if alive else "UNAVAILABLE")
+        self.segbuf = SimpleNamespace(
+            diagnostics=lambda stale_after_sec=10.0: SimpleNamespace(
+                buffer_status="FRESH" if alive else "STALE",
+                buffer_fresh=alive,
+                segment_age_sec=0.5 if alive else stale_after_sec + 1,
+                last_segment_at="2026-04-17T12:00:00+00:00",
+                segment_count=4 if alive else 0,
+            )
+        )
 
 
 class _FakeMQTTClient:
@@ -96,6 +115,7 @@ class DevicePresenceServiceTests(unittest.TestCase):
             device_id="edge-01",
             client_id="client-01",
             venue_id="venue-01",
+            boot_id="boot-01",
             runtime_snapshot_provider=lambda: {
                 "queue_size": 3,
                 "health": {"camera_count": 1},
@@ -155,6 +175,34 @@ class DevicePresenceServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["health"]["online_cameras"], 1)
         self.assertEqual(snapshot["runtime"]["light_mode"], False)
         self.assertEqual(snapshot["runtime"]["dev_mode"], True)
+        self.assertEqual(snapshot["cameras"][0]["buffer_status"], "FRESH")
+        self.assertEqual(snapshot["cameras"][0]["buffer_fresh"], True)
+        self.assertEqual(snapshot["cameras"][1]["buffer_status"], "STALE")
+        self.assertEqual(snapshot["cameras"][1]["camera_status"], "UNAVAILABLE")
+
+    def test_build_runtime_snapshot_preserves_reconnecting_camera_status(self) -> None:
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_dir = Path(tmp) / "cam01"
+            queue_dir.mkdir()
+            snapshot = build_runtime_snapshot(
+                runtimes=[
+                    _FakeRuntime(
+                        "cam01",
+                        queue_dir,
+                        alive=False,
+                        camera_status="RECONNECTING",
+                    ),
+                ],
+                light_mode=False,
+                dev_mode=False,
+                trigger_source="pico",
+            )
+
+        self.assertEqual(snapshot["cameras"][0]["camera_status"], "RECONNECTING")
+        self.assertEqual(snapshot["cameras"][0]["buffer_status"], "STALE")
 
 
 if __name__ == "__main__":

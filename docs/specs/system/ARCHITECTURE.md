@@ -101,7 +101,7 @@ Consequência:
 - o trigger global (ENTER/GPIO/token Pico global) faz fan-out para câmeras sem token dedicado;
 - câmeras com `pico_trigger_token` só disparam quando o token dedicado é recebido;
 - o lock evita sobreposição de build; o cooldown evita cliques acidentais em sequência.
-- câmera indisponível não aborta o edge; o trigger é ignorado para ela e o supervisor continua tentando restabelecer FFmpeg.
+- câmera indisponível não aborta o edge; o trigger é ignorado para ela e o supervisor continua tentando restabelecer FFmpeg, inclusive quando o processo permanece vivo mas o buffer deixa de receber segmentos.
 
 ## Queue and filesystem model
 
@@ -121,7 +121,8 @@ O sistema usa o filesystem como fila, lock e trilha de auditoria local.
 Camada opcional e isolada do pipeline principal:
 
 - cliente MQTT com reconexão controlada e `last will`;
-- publicação de `presence`, `heartbeat` e `state`;
+- publicação de `presence`, `heartbeat`, `state` e `diagnostics/events`;
+- `boot_id`, sequência e contadores de reconexão MQTT para correlação remota;
 - assinatura de `config/desired` em serviço dedicado para configuração operacional remota segura;
 - publicação de `config/reported` com resultado `applied`, `pending_restart` ou `rejected`;
 - logger dedicado em `mqtt.log`;
@@ -131,6 +132,7 @@ Camada opcional e isolada do pipeline principal:
 Ponto de integração:
 
 - bootstrap em `main.py` antes de iniciar FFmpeg, para publicar estado mesmo quando a câmera falha;
+- `DeviceDiagnosticEventService` assina eventos de ciclo de vida com `DEVICE_SECRET` sem expor segredo em log;
 - `DeviceConfigService` fica separado de `CommandDispatcher` para não transformar config remota em command/control arbitrário;
 - falhas do broker não derrubam captura, trigger nem worker;
 - payload é derivado de snapshot barato do runtime, sem dependência circular com a fila.

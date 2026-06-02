@@ -269,10 +269,11 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 2. publica presença retida em `grn/devices/{device_id}/presence`;
 3. publica heartbeat periódico em `grn/devices/{device_id}/heartbeat`;
 4. publica estado resumido em `grn/devices/{device_id}/state`;
-5. registra `last will` para marcar `offline` em queda abrupta;
-6. consome `config/desired` e `config/request` para configuração operacional remota segura;
-7. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
-8. mantém `commands/in` e `commands/out` reservados para a fase futura.
+5. publica diagnósticos assinados em `grn/devices/{device_id}/diagnostics/events`;
+6. registra `last will` para marcar `offline` em queda abrupta;
+7. consome `config/desired` e `config/request` para configuração operacional remota segura;
+8. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
+9. mantém `commands/in` e `commands/out` reservados para a fase futura.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
@@ -405,6 +406,7 @@ sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.js
 - Documentação completa: [`docs/specs/system/CONFIGURATION.md`](docs/specs/system/CONFIGURATION.md)
 - Override de path: `GN_CONFIG_PATH=/caminho/para/config.json`
 - Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
+- Para gerenciamento admin de `.env`, monte o diretório que contém o `.env` em `/usr/src/app/host_config:rw` e defina `GN_HOST_ENV_PATH=/usr/src/app/host_config/.env`. Se esse arquivo não existir no container, o edge responderá `env.reported` com `status=rejected`.
 
 **Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
 
@@ -535,7 +537,7 @@ GN_PICO_DOCKER_RESTART_TOKEN=RESTART_DOCKER
 GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
 ```
 
-O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --remove-orphans` ou `docker restart grava_nois_system`. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --force-recreate --remove-orphans` ou `docker compose up -d --force-recreate --remove-orphans`. Antes de recriar, o runner do host regenera `config.json` a partir do `.env`, preservando identidade e segredos somente no `.env`. O `RESTART_DOCKER` recria o container para reler `env_file` e aplicar alterações no `.env`; não baixa imagem nova. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
@@ -558,9 +560,9 @@ GN_HQ_PRESET=medium             # Preset do encode com watermark no modo normal
 GN_LM_CRF=26                    # CRF do encode com watermark no modo leve
 GN_LM_PRESET=veryfast           # Preset do encode com watermark no modo leve
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
-GN_WM_OPACITY=0.8               # Opacidade alvo da logo (limitada internamente a 70-85%)
+GN_WM_OPACITY=0.8               # Opacidade da logo (0.0 a 1.0)
 GN_WM_MARGIN=24                 # Margem vertical da safe zone
-VERTICAL_FORMAT=1               # Crop central 9:16 sem upscale forçado
+VERTICAL_FORMAT=0               # 1=crop central 9:16 sem upscale forçado
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
@@ -639,7 +641,7 @@ Observações:
 
 ### Objetivo
 
-Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE` e reiniciadas automaticamente por um supervisor em background com backoff exponencial.
+Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumida do edge sem misturar essa responsabilidade com a pipeline de captura. O MQTT inicia **antes** das câmeras, e o listener Pico/LED também sobe antes das tentativas RTSP/FFmpeg. Isso garante status e sinalização local mesmo com falha total de câmera. Câmeras indisponíveis são reportadas como `camera_status=UNAVAILABLE`; o supervisor reinicia o FFmpeg quando o processo cai ou quando o buffer fica sem segmentos recentes de forma persistente. Durante a indisponibilidade, triggers são bloqueados, logs registram o motivo e o evento MQTT é publicado.
 
 ### Variáveis principais
 
@@ -663,6 +665,8 @@ Observação:
 - `grn/devices/{device_id}/presence`
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
+- `grn/devices/{device_id}/capture/events`
+- `grn/devices/{device_id}/diagnostics/events`
 - `grn/devices/{device_id}/events`
 - `grn/devices/{device_id}/alerts`
 - `grn/devices/{device_id}/config/desired`
@@ -793,7 +797,12 @@ Exemplo de payload:
       "camera_status": "OK",
       "last_error": "",
       "last_error_at": "",
-      "restart_attempts": 0
+      "restart_attempts": 0,
+      "buffer_status": "FRESH",
+      "buffer_fresh": true,
+      "segment_age_sec": 0.5,
+      "last_segment_at": "2026-04-05T19:10:29+00:00",
+      "buffer_segment_count": 12
     },
     {
       "camera_id": "cam02",
@@ -805,7 +814,12 @@ Exemplo de payload:
       "camera_status": "UNAVAILABLE",
       "last_error": "Câmera RTSP não acessível após tentativas configuradas",
       "last_error_at": "2026-04-05T19:10:25+00:00",
-      "restart_attempts": 3
+      "restart_attempts": 3,
+      "buffer_status": "STALE",
+      "buffer_fresh": false,
+      "segment_age_sec": 18.2,
+      "last_segment_at": "2026-04-05T19:10:07+00:00",
+      "buffer_segment_count": 3
     }
   ],
   "runtime": {
@@ -815,6 +829,36 @@ Exemplo de payload:
   }
 }
 ```
+
+#### `grn/devices/{device_id}/capture/events`
+
+Evento assinado publicado quando um trigger é rejeitado por falta de câmera/buffer válido. O edge não gera clipe fantasma com segmentos antigos.
+
+```json
+{
+  "type": "capture.trigger_rejected",
+  "event_id": "f4b2d9c8-5f0d-4d7a-8b20-3e3f6f9f6d0a",
+  "device_id": "edge-test-01",
+  "client_id": "client-test",
+  "venue_id": "venue-test",
+  "camera_id": "cam02",
+  "trigger_id": "pico-cam02",
+  "trigger_source": "pico",
+  "reason": "Buffer sem segmentos novos",
+  "severity": "warning",
+  "occurred_at": "2026-04-05T19:10:30+00:00",
+  "camera_status": "UNAVAILABLE",
+  "ffmpeg_alive": true,
+  "buffer_status": "STALE",
+  "segment_age_sec": 18.2,
+  "last_segment_at": "2026-04-05T19:10:07+00:00",
+  "agent_version": "1.0.0-edge",
+  "signature_version": "hmac-sha256-v1",
+  "signature": "<base64>"
+}
+```
+
+Se MQTT estiver indisponível, o evento é salvo em `runtime_config/capture_event_outbox/` e reenviado quando o heartbeat conseguir reconectar.
 
 #### `grn/devices/{device_id}/events`
 
@@ -1076,6 +1120,23 @@ Para câmeras RTSP, especialmente em redes WiFi instáveis, existem várias opç
 - **Qualidade de Compressão** (`GN_RTSP_CRF`, `GN_RTSP_PRESET`)
 - **Limitação de Taxa de Frames** (`GN_RTSP_FPS`)
 - **Script de Teste Automático** (`./test_wallclock_quality.sh`)
+
+**Início rápido para qualidade máxima:**
+
+```bash
+# Evita reencode na captura; watermark final ainda reencoda para aplicar branding.
+GN_RTSP_PROFILE=hq \
+GN_RTSP_REENCODE=0 \
+GN_RTSP_FPS= \
+GN_RTSP_USE_WALLCLOCK=0 \
+GN_LIGHT_MODE=0 \
+GN_HQ_CRF=16 \
+GN_HQ_PRESET=slow \
+VERTICAL_FORMAT=0 \
+python main.py
+```
+
+Para esse perfil funcionar bem, configure a própria câmera com FPS fixo e GOP/I-frame interval de 1 segundo.
 
 **Início rápido para câmeras problemáticas:**
 

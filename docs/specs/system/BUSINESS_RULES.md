@@ -109,8 +109,15 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - MQTT deve iniciar antes das câmeras para reportar `UNAVAILABLE`/`ERROR` em vez de deixar o device invisível;
 - `presence` deve distinguir `online`, `offline` limpo e `offline` por queda abrupta via `last will`;
 - `heartbeat` deve atualizar `last_seen` sem gerar ruído excessivo de log;
+- `heartbeat` e `state` devem carregar `boot_id` e sequência para correlação remota entre reconexões;
 - `heartbeat` deve sobreviver a exceções de snapshot e publicar fallback seguro quando necessário;
-- `state` deve expor saúde por câmera (`camera_status`, `ffmpeg_alive`, `restart_attempts`) e métricas de fila/storage;
+- `state` deve expor saúde por câmera (`camera_status`, `ffmpeg_alive`, `restart_attempts`, `buffer_status`, `buffer_fresh`, `segment_age_sec`, `last_segment_at`) e métricas de fila/storage;
+- trigger para câmera sem FFmpeg vivo, sem `SegmentBuffer` ou com buffer sem segmentos recentes não deve gerar clipe; deve registrar warning e publicar `capture.trigger_rejected` em `grn/devices/{device_id}/capture/events`;
+- buffer sem segmentos recentes muda o diagnóstico da câmera para `UNAVAILABLE`, bloqueia clipes fantasmas e, se persistente, faz o supervisor reiniciar apenas o FFmpeg daquela câmera, sem reiniciar o container;
+- quando o supervisor tenta recuperar FFmpeg/câmera, o snapshot pode expor `camera_status=RECONNECTING` e deve publicar `camera.reconnecting`, `camera.reconnected` ou `camera.restart_failed` em `capture/events`;
+- eventos de `capture/events` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET`; se MQTT estiver indisponível, devem ficar em outbox local para reenvio;
+- eventos de `diagnostics/events` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET` e publicados em boot, shutdown limpo, conexão e desconexão MQTT;
+- desconexão MQTT deve registrar motivo/timestamp local e não pode reiniciar o pipeline de captura por si só;
 - `mqtt.log` deve ser separado do `app.log`;
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
 - `device_id` usado em tópicos MQTT deve rejeitar separadores de nível e wildcards (`/`, `+`, `#`);
@@ -125,6 +132,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - o report `config.reported` também é assinado com `DEVICE_SECRET`/`GN_DEVICE_SECRET` antes de ser enviado à API;
 - `config.request` válido deve gerar `config.state` assinado com snapshot sanitizado da configuração efetiva;
 - o edge publica `config.state` no boot para permitir bootstrap do `reportedConfig` persistido no backend;
+- `config.reported` e `config.state` devem expor `last_applied_version` para permitir que o backend rebaseie desired config quando o device rejeitar versão antiga;
 - `pending_version` no snapshot só pode ser inteiro quando houver pendência real; sem pendência, deve ser `null`;
 - o cálculo de `reported_hash` do snapshot deve normalizar `float` inteiros para manter compatibilidade de hash com o backend;
 - secrets, credenciais MQTT, tokens, `DEVICE_SECRET` e RTSP com `user:pass@` são rejeitados;

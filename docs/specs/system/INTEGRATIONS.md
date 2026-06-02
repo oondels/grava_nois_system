@@ -128,6 +128,8 @@ Publicações da fase 1:
 - `grn/devices/{device_id}/presence` (retained)
 - `grn/devices/{device_id}/heartbeat`
 - `grn/devices/{device_id}/state`
+- `grn/devices/{device_id}/capture/events`
+- `grn/devices/{device_id}/diagnostics/events`
 - `grn/devices/{device_id}/config/reported`
 - `grn/devices/{device_id}/config/state`
 
@@ -164,7 +166,17 @@ Exemplos rápidos por tópico:
   - payload típico: mesmo envelope base de presença com `status=online`
 - `state`
   - tópico: `grn/devices/edge-test-01/state`
-  - payload típico: envelope expandido com `cameras[]`, `runtime`, `camera_status`, `restart_attempts` e métricas de storage/fila (`failed_clips_count`, `upload_failed_count`, `disk_free_bytes`, `storage_status`)
+  - payload típico: envelope expandido com `cameras[]`, `runtime`, `camera_status`, `restart_attempts`, diagnóstico de buffer (`buffer_status`, `buffer_fresh`, `segment_age_sec`, `last_segment_at`) e métricas de storage/fila (`failed_clips_count`, `upload_failed_count`, `disk_free_bytes`, `storage_status`)
+- `capture/events`
+  - tópico: `grn/devices/edge-test-01/capture/events`
+  - payload típico: `type`, `event_id`, `camera_id`, `reason`, `camera_status`, `buffer_status`, `restart_attempts`, `occurred_at` e assinatura HMAC
+  - tipos publicados: `capture.trigger_rejected`, `camera.reconnecting`, `camera.reconnected` e `camera.restart_failed`
+  - regra: registra rejeição de trigger por câmera/buffer indisponível e ciclo operacional de reconexão do FFmpeg/câmera
+- `diagnostics/events`
+  - tópico: `grn/devices/edge-test-01/diagnostics/events`
+  - payload típico: `type`, `event_id`, `device_id`, `client_id`, `venue_id`, `boot_id`, `sequence`, `reason_code`, `occurred_at` e assinatura HMAC
+  - tipos publicados: `device.boot`, `device.shutdown_clean`, `mqtt.connected`, `mqtt.disconnected`, `network.probe_failed` e `api.probe_failed`
+  - regra: registra ciclo de vida e conectividade do edge para auditoria remota; payload não pode incluir secrets, tokens, credenciais MQTT ou URL RTSP com credenciais
 - `events`
   - tópico reservado para eventos operacionais futuros; fase 1 não publica nele
 - `alerts`
@@ -176,11 +188,11 @@ Exemplos rápidos por tópico:
 - `config/desired`
   - recebe envelope `config.desired` com `desired_config` completo, hash, expiração e assinatura HMAC
 - `config/reported`
-  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição e assinatura HMAC
+  - publica envelope `config.reported` com `status=applied|pending_restart|rejected`, versão, hash reportado, motivo seguro de rejeição, `last_applied_version`/`pending_version` e assinatura HMAC
 - `config/request`
   - recebe envelope `config.request` assinado para solicitar snapshot atual do edge
 - `config/state`
-  - publica envelope `config.state` com `reported_config`, `reported_hash`, `has_pending_restart`, `pending_version` e assinatura HMAC
+  - publica envelope `config.state` com `reported_config`, `reported_hash`, `has_pending_restart`, `last_applied_version`, `pending_version` e assinatura HMAC
 
 ## Request signing
 
@@ -223,7 +235,7 @@ Canonical string:
 - `ACK_GRN_STARTED` recebido do Pico é logado como info e ignorado (não dispara câmera nem Docker);
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
-O edge não usa Docker socket. A execução real de `pull/up` ou `restart` é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`.
+O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. `PULL_DOCKER` executa pull e recriação por compose; `RESTART_DOCKER` executa recriação por compose sem pull, para reler `env_file` e aplicar mudanças de `.env`. Antes da recriação, o runner do host regenera o `config.json` runtime a partir do `.env`, evitando que uma edição admin fique mascarada por configuração operacional antiga.
 
 ## WiFi Provisioning (hotspot local)
 

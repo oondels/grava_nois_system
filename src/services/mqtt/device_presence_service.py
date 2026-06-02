@@ -26,6 +26,7 @@ class DevicePresenceService:
         device_id: str,
         client_id: str,
         venue_id: str,
+        boot_id: str,
         runtime_snapshot_provider: RuntimeSnapshotProvider,
     ):
         self.mqtt_client = mqtt_client
@@ -33,9 +34,11 @@ class DevicePresenceService:
         self.device_id = device_id
         self.client_id = client_id
         self.venue_id = venue_id
+        self.boot_id = boot_id
         self.runtime_snapshot_provider = runtime_snapshot_provider
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._heartbeat_seq = 0
         self._presence_topic = self.config.topic_for(self.device_id, "presence")
         self._heartbeat_topic = self.config.topic_for(self.device_id, "heartbeat")
         self._state_topic = self.config.topic_for(self.device_id, "state")
@@ -98,6 +101,7 @@ class DevicePresenceService:
         )
 
     def publish_heartbeat(self) -> None:
+        self._heartbeat_seq += 1
         payload = self.build_presence_payload(status="online")
         self.mqtt_client.publish_json(self._heartbeat_topic, payload, retain=False)
 
@@ -122,6 +126,8 @@ class DevicePresenceService:
             "venue_id": self.venue_id,
             "status": status,
             "agent_version": self.config.agent_version,
+            "boot_id": self.boot_id,
+            "heartbeat_seq": self._heartbeat_seq,
             "timestamp": now,
             "last_seen": now,
             "queue_size": snapshot.get("queue_size", 0),
@@ -143,6 +149,8 @@ class DevicePresenceService:
             "venue_id": self.venue_id,
             "status": "online",
             "agent_version": self.config.agent_version,
+            "boot_id": self.boot_id,
+            "heartbeat_seq": self._heartbeat_seq,
             "timestamp": now,
             "last_seen": now,
             "queue_size": snapshot.get("queue_size", 0),
@@ -172,6 +180,7 @@ def build_runtime_snapshot(
     light_mode: bool,
     dev_mode: bool,
     trigger_source: str,
+    camera_stale_after_sec: float = 10.0,
 ) -> dict[str, Any]:
     cameras: list[dict[str, Any]] = []
     total_queue_size = 0
@@ -185,6 +194,28 @@ def build_runtime_snapshot(
         ffmpeg_alive = (
             runtime.proc is not None and runtime.proc.poll() is None
         )
+        diagnostics = None
+        if getattr(runtime, "segbuf", None) is not None:
+            try:
+                diagnostics = runtime.segbuf.diagnostics(
+                    stale_after_sec=camera_stale_after_sec
+                )
+            except Exception:
+                diagnostics = None
+        buffer_status = (
+            diagnostics.buffer_status
+            if diagnostics is not None
+            else ("NO_BUFFER" if getattr(runtime, "segbuf", None) is None else "UNKNOWN")
+        )
+        buffer_fresh = diagnostics.buffer_fresh if diagnostics is not None else False
+        runtime_camera_status = getattr(runtime, "camera_status", "UNKNOWN")
+        effective_camera_status = (
+            "OK" if ffmpeg_alive and buffer_fresh else runtime_camera_status
+        )
+        if (
+            not ffmpeg_alive or not buffer_fresh
+        ) and runtime_camera_status not in {"STARTING", "RECONNECTING"}:
+            effective_camera_status = "UNAVAILABLE"
         cameras.append(
             {
                 "camera_id": runtime.cfg.camera_id,
@@ -193,10 +224,15 @@ def build_runtime_snapshot(
                 "queue_size": queue_size,
                 "capture_busy": runtime.capture_lock.locked(),
                 "ffmpeg_alive": ffmpeg_alive,
-                "camera_status": getattr(runtime, "camera_status", "UNKNOWN"),
+                "camera_status": effective_camera_status,
                 "last_error": getattr(runtime, "last_error", ""),
                 "last_error_at": getattr(runtime, "last_error_at", ""),
                 "restart_attempts": getattr(runtime, "restart_attempts", 0),
+                "buffer_status": buffer_status,
+                "buffer_fresh": buffer_fresh,
+                "segment_age_sec": diagnostics.segment_age_sec if diagnostics else None,
+                "last_segment_at": diagnostics.last_segment_at if diagnostics else None,
+                "buffer_segment_count": diagnostics.segment_count if diagnostics else 0,
             }
         )
 
@@ -234,7 +270,9 @@ def build_runtime_snapshot(
         "queue_size": total_queue_size,
         "health": {
             "camera_count": len(runtimes),
-            "online_cameras": sum(1 for cam in cameras if cam["ffmpeg_alive"]),
+            "online_cameras": sum(
+                1 for cam in cameras if cam["ffmpeg_alive"] and cam["buffer_fresh"]
+            ),
             "trigger_source": trigger_source,
             "failed_clips_count": failed_clips_count,
             "upload_failed_count": upload_failed_count,

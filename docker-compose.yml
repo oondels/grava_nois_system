@@ -10,13 +10,14 @@ services:
       - .env
     environment:
       GN_CONFIG_PATH: /usr/src/app/runtime_config/config.json
+      GN_HOST_ENV_PATH: /usr/src/app/host_config/.env
     working_dir: /usr/src/app
     shm_size: 512m
 
     # Health check: verifica se o processo principal Python está vivo
     # (câmeras podem estar em modo degradado sem derrubar o container)
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'python.*main' || exit 1"]
+      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_text(); sys.exit(0 if 'python' in cmd and 'main.py' in cmd else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -24,6 +25,7 @@ services:
 
     volumes:
       - ./.env:/usr/src/app/.env:ro
+      - .:/usr/src/app/host_config:rw  # Expõe diretório do host para leitura/escrita do .env via admin
       - ./runtime_config:/usr/src/app/runtime_config
       - ./files:/usr/src/app/files:ro
       - ./recorded_clips:/usr/src/app/recorded_clips

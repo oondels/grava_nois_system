@@ -4,13 +4,24 @@ Este documento descreve as opções de configuração disponíveis para otimizar
 
 ## Visão Geral
 
-O sistema de captura RTSP foi projetado para lidar com câmeras WiFi instáveis (ex: Tapo C500) que podem gerar:
+O sistema de captura RTSP possui dois perfis principais:
+
+- `hq`: passthrough com `-c:v copy`, preservando o stream original da câmera.
+- `compatible`: reencode com `libx264`, mais tolerante a streams problemáticos.
+
+O perfil efetivo é definido por `GN_RTSP_PROFILE` ou por inferência de `GN_LIGHT_MODE`:
+
+- `GN_LIGHT_MODE=0` e profile vazio -> `hq`.
+- `GN_LIGHT_MODE=1` e profile vazio -> `compatible`.
+
+O modo `compatible` existe para lidar com câmeras WiFi instáveis (ex: Tapo C500) que podem gerar:
+
 - DTS (Decode Timestamp) não-monotônicos
 - Perda de pacotes
 - Timestamps não-confiáveis
 - Frames corrompidos
 
-Por padrão, o sistema aplica **re-encoding com error concealment** para mitigar esses problemas. Todas as opções abaixo podem ser configuradas via variáveis de ambiente.
+Para qualidade máxima, prefira `GN_RTSP_PROFILE=hq` e `GN_RTSP_REENCODE=0`, desde que a câmera entregue timestamps estáveis e GOP adequado.
 
 ---
 
@@ -18,10 +29,27 @@ Por padrão, o sistema aplica **re-encoding com error concealment** para mitigar
 
 ### Modo de Processamento
 
-#### `GN_RTSP_REENCODE` (default: `1`)
+#### `GN_RTSP_PROFILE` (default: vazio)
+
+Seleciona o perfil de captura:
+
+- `hq`: usa `-c:v copy`; preserva a qualidade da câmera e evita reencode na captura.
+- `compatible`: usa `libx264`; aumenta robustez contra timestamps ruins, mas adiciona uma geração de compressão.
+- vazio: infere por `GN_LIGHT_MODE`.
+
+```bash
+# Máxima qualidade para câmeras estáveis
+GN_RTSP_PROFILE=hq GN_RTSP_REENCODE=0 python main.py
+
+# Robustez para câmeras problemáticas
+GN_RTSP_PROFILE=compatible python main.py
+```
+
+#### `GN_RTSP_REENCODE` (default: vazio)
 Controla se o stream RTSP será **re-encodado** ou passado diretamente.
 
-- `GN_RTSP_REENCODE=1` (default): Re-encode com libx264
+- vazio: usa o default do profile efetivo (`hq -> false`, `compatible -> true`)
+- `GN_RTSP_REENCODE=1`: Re-encode com libx264
   - ✅ Reconstrui frames corrompidos (error concealment)
   - ✅ Garante keyframes em pontos consistentes
   - ❌ Consome mais CPU
@@ -29,13 +57,13 @@ Controla se o stream RTSP será **re-encodado** ou passado diretamente.
 
 - `GN_RTSP_REENCODE=0`: Passthrough direto (copy)
   - ✅ Baixíssima CPU
-  - ✅ Sem re-encoding, zero latência extra
+  - ✅ Sem re-encoding na captura, sem perda geracional nessa etapa
   - ❌ Depende de timestamps e DTS confiáveis
-  - **Recomendado para**: Câmeras cabeadas ou com DTS estável
+  - **Recomendado para**: Câmeras cabeadas ou com DTS/GOP estáveis
 
 ```bash
 # Teste passthrough (use com câmeras estáveis)
-GN_RTSP_REENCODE=0 python main.py
+GN_RTSP_PROFILE=hq GN_RTSP_REENCODE=0 python main.py
 ```
 
 ---
@@ -109,13 +137,14 @@ Intervalo entre keyframes em quadros (Group of Pictures).
 #### `GN_RTSP_FPS` (default: vazio)
 Limita a taxa de frames do stream (ex: `15`, `20`, `24`, `30`).
 
-Aplica filtro ffmpeg `fps=N` **leve** (não é re-encode pesado):
-- Descarta frames desnecessários
-- Mantém qualidade dos frames restantes
-- Reduz carga de processamento
+Quando há reencode, aplica filtro ffmpeg `fps=N`:
+
+- pode descartar ou duplicar frames;
+- reduz carga e tamanho, mas muda a cadência temporal;
+- deve ficar vazio no perfil de qualidade máxima.
 
 ```bash
-# Limita a 15fps (reduz CPU sem perder qualidade de encode)
+# Limita a 15fps (reduz CPU/tamanho, mas remove quadros)
 GN_RTSP_FPS=15 python main.py
 
 # Limita a 20fps em câmeras 30fps
@@ -129,8 +158,8 @@ GN_RTSP_FPS=20 python main.py
 ### Câmera WiFi Instável (ex: Tapo C500)
 
 ```bash
-# Padrão (recomendado)
-GN_RTSP_REENCODE=1          # Re-encode com error concealment
+# Robustez (recomendado para stream problemático)
+GN_RTSP_PROFILE=compatible  # Re-encode com error concealment
 GN_RTSP_PRESET=veryfast     # CPU moderada
 GN_RTSP_CRF=23              # Qualidade padrão
 ```
@@ -151,8 +180,9 @@ GN_RTSP_FPS=20             # Limita a 20fps
 ### Câmera Cabeada (Ethernet)
 
 ```bash
-# DTS é estável, pode usar passthrough
-GN_RTSP_REENCODE=0  # Passthrough puro, quase zero CPU
+# DTS/GOP estáveis, pode usar passthrough
+GN_RTSP_PROFILE=hq
+GN_RTSP_REENCODE=0  # Passthrough puro, quase zero CPU e sem perda na captura
 ```
 
 ### Câmera com CPU Limitada (Raspberry Pi Zero)
@@ -164,13 +194,19 @@ GN_RTSP_FPS=15             # 15fps é suficiente para replay
 GN_RTSP_REENCODE=1         # Garante error concealment
 ```
 
-### Câmera com Arquivo Grande (mais qualidade)
+### Qualidade máxima em câmera estável
 
 ```bash
-GN_RTSP_PRESET=fast        # Melhor qualidade
-GN_RTSP_CRF=18             # Alta qualidade
-GN_RTSP_FPS=30             # 30fps (máximo qualidade)
+GN_RTSP_PROFILE=hq
+GN_RTSP_REENCODE=0
+GN_RTSP_FPS=
+GN_RTSP_USE_WALLCLOCK=0
+GN_HQ_CRF=16
+GN_HQ_PRESET=slow
+VERTICAL_FORMAT=0
 ```
+
+Configure também a câmera com H.264 High Profile, FPS fixo e GOP/I-frame interval igual a 1 segundo.
 
 ---
 
@@ -185,7 +221,7 @@ GN_RTSP_FPS=30             # 30fps (máximo qualidade)
 Gera 4 arquivos de teste (30s cada):
 1. Passthrough SEM wallclock
 2. Passthrough COM wallclock
-3. Re-encode SEM wallclock (padrão)
+3. Re-encode SEM wallclock
 4. Re-encode COM wallclock
 
 Compare visualmente em VLC:
@@ -236,7 +272,7 @@ GN_RTSP_CRF=20 python main.py
 GN_RTSP_PRESET=fast python main.py
 
 # 3. Verifica error concealment
-GN_RTSP_REENCODE=1 python main.py  # Não use copy
+GN_RTSP_PROFILE=compatible python main.py  # Use reencode se houver corrupção/timestamp ruim
 ```
 
 ### CPU Muito Alta (>90%)
@@ -254,8 +290,8 @@ GN_RTSP_PRESET=ultrafast python main.py
 # 3. Aumenta CRF (lower quality)
 GN_RTSP_CRF=28 python main.py
 
-# 4. Se nada ajudar: passthrough (risco: pode ter stutter)
-GN_RTSP_REENCODE=0 python main.py
+# 4. Se a câmera for estável: passthrough para reduzir CPU
+GN_RTSP_PROFILE=hq GN_RTSP_REENCODE=0 python main.py
 ```
 
 ---

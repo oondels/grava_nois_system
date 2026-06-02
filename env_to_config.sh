@@ -507,7 +507,7 @@ config: dict = {
     "processing": {
         "lightMode":      _bool("GN_LIGHT_MODE", False),
         "maxAttempts":    max(1, _int("GN_MAX_ATTEMPTS", 3)),
-        "verticalFormat": _bool("VERTICAL_FORMAT", True),
+        "verticalFormat": _bool("VERTICAL_FORMAT", False),
         "hqCrf":          _int_range("GN_HQ_CRF", 18, 0, 51),
         "hqPreset":       _str("GN_HQ_PRESET", "medium") or "medium",
         "lmCrf":          _int_range("GN_LM_CRF", 26, 0, 51),

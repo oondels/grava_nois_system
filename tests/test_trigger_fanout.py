@@ -5,10 +5,17 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.config.settings import CaptureConfig
-from main import CameraRuntime, _get_fanout_targets, _trigger_fan_out, _trigger_single_camera
+from main import (
+    CameraRuntime,
+    _camera_supervisor,
+    _get_fanout_targets,
+    _trigger_fan_out,
+    _trigger_single_camera,
+)
 
 
 def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> CameraRuntime:
@@ -16,9 +23,148 @@ def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> Came
     cfg.camera_id = camera_id
     cfg.pico_trigger_token = pico_trigger_token
     segbuf = MagicMock()
+    segbuf.diagnostics.return_value = SimpleNamespace(
+        buffer_status="FRESH",
+        buffer_fresh=True,
+        segment_age_sec=0.5,
+        last_segment_at="2026-04-17T12:00:00+00:00",
+        segment_count=10,
+    )
     proc = MagicMock()
     proc.poll.return_value = None
     return CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf, camera_status="OK")
+
+
+class CameraSupervisorTests(unittest.TestCase):
+    def test_persistent_stale_buffer_restarts_ffmpeg(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.segbuf.diagnostics.return_value = SimpleNamespace(
+            buffer_status="STALE",
+            buffer_fresh=False,
+            segment_age_sec=31.0,
+            last_segment_at="2026-04-17T12:00:00+00:00",
+            segment_count=10,
+        )
+        old_proc = rt.proc
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        new_segbuf = MagicMock()
+        stop_evt = threading.Event()
+
+        def fake_start_ffmpeg(cfg):
+            self.assertEqual(cfg.camera_id, "cam01")
+            stop_evt.set()
+            return new_proc
+
+        with patch("main.clear_buffer") as clear_buffer, \
+             patch("main.start_ffmpeg", side_effect=fake_start_ffmpeg) as start_ffmpeg, \
+             patch("main.SegmentBuffer", return_value=new_segbuf):
+            _camera_supervisor(
+                rt,
+                stop_evt,
+                stale_restart_after_sec=999.0,
+                stale_restart_cycles=1,
+                poll_interval=0.01,
+            )
+
+        old_proc.terminate.assert_called_once()
+        clear_buffer.assert_called_once_with(rt.cfg)
+        start_ffmpeg.assert_called_once_with(rt.cfg)
+        new_segbuf.start.assert_called_once()
+        self.assertIs(rt.proc, new_proc)
+        self.assertIs(rt.segbuf, new_segbuf)
+        self.assertEqual(rt.camera_status, "OK")
+
+    def test_restart_attempt_publishes_reconnect_events(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.proc.poll.return_value = 1
+        rt.camera_status = "ERROR"
+        rt.last_error = "FFmpeg encerrou inesperadamente"
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        new_segbuf = MagicMock()
+        event_service = MagicMock()
+        stop_evt = threading.Event()
+
+        def fake_start_ffmpeg(cfg):
+            self.assertEqual(cfg.camera_id, "cam01")
+            stop_evt.set()
+            return new_proc
+
+        with patch("main.clear_buffer"), \
+             patch("main.start_ffmpeg", side_effect=fake_start_ffmpeg), \
+             patch("main.SegmentBuffer", return_value=new_segbuf):
+            _camera_supervisor(
+                rt,
+                stop_evt,
+                event_service,
+                poll_interval=0.01,
+            )
+
+        event_service.publish_camera_reconnecting.assert_called_once()
+        event_service.publish_camera_reconnected.assert_called_once_with(
+            camera_id="cam01",
+            reason="FFmpeg reiniciado com sucesso",
+            restart_attempts=1,
+        )
+
+    def test_restart_failure_publishes_failure_event(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.proc.poll.return_value = 1
+        rt.camera_status = "ERROR"
+        rt.last_error = "FFmpeg encerrou inesperadamente"
+        event_service = MagicMock()
+        stop_evt = threading.Event()
+
+        def fake_start_ffmpeg(cfg):
+            stop_evt.set()
+            raise RuntimeError("rtsp offline")
+
+        with patch("main.clear_buffer"), \
+             patch("main.start_ffmpeg", side_effect=fake_start_ffmpeg):
+            _camera_supervisor(
+                rt,
+                stop_evt,
+                event_service,
+                poll_interval=0.01,
+            )
+
+        event_service.publish_camera_reconnecting.assert_called_once()
+        event_service.publish_camera_restart_failed.assert_called_once()
+        self.assertEqual(rt.camera_status, "UNAVAILABLE")
+
+    def test_transient_stale_buffer_does_not_restart_ffmpeg(self) -> None:
+        rt = _make_runtime("cam01")
+        stop_evt = threading.Event()
+
+        def fake_diagnostics(stale_after_sec=10.0):
+            stop_evt.set()
+            return SimpleNamespace(
+                buffer_status="STALE",
+                buffer_fresh=False,
+                segment_age_sec=12.0,
+                last_segment_at="2026-04-17T12:00:00+00:00",
+                segment_count=10,
+            )
+
+        rt.segbuf.diagnostics.side_effect = fake_diagnostics
+        old_proc = rt.proc
+
+        with patch("main.clear_buffer") as clear_buffer, \
+             patch("main.start_ffmpeg") as start_ffmpeg:
+            _camera_supervisor(
+                rt,
+                stop_evt,
+                stale_restart_after_sec=999.0,
+                stale_restart_cycles=3,
+                poll_interval=0.01,
+            )
+
+        old_proc.terminate.assert_not_called()
+        clear_buffer.assert_not_called()
+        start_ffmpeg.assert_not_called()
+        self.assertEqual(rt.camera_status, "UNAVAILABLE")
+        self.assertEqual(rt.last_error, "Buffer sem segmentos novos")
 
 
 class TriggerFanOutTests(unittest.TestCase):
@@ -88,6 +234,31 @@ class TriggerFanOutTests(unittest.TestCase):
         self.assertTrue(acquired)
         if acquired:
             rt.capture_lock.release()
+
+    def test_stale_buffer_is_skipped_and_event_is_published(self) -> None:
+        rt = _make_runtime("cam01")
+        rt.segbuf.diagnostics.return_value = SimpleNamespace(
+            buffer_status="STALE",
+            buffer_fresh=False,
+            segment_age_sec=12.0,
+            last_segment_at="2026-04-17T12:00:00+00:00",
+            segment_count=10,
+        )
+        event_service = MagicMock()
+
+        with patch("main.build_highlight") as build_mock, \
+             ThreadPoolExecutor(max_workers=1) as exe:
+            _trigger_fan_out(
+                [rt],
+                Path("/tmp/failed"),
+                exe,
+                "stale-001",
+                trigger_source="pico",
+                capture_event_service=event_service,
+            )
+
+        build_mock.assert_not_called()
+        event_service.publish_trigger_rejected.assert_called_once()
 
 
 class PicoTokenRoutingTests(unittest.TestCase):

@@ -94,8 +94,25 @@ Duas opções:
 - **Padrão local**: `config.json` na raiz do projeto (mesmo diretório de `main.py`).
 - **Override**: defina `GN_CONFIG_PATH=/caminho/para/config.json` no env.
 - **Docker provisionado**: monte o diretorio persistente de config como volume gravavel e defina `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`. O `.env` deve continuar montado separadamente como somente leitura.
+- **Gerenciamento admin de `.env`**: defina `GN_HOST_ENV_PATH` apontando para o `.env` real montado em volume gravável dentro do container. No compose gerenciado, o padrão é `/usr/src/app/host_config/.env`.
 
 Se o arquivo não existir, o sistema opera com valores de env e defaults — sem erro.
+
+Para o painel admin conseguir visualizar/editar `.env`, o path de `GN_HOST_ENV_PATH` precisa existir no container. Em teste local com `docker-compose.yml`, mantenha `.env` na raiz do repo e o volume `.:/usr/src/app/host_config:rw`. Em device provisionado pelo `grava_nois_config`, o setup monta `/opt/.grn/config:/usr/src/app/host_config:rw`.
+
+---
+
+## Gerenciamento remoto de `.env` via admin
+
+O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env` do host pelo app, usando MQTT e SSE:
+
+- `env/request`: backend solicita snapshot do `.env`;
+- `env/desired`: backend envia o novo conteúdo criptografado;
+- `env/reported`: edge responde snapshot, aplicação ou rejeição.
+
+O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
+
+Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. No fluxo instalado pelo `grava_nois_config`, esse runner regenera `/opt/.grn/config/runtime/config.json` a partir de `/opt/.grn/config/.env` antes do `docker compose up -d --force-recreate --remove-orphans`. Identidade e segredos permanecem somente no `.env` e não são migrados para `config.json`.
 
 ---
 
@@ -188,6 +205,8 @@ Contrato de saída:
 - `reported_hash`: hash aplicado ou pendente, quando houver
 - `reported_at`
 - `rejection_reason`: motivo sanitizado, quando houver rejeição
+- `last_applied_version`: última versão local aplicada em `config.state.json`, quando conhecida
+- `pending_version`: versão pendente local, quando houver `config.pending.json`
 - `agent_version`
 - `signature`: HMAC-SHA256 base64 do envelope reportado
 - `signature_version`: `hmac-sha256-v1`
@@ -204,6 +223,7 @@ Snapshot de sincronização (`config.state`):
 - saída: `grn/devices/{device_id}/config/state`
 - o edge publica `config.state` no boot e em resposta a `config.request`
 - `reported_config` deve refletir a configuração operacional efetiva sanitizada
+- `last_applied_version` expõe a última versão local aplicada para o backend recuperar divergência de versionamento
 - `has_pending_restart=false` implica `pending_version=null`
 - `has_pending_restart=true` implica `pending_version>=1`
 - antes do hash, o snapshot normaliza `float` inteiros (`1.0`, `300.0`, `120.0`) para `int`, preservando floats reais como `0.8`

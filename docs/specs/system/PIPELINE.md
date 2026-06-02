@@ -11,6 +11,7 @@ O bootstrap de captura é resiliente e não deve bloquear MQTT/presença nem o h
 5. inicia um supervisor por câmera em background;
 6. o supervisor faz a primeira tentativa de FFmpeg, cria `SegmentBuffer` e marca `camera_status=OK`;
 7. se FFmpeg falhar, marca `camera_status=UNAVAILABLE`, mantém o edge vivo e tenta novamente com backoff.
+8. se FFmpeg continuar vivo mas o buffer ficar sem segmentos novos de forma persistente, o supervisor encerra apenas esse FFmpeg e entra no mesmo fluxo de restart/backoff.
 
 Entradas possíveis:
 
@@ -36,7 +37,7 @@ O `SegmentBuffer`:
 - mantém janela deslizante;
 - remove arquivos excedentes do buffer.
 
-Quando a câmera está indisponível (`proc=None`, processo encerrado ou `segbuf=None`), triggers para aquela câmera são ignorados com warning. Isso evita build sem segmentos e mantém os demais módulos operando.
+Quando a câmera está indisponível (`proc=None`, processo encerrado ou `segbuf=None`) ou quando o último segmento está velho demais, triggers para aquela câmera são ignorados com warning. Isso evita build com segmentos antigos e mantém os demais módulos operando. A queda real do processo FFmpeg continua sendo tratada pelo supervisor; buffer stale persistente reinicia apenas o FFmpeg da câmera afetada, sem reiniciar o container nem forçar restart do sistema.
 
 ## 3. Trigger flow
 
@@ -57,7 +58,9 @@ Antes do build:
 
 1. o trigger pode passar por janela horária local;
 2. GPIO/Pico respeitam cooldown por câmera (`_cooldown_until`);
-3. o evento é roteado conforme o tipo:
+3. o runtime da câmera é validado: FFmpeg precisa estar vivo e `SegmentBuffer.diagnostics()` precisa retornar `buffer_fresh=true`;
+4. se a câmera não estiver pronta, o edge publica `capture.trigger_rejected` em `grn/devices/{device_id}/capture/events` e não chama `build_highlight()`;
+5. o evento é roteado conforme o tipo:
    - **ACK Pico** (`ACK_GRN_STARTED`): confirmação do handshake iniciado pelo edge; interrompe novos reenvios de `GRN_STARTED` e é ignorado no fluxo de câmera/Docker;
    - **Token Pico dedicado** (`pico_trigger_token` da câmera): dispara apenas a câmera correspondente;
    - **Token Pico global** (`GN_PICO_TRIGGER_TOKEN`) ou ENTER/GPIO: fan-out para câmeras sem token dedicado (fallback: todas, se todas tiverem token);

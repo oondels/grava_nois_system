@@ -1,5 +1,52 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
+- `boot_id`, sequência de heartbeat e contadores de reconexão MQTT no payload de presença/state para auditoria remota.
+- `config.reported` e `config.state` passam a expor `last_applied_version` e `pending_version` para reconciliação remota de versão.
+
+### Changed
+- Cliente MQTT registra motivo/timestamp da última desconexão e notifica listeners internos sem interromper o pipeline de captura.
+- Rejeição de configuração por `config_version antiga ou já aplicada` agora é reportada via MQTT com `correlation_id`, versão local aplicada e snapshot efetivo quando disponível.
+
+## 2026-05-02
+
+### Fixed
+- Supervisor de camera passa a reiniciar apenas o FFmpeg da camera quando o buffer fica `STALE`/`MISSING`/`UNKNOWN` de forma persistente, cobrindo o caso de processo vivo sem novos segmentos apos queda/religamento RTSP.
+- Healthcheck Docker deixa de depender de `pgrep`/`procps` e passa a verificar o processo principal via Python e `/proc/1/cmdline`, evitando falso `unhealthy` em imagens slim.
+
+## 2026-04-17
+
+### Changed
+- `DeviceEnvService`: `restart_after_apply=true` passa a solicitar `restart_container` ao runner Docker do host (`source=admin_env`), permitindo que o host regenere `config.json` antes do recreate.
+- `env_to_config.sh` e `.env.example`: `VERTICAL_FORMAT` passa a default `0`, alinhado ao loader e ao `config.example.json`, evitando crop 9:16 acidental em configs geradas.
+- `.env.example`: `GN_RTSP_FPS` passa a default vazio para preservar a cadencia original quando nao houver necessidade explicita de filtro `fps`.
+- Documentacao de RTSP/qualidade atualizada para diferenciar `hq` passthrough, `compatible` com reencode, watermark final e tradeoffs de CRF/preset.
+
+## 2026-04-16
+
+### Changed
+- Documentado que o token `RESTART_DOCKER` deve recriar o container via compose no host, sem pull de imagem, para reler `env_file` e aplicar alterações remotas no `.env`.
+- Documentado que o token `PULL_DOCKER` executa pull e recriação por compose, preservando `runtime_config` como volume persistente.
+
+## 2026-04-13
+
+### Added
+- Serviço MQTT `DeviceEnvService` para gerenciamento remoto de .env admin-only.
+- Topicos MQTT: `env/request`, `env/desired`, `env/reported` com envelope criptografado AES-256-GCM.
+- Helper `env_envelope.py` para criptografia/descriptografia de envelope de .env com HKDF-SHA256.
+- Backup atomico de .env antes de sobrescrever (`.env.bak.grn.<timestamp>`).
+- Escrita atomica com `chmod 600` para proteger .env.
+- Suporte a `restart_after_apply` para agendar restart do container apos aplicar .env.
+- Auditoria dedicada em `env_audit.log` sem valores sensiveis.
+- Testes unitarios completos e testes cruzados de compatibilidade TS/Python.
+
+### Changed
+- `requirements.txt`: adicionada dependencia `cryptography==44.0.3` para AES-256-GCM e HKDF.
+- `main.py`: inicializa `DeviceEnvService` junto com os demais servicos MQTT.
+
 ## 2026-04-11
 
 ### Added
@@ -14,7 +61,7 @@
 - **MQTT inicia antes das câmeras**: presença e heartbeat publicam status mesmo com falha total de hardware.
 - Configuração remota passa a aplicar payload válido mesmo quando `config_version` é antiga, já aplicada ou menor que a pendente.
 - Startup de câmera não-fatal: falha em `start_ffmpeg()` marca câmera como `UNAVAILABLE` sem abortar o processo.
-- Healthcheck Docker mede liveness do processo Python (`pgrep -f 'python.*main'`) em vez de FFmpeg.
+- Healthcheck Docker mede liveness do processo Python em vez de FFmpeg.
 - `CameraRuntime.proc` e `.segbuf` agora são opcionais (`None` quando câmera indisponível).
 - Heartbeat MQTT protegido com try/except permanente; snapshot provider com fallback seguro.
 - Shutdown gracioso verifica `proc` e `segbuf` antes de chamar `terminate()`/`stop()`.

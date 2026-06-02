@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.config.config_loader import reset_config_cache
@@ -34,6 +35,13 @@ def _run_build_highlight(cfg: CaptureConfig, fixed_ts: float = 1700000000.0) -> 
 
     segbuf = MagicMock()
     segbuf.snapshot_last.return_value = segs
+    segbuf.diagnostics.return_value = SimpleNamespace(
+        buffer_status="FRESH",
+        buffer_fresh=True,
+        segment_age_sec=0.5,
+        last_segment_at="2026-04-17T12:00:00+00:00",
+        segment_count=len(segs),
+    )
 
     def fake_run(cmd, **kwargs):
         out = Path(cmd[-1])
