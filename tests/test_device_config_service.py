@@ -548,7 +548,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
 
         self.assertIn("expirada", str(ctx.exception))
 
-    def test_rejects_old_version(self) -> None:
+    def test_applies_old_version_when_payload_is_valid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             (base / "config.state.json").write_text(
@@ -556,15 +556,23 @@ class DeviceConfigServiceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             service = self._service(base)
+            (base / "config.json").write_text(
+                json.dumps(self._desired_config({"version": 3})),
+                encoding="utf-8",
+            )
             payload = self._payload(
                 self._desired_config({"operationWindow": {"start": "08:00"}}),
                 version=2,
             )
 
-            with self.assertRaises(Exception) as ctx:
-                service.process_desired_config(payload)
+            result = service.process_desired_config(payload)
+            config_data = json.loads((base / "config.json").read_text(encoding="utf-8"))
+            state_data = json.loads((base / "config.state.json").read_text(encoding="utf-8"))
 
-        self.assertIn("antiga", str(ctx.exception))
+        self.assertEqual(result.status, "applied")
+        self.assertEqual(result.config_version, 2)
+        self.assertEqual(config_data["operationWindow"]["start"], "08:00")
+        self.assertEqual(state_data["lastAppliedVersion"], 2)
 
     def test_malformed_payload_still_publishes_signed_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

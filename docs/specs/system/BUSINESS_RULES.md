@@ -130,4 +130,5 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - secrets, credenciais MQTT, tokens, `DEVICE_SECRET` e RTSP com `user:pass@` são rejeitados;
 - campos que exigem restart são gravados em `config.pending.json` e reportados como `pending_restart`;
 - mudanças em domínios hot-reload-safe podem ser promovidas atomicamente para `config.json`;
+- `config_version` antiga, já aplicada ou menor que a pendente não bloqueia aplicação; payload válido sobrescreve a configuração desejada local;
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.

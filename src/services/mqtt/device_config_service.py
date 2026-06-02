@@ -290,13 +290,6 @@ class DeviceConfigService:
         _validate_remote_config(desired_config)
 
         state = self._load_state()
-        last_applied_version = int(state.get("lastAppliedVersion") or 0)
-        pending_version = int(state.get("pendingVersion") or 0)
-        if config_version <= last_applied_version:
-            raise RemoteConfigError("config_version antiga ou já aplicada")
-        if pending_version and config_version < pending_version:
-            raise RemoteConfigError("config_version anterior à versão pendente")
-
         current_config = self._load_current_config()
         requires_restart = payload.get("requires_restart")
         if requires_restart is None:
