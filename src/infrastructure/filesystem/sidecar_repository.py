@@ -53,7 +53,7 @@ class FilesystemClipJobRepository:
         if not path.exists():
             return None
         payload = self._read_payload(path)
-        return None if payload is None else self._decode(path, payload)
+        return None if payload is None else self._decode_or_quarantine(path, payload)
 
     def save(self, job: ClipJob) -> None:
         self._root.mkdir(parents=True, exist_ok=True)
@@ -72,10 +72,23 @@ class FilesystemClipJobRepository:
             payload = self._read_payload(path)
             if payload is None:
                 continue
-            job = self._decode(path, payload)
+            job = self._decode_or_quarantine(path, payload)
+            if job is None:
+                continue
             if job.state in expected:
                 jobs.append(job)
         return tuple(jobs)
+
+    def _decode_or_quarantine(
+        self,
+        path: Path,
+        payload: dict[str, Any],
+    ) -> ClipJob | None:
+        try:
+            return self._decode(path, payload)
+        except (OSError, TypeError, ValueError):
+            self._quarantine(path)
+            return None
 
     def _path(self, job_id: str) -> Path:
         if not job_id or job_id in {".", ".."} or Path(job_id).name != job_id:

@@ -191,6 +191,37 @@ class CameraSupervisorTests(unittest.TestCase):
         self.assertEqual((expected,), results)
         second.tick.assert_called_once()
 
+    def test_real_supervisors_keep_failure_backoff_isolated_per_camera(self) -> None:
+        clock = FakeClock()
+        failing = FakeProcess(failures=1)
+        healthy = FakeProcess()
+        first = CameraSupervisor(
+            camera_id=CameraId("failing"),
+            process=failing,
+            segments=Mock(),
+            clock=clock,
+        )
+        second = CameraSupervisor(
+            camera_id=CameraId("healthy"),
+            process=healthy,
+            segments=Mock(),
+            clock=clock,
+        )
+        coordinator = CameraSupervisionCoordinator((first, second))
+
+        initial = coordinator.tick_all()
+        follow_up = coordinator.tick_all()
+
+        self.assertEqual(
+            (SupervisionAction.START_FAILED, SupervisionAction.STARTED),
+            tuple(item.action for item in initial),
+        )
+        self.assertEqual(
+            (SupervisionAction.WAITING_BACKOFF, SupervisionAction.HEALTHY),
+            tuple(item.action for item in follow_up),
+        )
+        self.assertEqual((1, 1), (failing.starts, healthy.starts))
+
 
 class RecordingScheduler:
     def __init__(self) -> None:

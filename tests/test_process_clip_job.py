@@ -42,6 +42,19 @@ class MemoryJobs:
         return ()
 
 
+class CrashAfterCheckpointJobs(MemoryJobs):
+    def __init__(self, job: ClipJob, crash_state: ClipJobState) -> None:
+        super().__init__(job)
+        self.crash_state = crash_state
+        self.crashed = False
+
+    def save(self, job: ClipJob) -> None:
+        super().save(job)
+        if job.state is self.crash_state and not self.crashed:
+            self.crashed = True
+            raise KeyboardInterrupt("simulated process death")
+
+
 class FakeLeases:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, timedelta]] = []
@@ -252,6 +265,32 @@ class ProcessClipJobTests(unittest.TestCase):
         self.assertEqual(ClipJobState.FINALIZED, completed.state)
         self.assertEqual(0, self.backend.uploads)
         self.assertEqual(2, self.backend.finalizes)
+
+    def test_crash_after_uploaded_checkpoint_resumes_at_finalize_without_reupload(self) -> None:
+        self.jobs = CrashAfterCheckpointJobs(
+            make_job(ClipJobState.REGISTERED),
+            ClipJobState.UPLOADED,
+        )
+
+        with self.assertRaisesRegex(KeyboardInterrupt, "simulated process death"):
+            self.use_case().execute("job-1")
+
+        self.assertEqual(ClipJobState.UPLOADED, self.jobs.job.state)
+        self.assertEqual(1, self.backend.uploads)
+        completed = self.use_case().execute("job-1")
+        self.assertEqual(ClipJobState.FINALIZED, completed.state)
+        self.assertEqual(1, self.backend.uploads)
+        self.assertEqual(1, self.backend.finalizes)
+
+    def test_terminal_discard_is_idempotent_on_later_execution(self) -> None:
+        self.backend.failure = ("register", False)
+        first = self.use_case().execute("job-1")
+        second = self.use_case().execute("job-1")
+
+        self.assertEqual(ClipJobState.DISCARDED, first.state)
+        self.assertEqual(ClipJobState.DISCARDED, second.state)
+        self.assertEqual(1, self.artifacts.discarded)
+        self.assertEqual(1, self.backend.registers)
 
     def test_unknown_failure_defaults_to_retryable(self) -> None:
         self.media.apply_watermark = lambda source, output: (_ for _ in ()).throw(

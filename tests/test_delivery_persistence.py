@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from src.application.delivery import RetryPolicy
 from src.domain.capture import CameraId
@@ -175,6 +176,41 @@ class FilesystemClipJobRepositoryTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertEqual(1, len(list(self.root.glob("broken.json.corrupt-*"))))
 
+    def test_semantically_invalid_sidecar_is_quarantined_and_skipped(self) -> None:
+        path = self.root / "invalid-fields.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "job_id": "invalid-fields",
+                    "camera_id": " ",
+                    "attempts": "not-an-integer",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertIsNone(self.repository.get("invalid-fields"))
+        self.assertFalse(path.exists())
+        self.assertEqual(1, len(list(self.root.glob("invalid-fields.json.corrupt-*"))))
+
+    def test_failed_atomic_replace_preserves_previous_sidecar_and_removes_temp(self) -> None:
+        original = make_job()
+        self.repository.save(original)
+        path = self.root / "clip-1.json"
+        previous = path.read_bytes()
+
+        with (
+            patch(
+                "src.infrastructure.filesystem.sidecar_repository.os.replace",
+                side_effect=OSError("disk unavailable"),
+            ),
+            self.assertRaisesRegex(OSError, "disk unavailable"),
+        ):
+            self.repository.save(make_job(state=ClipJobState.RETRY_PENDING, attempts=1))
+
+        self.assertEqual(previous, path.read_bytes())
+        self.assertEqual([], list(self.root.glob(".*.tmp")))
+
     def test_list_filters_states_and_quarantines_invalid_entries(self) -> None:
         self.repository.save(make_job(state=ClipJobState.PROCESSING))
         other = ClipJob(
@@ -229,6 +265,26 @@ class FilesystemJobLeaseRepositoryTests(unittest.TestCase):
             self.repository.acquire("clip-1", "worker-b", timedelta(seconds=30)),
         ):
             self.fail("an active lease must not be entered")
+
+    def test_release_does_not_remove_a_lease_replaced_by_another_owner(self) -> None:
+        path = self.root / "clip-1.lease"
+        with self.repository.acquire("clip-1", "worker-a", timedelta(seconds=30)):
+            replacement = {
+                "job_id": "clip-1",
+                "owner_id": "worker-b",
+                "boot_id": "boot-b",
+                "pid": 456,
+                "acquired_at": datetime.now(UTC).isoformat(),
+                "ttl_seconds": 30,
+                "token": "replacement-token",
+            }
+            path.write_text(json.dumps(replacement), encoding="utf-8")
+
+        self.assertTrue(path.exists())
+        self.assertEqual(
+            "worker-b",
+            json.loads(path.read_text(encoding="utf-8"))["owner_id"],
+        )
 
     def test_expired_and_corrupt_leases_are_recovered(self) -> None:
         path = self.root / "clip-1.lease"
