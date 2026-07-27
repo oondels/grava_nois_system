@@ -194,6 +194,35 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
     post_seg_cfg = capture.post_segments
     pre_sec_cfg = pre_seg_cfg * seg_time
     post_sec_cfg = post_seg_cfg * seg_time
+    default_buffer_seconds = max(
+        40,
+        pre_sec_cfg + post_sec_cfg + (2 * seg_time),
+    )
+
+    def _buffer_seconds_for(pre_segments: int, post_segments: int) -> int:
+        required = (pre_segments + post_segments + 2) * seg_time
+        effective = (
+            capture.buffer_seconds
+            if capture.buffer_seconds is not None
+            else max(default_buffer_seconds, required)
+        )
+        if effective < required:
+            raise ValueError(
+                "capture.bufferSeconds/GN_MAX_BUFFER_SECONDS deve ser >= "
+                f"{required}s para comportar a janela da câmera "
+                f"({pre_segments} pre + {post_segments} post + 2 segmentos de margem)"
+            )
+        return effective
+
+    def _buffer_seconds_for_window(pre_seconds: int, post_seconds: int) -> int:
+        required = pre_seconds + post_seconds + (2 * seg_time)
+        effective = capture.buffer_seconds or max(40, required)
+        if effective < required:
+            raise ValueError(
+                "capture.bufferSeconds/GN_MAX_BUFFER_SECONDS deve ser >= "
+                f"{required}s para comportar a janela V4L2 e 2 segmentos de margem"
+            )
+        return effective
 
     buffer_base = Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer"))
 
@@ -222,7 +251,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
             pre_seconds=_pre_seg * seg_time,
             post_seconds=_post_seg * seg_time,
             scan_interval=1,
-            max_buffer_seconds=40,
+            max_buffer_seconds=_buffer_seconds_for(_pre_seg, _post_seg),
             pre_segments=_pre_seg,
             post_segments=_post_seg,
             pico_trigger_token=pico_trigger_token,
@@ -248,7 +277,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                         pre_seconds=pre_sec_cfg,
                         post_seconds=post_sec_cfg,
                         scan_interval=1,
-                        max_buffer_seconds=40,
+                        max_buffer_seconds=_buffer_seconds_for(pre_seg_cfg, post_seg_cfg),
                         failed_dir_highlight=base / "failed_clips",
                         pre_segments=pre_seg_cfg,
                         post_segments=post_seg_cfg,
@@ -353,7 +382,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
             pre_seconds=pre_sec_cfg,
             post_seconds=post_sec_cfg,
             scan_interval=1,
-            max_buffer_seconds=40,
+            max_buffer_seconds=_buffer_seconds_for_window(pre_sec_cfg, post_sec_cfg),
             failed_dir_highlight=base / "failed_clips",
             pre_segments=pre_seg_cfg,
             post_segments=post_seg_cfg,

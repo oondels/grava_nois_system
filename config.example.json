@@ -12,6 +12,7 @@
     "segmentSeconds": 1,
     "preSegments": 6,
     "postSegments": 3,
+    "bufferSeconds": 40,
     "rtsp": {
       "_comment": "Tuning de captura RTSP. Todos exigem restart.",
       "_profiles": "profile=hq: passthrough (-c:v copy), ideal para câmeras com timestamps estáveis. profile=compatible: reencode libx264 com fps_mode=vfr, tolerante a DTS/PTS ruins. null = inferido por lightMode (false→hq, true→compatible).",

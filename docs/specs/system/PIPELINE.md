@@ -22,7 +22,11 @@ Entradas possíveis:
 
 ## 2. Continuous capture
 
-FFmpeg gera segmentos contínuos de 1s ou `GN_SEG_TIME`.
+FFmpeg gera segmentos contínuos de 1s ou `capture.segmentSeconds`
+(`GN_SEG_TIME` no modo legado). O buffer circular usa
+`capture.bufferSeconds`/`GN_MAX_BUFFER_SECONDS`; sem override, sua capacidade é
+`max(40, (preSegments + postSegments + 2) × segmentSeconds)`, incluindo dois
+segmentos de margem.
 
 Perfis de captura RTSP (`capture.rtsp.profile`):
 

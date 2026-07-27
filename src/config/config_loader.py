@@ -136,6 +136,8 @@ class CaptureParams:
     # pre/post_segments usados quando há fonte RTSP detectada
     pre_segments: int = 6
     post_segments: int = 3
+    # None calcula max(40, janela de replay + margem de dois segmentos).
+    buffer_seconds: Optional[int] = None
     rtsp: RtspConfig = field(default_factory=RtspConfig)
     v4l2: V4l2Config = field(default_factory=V4l2Config)
 
@@ -426,6 +428,7 @@ def _build_from_env() -> OperationalConfig:
             segment_seconds=_env_int("GN_SEG_TIME", 1),
             pre_segments=_env_int("GN_RTSP_PRE_SEGMENTS", 6),
             post_segments=_env_int("GN_RTSP_POST_SEGMENTS", 3),
+            buffer_seconds=_env_int_nullable("GN_MAX_BUFFER_SECONDS"),
             rtsp=RtspConfig(
                 max_retries=_env_int("GN_RTSP_MAX_RETRIES", 10),
                 timeout_seconds=_env_int("GN_RTSP_TIMEOUT", 5),
@@ -564,6 +567,7 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
         segment_seconds=max(1, _get(cap_d, "segmentSeconds", base.capture.segment_seconds)),
         pre_segments=max(1, _get(cap_d, "preSegments", base.capture.pre_segments)),
         post_segments=max(1, _get(cap_d, "postSegments", base.capture.post_segments)),
+        buffer_seconds=_get(cap_d, "bufferSeconds", base.capture.buffer_seconds),
         rtsp=rtsp,
         v4l2=v4l2,
     )

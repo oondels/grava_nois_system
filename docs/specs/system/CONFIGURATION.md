@@ -23,7 +23,7 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 
 | Domínio | Campos | Exige restart? |
 |---|---|---|
-| Captura / segmentação | `capture.segmentSeconds`, `capture.preSegments`, `capture.postSegments` | Sim |
+| Captura / segmentação | `capture.segmentSeconds`, `capture.preSegments`, `capture.postSegments`, `capture.bufferSeconds` | Sim |
 | Tuning RTSP | `capture.rtsp.*` (maxRetries, timeout, profile, reencode, gop, preset, crf, fps, useWallclockTimestamps, lowLatencyInput, lowDelayCodecFlags) | Sim |
 | Câmera V4L2 | `capture.v4l2.*` (device, framerate, videoSize) | Sim |
 | Estrutura de câmeras | `cameras[]` (id, name, enabled, sourceType, rtspUrl, picoTriggerToken, pre/postSegments) | Sim |
@@ -157,6 +157,10 @@ A separação entre parâmetros que suportarão hot-reload e os que exigem resta
 ### Exigem restart/reload controlado
 - `cameras` — estrutura de câmeras e source RTSP
 - `capture.segmentSeconds` — tamanho do segmento FFmpeg
+- `capture.bufferSeconds` — capacidade do buffer circular. Se omitido, usa
+  `max(40, (preSegments + postSegments + 2) × segmentSeconds)`. O fallback
+  legado é `GN_MAX_BUFFER_SECONDS`; overrides menores que a janela necessária
+  são rejeitados.
 - `capture.rtsp.*` — parâmetros do stream RTSP
 - `triggers.source` — fonte de trigger físico
 - `triggers.gpio.pin` — pino BCM

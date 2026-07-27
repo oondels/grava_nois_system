@@ -438,6 +438,7 @@ GN_FFMPEG_STARTUP_CHECK_SEC=1.0 # Tempo para validar boot do FFmpeg (padrão: 1s
 GN_SEG_TIME=1                   # Duração de cada segmento (padrão: 1s)
 GN_RTSP_PRE_SEGMENTS=6          # Segmentos antes do clique (padrão: 6)
 GN_RTSP_POST_SEGMENTS=3         # Segmentos depois do clique (padrão: 3)
+GN_MAX_BUFFER_SECONDS=          # Opcional; padrão=max(40, (pre+post+2)*segmento)
 
 # Encoder RTSP
 GN_RTSP_PROFILE=               # vazio=inferido por GN_LIGHT_MODE; "hq" ou "compatible"
