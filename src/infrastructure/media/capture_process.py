@@ -89,4 +89,3 @@ class SubprocessCaptureProcess:
 
     def is_alive(self) -> bool:
         return self._process is not None and self._process.poll() is None
-

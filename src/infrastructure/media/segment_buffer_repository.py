@@ -137,4 +137,3 @@ class SegmentBufferRepository:
         except ValueError:
             return None
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
