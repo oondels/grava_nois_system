@@ -15,8 +15,8 @@ de `IN_PROGRESS` e `CANCELLED` a partir de `BACKLOG` ou `READY`.
 | RF-008 | Persistência e máquina de estados | DONE | RF-004, RF-003 | delivery_pipeline | quality_reliability | [RF-008](progress/RF-008.md) |
 | RF-009 | Delivery pipeline | DONE | RF-005, RF-008 | delivery_pipeline | architecture_lead | [RF-009](progress/RF-009.md) |
 | RF-010 | Device Management | DONE | RF-005, RF-004 | device_integrations | quality_reliability | [RF-010](progress/RF-010.md) |
-| RF-011 | Composition root, EdgeRuntime e cutover | READY | RF-007, RF-009, RF-010 | architecture_lead | quality_reliability | [RF-011](progress/RF-011.md) |
-| RF-012 | Hardening operacional | BACKLOG | RF-011 | quality_reliability | delivery_pipeline | [RF-012](progress/RF-012.md) |
+| RF-011 | Composition root, EdgeRuntime e cutover | REVIEW | RF-007, RF-009, RF-010 | architecture_lead | quality_reliability | [RF-011](progress/RF-011.md) |
+| RF-012 | Hardening operacional | REVIEW | RF-011 | quality_reliability | delivery_pipeline | [RF-012](progress/RF-012.md) |
 | RF-013 | Remoção do legado e consolidação documental | BACKLOG | RF-012 | documentation_governance | architecture_lead | [RF-013](progress/RF-013.md) |
 | RF-014 | Aceitação final e prontidão para merge | BACKLOG | RF-013 | architecture_lead | quality_reliability | [RF-014](progress/RF-014.md) |
 
