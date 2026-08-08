@@ -1543,6 +1543,25 @@ rm logs/app.log.*
 > logs/app.log
 ```
 
+### 11. MQTT TCP Conecta, mas o Device Continua Offline
+
+**Sintomas:**
+
+- DNS do broker resolve;
+- conexao TCP na porta 8883 funciona;
+- `logs/mqtt.log` mostra tentativas de reconexao;
+- handshake TLS retorna `CERTIFICATE_VERIFY_FAILED`.
+
+**Diagnostico dentro do container:**
+
+```bash
+python -c 'import socket,ssl; h="mqtt.gravanois.com.br"; s=socket.create_connection((h,8883),5); c=ssl.create_default_context().wrap_socket(s,server_hostname=h); print("MQTT TLS OK",c.version()); c.close()'
+```
+
+Se o erro indicar certificado expirado ou hostname divergente, corrija o certificado apresentado pelo RabbitMQ. Nao use `CERT_NONE`, `tls_insecure_set(true)` ou `GN_MQTT_TLS=0` como contorno.
+
+O cliente MQTT reconecta automaticamente com backoff entre 1 e 120 segundos. Depois que o broker voltar a apresentar um certificado valido, o device deve recuperar a sessao sem restart; o pipeline de captura continua operando durante a indisponibilidade MQTT.
+
 ---
 
 ## 📚 Sistema de Logging

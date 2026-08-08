@@ -9,6 +9,7 @@
 
 ### Changed
 - Cliente MQTT registra motivo/timestamp da última desconexão e notifica listeners internos sem interromper o pipeline de captura.
+- Troubleshooting MQTT documenta diagnostico separado de DNS, TCP e handshake TLS; certificado expirado deve ser corrigido no broker sem desabilitar `CERT_REQUIRED` no edge.
 - Rejeição de configuração por `config_version antiga ou já aplicada` agora é reportada via MQTT com `correlation_id`, versão local aplicada e snapshot efetivo quando disponível.
 
 ## 2026-05-02

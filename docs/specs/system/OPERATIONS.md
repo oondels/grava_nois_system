@@ -89,6 +89,7 @@ Esses testes cobrem os pontos mais sensíveis do edge:
 - o worker é sensível a sidecars inconsistentes;
 - há `.pyc` em `tests/__pycache__` e `src/__pycache__` no workspace, mas não fazem parte do contrato de runtime;
 - MQTT pode ficar habilitado sem broker disponível; isso deve degradar para warning/log e seguir com o pipeline principal.
+- DNS/TCP acessiveis nao garantem MQTT funcional: valide separadamente o handshake TLS com SNI; certificado expirado deve ser renovado/recarregado no broker, sem desabilitar validacao no edge.
 - câmera pode ficar `UNAVAILABLE` no boot; o supervisor tenta reiniciar FFmpeg sem exigir restart do container.
 - remote config depende de `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura; sem segredo, mensagens `config/desired` são rejeitadas.
 

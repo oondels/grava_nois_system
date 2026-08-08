@@ -151,6 +151,7 @@ Observações:
 - `last will` marca `offline` quando a conexão cai abruptamente;
 - o edge continua operando sem broker;
 - o cliente MQTT usa reconexão explícita com backoff do Paho (`reconnect_delay_set(min_delay=1, max_delay=120)`);
+- TLS usa validacao obrigatoria da cadeia (`ssl.CERT_REQUIRED`); falhas de certificado do broker nao devem ser contornadas com modo inseguro, e o cliente continua tentando reconectar ate o servidor ser corrigido;
 - mensagens recebidas são despachadas para uma thread dedicada de handlers, evitando I/O síncrono no loop Paho;
 - heartbeat e state são protegidos contra exceções no snapshot provider;
 - a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.
