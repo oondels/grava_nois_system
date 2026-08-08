@@ -25,7 +25,7 @@ class DevicePresenceService:
         *,
         device_id: str,
         client_id: str,
-        venue_id: str,
+        venue_id: str | None,
         boot_id: str,
         runtime_snapshot_provider: RuntimeSnapshotProvider,
     ):

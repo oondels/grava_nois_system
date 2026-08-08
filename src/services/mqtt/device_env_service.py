@@ -85,7 +85,7 @@ class DeviceEnvService:
         *,
         device_id: str,
         client_id: str,
-        venue_id: str,
+        venue_id: str | None,
         request_topic: str,
         desired_topic: str,
         reported_topic: str,

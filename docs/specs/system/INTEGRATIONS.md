@@ -1,5 +1,10 @@
 # Edge Integrations
 
+## Integração rental
+
+- Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT omitem `venue_id`.
+- `client_id`, `device_id`, timestamp, nonce e assinatura HMAC permanecem obrigatórios; o backend resolve a locação pelo device e `captured_at`.
+
 ## Environment and settings
 
 Config principal em [`src/config/config_loader.py`](../../../src/config/config_loader.py) e [`src/config/settings.py`](../../../src/config/settings.py), com bootstrap complementar em `main.py`.

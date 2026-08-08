@@ -25,6 +25,10 @@ _DELETE_RECORD_MESSAGES = {
     "integrity_failed",
     "signature_mismatch",
     "device_not_authenticated",
+    "device_not_authorized_for_rental",
+    "rental_not_found_for_capture",
+    "rental_upload_grace_expired",
+    "rental_owner_unavailable",
 }
 
 _DELETE_RECORD_MESSAGE_SNIPPETS = {

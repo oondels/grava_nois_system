@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-08
+
+### Added
+- `feat(rental)`: modo `GN_DEVICE_MODE=rental` para captura móvel sem `GN_VENUE_ID` e registro pela rota HMAC de locações.
+
+### Changed
+- `feat(edge)`: eventos MQTT aceitam venue ausente no modo rental e erros definitivos de período/locação são descartados sem retry.
+
 ## Unreleased
 
 ### Added

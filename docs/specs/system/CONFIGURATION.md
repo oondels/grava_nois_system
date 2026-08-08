@@ -1,5 +1,10 @@
 # CONFIGURATION.md — Modelo de configuração do grava_nois_system
 
+## Seleção fixed/rental
+
+- `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.
+- `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` continua identificando a frota e `GN_VENUE_ID` deve ficar vazio.
+
 ## Visão geral
 
 O `grava_nois_system` suporta configuração operacional por arquivo persistente (`config.json`), preparando o sistema para futura edição via app (frontend) sem depender de redeploy.

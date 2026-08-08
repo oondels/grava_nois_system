@@ -572,7 +572,14 @@ def main() -> int:
         ).strip()
     )
     client_id = (os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID") or "").strip()
-    venue_id = (os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID") or "").strip()
+    device_mode = (os.getenv("GN_DEVICE_MODE") or "fixed").strip().lower()
+    venue_id = (os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID") or "").strip() or None
+    if device_mode not in {"fixed", "rental"}:
+        raise RuntimeError("GN_DEVICE_MODE deve ser fixed ou rental")
+    if device_mode == "fixed" and not venue_id:
+        raise RuntimeError("GN_VENUE_ID é obrigatório para device fixed")
+    if device_mode == "rental" and venue_id:
+        raise RuntimeError("GN_VENUE_ID deve ficar vazio para device rental")
 
     mqtt_config = load_mqtt_config()
     mqtt_client = MQTTClient(mqtt_config)

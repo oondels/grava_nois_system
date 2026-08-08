@@ -1,5 +1,9 @@
 # Edge Architecture
 
+## Identidade operacional
+
+`GN_DEVICE_MODE=fixed` mantém a identidade cliente/venue. `GN_DEVICE_MODE=rental` mantém cliente/device/HMAC, omite venue e deixa a API associar a captura ao evento temporário.
+
 ## Overview
 
 `grava_nois_system` roda no edge para capturar segmentos contínuos, montar highlights sob trigger, enfileirar processamento local e integrar com o backend via URL assinada.

@@ -5,6 +5,8 @@
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
 >
 > **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
+>
+> **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_VENUE_ID`; a API resolve o evento de locação a partir da identidade HMAC e do horário capturado.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 

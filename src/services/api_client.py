@@ -19,6 +19,7 @@ from src.services.backend_response_sanitizer import redact_url_for_log
 from src.utils.logger import logger
 
 _METADATA_SIGNED_PATH_RE = re.compile(r"^/api/videos/metadados/client/([^/]+)(?:/|$)")
+_RENTAL_METADATA_SIGNED_PATH_RE = re.compile(r"^/api/videos/rental/metadata$")
 _UPLOADED_SIGNED_PATH_RE = re.compile(r"^/api/videos/[^/]+/uploaded$")
 
 
@@ -54,6 +55,9 @@ class GravaNoisAPIClient:
         self.api_token = api_token or os.getenv("GN_API_TOKEN") or os.getenv("API_TOKEN")
         self.client_id = client_id or os.getenv("GN_CLIENT_ID") or os.getenv("CLIENT_ID")
         self.venue_id = venue_id or os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID")
+        self.device_mode = (os.getenv("GN_DEVICE_MODE") or "fixed").strip().lower()
+        if self.device_mode not in {"fixed", "rental"}:
+            raise RuntimeError("GN_DEVICE_MODE deve ser fixed ou rental")
         self.device_id = os.getenv("DEVICE_ID") or os.getenv("GN_DEVICE_ID") or ""
         self.device_secret = (
             os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
@@ -78,7 +82,9 @@ class GravaNoisAPIClient:
     @staticmethod
     def _is_hmac_protected_path(path: str) -> bool:
         return bool(
-            _METADATA_SIGNED_PATH_RE.match(path) or _UPLOADED_SIGNED_PATH_RE.match(path)
+            _METADATA_SIGNED_PATH_RE.match(path)
+            or _RENTAL_METADATA_SIGNED_PATH_RE.match(path)
+            or _UPLOADED_SIGNED_PATH_RE.match(path)
         )
 
     @staticmethod
@@ -241,7 +247,7 @@ class GravaNoisAPIClient:
             raise RuntimeError("API base URL não configurada")
         if not self.client_id:
             raise RuntimeError("CLIENT_ID (ou GN_CLIENT_ID) não configurado")
-        if not self.venue_id:
+        if self.device_mode == "fixed" and not self.venue_id:
             raise RuntimeError("VENUE_ID (ou GN_VENUE_ID) não configurado")
 
         required_fields = ("sha256", "meta")
@@ -251,7 +257,11 @@ class GravaNoisAPIClient:
                 f"Payload de metadados incompleto; faltando: {', '.join(missing_fields)}"
             )
 
-        url = f"{self.api_base}/api/videos/metadados/client/{self.client_id}/venue/{self.venue_id}"
+        if self.device_mode == "rental":
+            url = f"{self.api_base}/api/videos/rental/metadata"
+            metadados = {key: value for key, value in metadados.items() if key != "venue_id"}
+        else:
+            url = f"{self.api_base}/api/videos/metadados/client/{self.client_id}/venue/{self.venue_id}"
         headers = {"Content-Type": "application/json"}
 
         if self.api_token:

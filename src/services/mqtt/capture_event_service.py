@@ -52,7 +52,7 @@ class CaptureEventService:
         topic: str,
         device_id: str,
         client_id: str,
-        venue_id: str,
+        venue_id: str | None,
         device_secret: str,
         agent_version: str,
         outbox_dir: Path,

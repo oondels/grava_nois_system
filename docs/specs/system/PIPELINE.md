@@ -1,5 +1,9 @@
 # Edge Pipeline
 
+## Registro no modo rental
+
+O processamento local é idêntico. Na reserva do upload, o cliente envia metadata para `POST /api/videos/rental/metadata`; upload S3 e finalize continuam usando os contratos assinados existentes. O `captured_at` original determina a locação, e não o horário do retry.
+
 ## 1. Capture bootstrap
 
 O bootstrap de captura é resiliente e não deve bloquear MQTT/presença nem o handshake Pico/LED. Para cada `CaptureConfig`:
