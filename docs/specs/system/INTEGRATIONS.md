@@ -1,5 +1,11 @@
 # Edge Integrations
 
+## Integração rental
+
+- Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT mantêm `venue_id` presente com valor `null`.
+- `client_id`, `device_id`, timestamp, nonce e assinatura HMAC permanecem obrigatórios; o backend resolve a locação pelo device e `captured_at`.
+- A resposta de metadata segue `{ data: { clip: { clip_id, upload_url, ... } } }`; worker e retry usam um extrator comum e rejeitam respostas sem objeto de clipe.
+
 ## Environment and settings
 
 Config principal em [`src/config/config_loader.py`](../../../src/config/config_loader.py) e [`src/config/settings.py`](../../../src/config/settings.py), com bootstrap complementar em `main.py`.
@@ -151,6 +157,7 @@ Observações:
 - `last will` marca `offline` quando a conexão cai abruptamente;
 - o edge continua operando sem broker;
 - o cliente MQTT usa reconexão explícita com backoff do Paho (`reconnect_delay_set(min_delay=1, max_delay=120)`);
+- TLS usa validacao obrigatoria da cadeia (`ssl.CERT_REQUIRED`); falhas de certificado do broker nao devem ser contornadas com modo inseguro, e o cliente continua tentando reconectar ate o servidor ser corrigido;
 - mensagens recebidas são despachadas para uma thread dedicada de handlers, evitando I/O síncrono no loop Paho;
 - heartbeat e state são protegidos contra exceções no snapshot provider;
 - a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.

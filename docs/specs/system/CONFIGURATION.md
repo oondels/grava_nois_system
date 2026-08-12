@@ -1,5 +1,12 @@
 # CONFIGURATION.md — Modelo de configuração do grava_nois_system
 
+## Seleção fixed/rental
+
+- `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.
+- `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` continua identificando a frota e `GN_VENUE_ID` deve ficar vazio.
+- Em configuração remota rental, `venue_id` permanece presente nos envelopes com valor JSON `null`.
+- Se `GN_API_BASE`/`API_BASE_URL` estiver definido, `GN_CLIENT_ID`, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` são obrigatórios e validados antes do pipeline.
+
 ## Visão geral
 
 O `grava_nois_system` suporta configuração operacional por arquivo persistente (`config.json`), preparando o sistema para futura edição via app (frontend) sem depender de redeploy.
@@ -182,7 +189,7 @@ Tópicos:
 Contrato de entrada:
 
 - `type`: `config.desired`
-- `device_id`, `client_id`, `venue_id`
+- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: inteiro monotônico
 - `desired_hash`: `sha256:<hex>` calculado sobre o JSON canônico do `desired_config` preparado com `version` e `updatedAt`
@@ -201,7 +208,7 @@ v1:CONFIG_DESIRED:{device_id}:{config_version}:{correlation_id}:{issued_at}:{exp
 Contrato de saída:
 
 - `type`: `config.reported`
-- `device_id`, `client_id`, `venue_id`
+- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: versão recebida em `config.desired`
 - `status`: `applied`, `pending_restart` ou `rejected`

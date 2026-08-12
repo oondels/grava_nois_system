@@ -1,5 +1,12 @@
 # Edge Business Rules
 
+## Captura rental
+
+- `fixed` exige `GN_VENUE_ID`; `rental` exige que ele esteja vazio.
+- Rejeições `rental_not_found_for_capture`, `rental_upload_grace_expired` e de proprietário/device são definitivas e não geram retry.
+- A mesma classificação definitiva se aplica quando a rejeição ocorre no finalize; o item não pode permanecer em `upload_failed`.
+- O device nunca escolhe `rental_id` ou usuário: envia `captured_at` assinado e a API faz a resolução autoritativa.
+
 ## Trigger and time-window rules
 
 - trigger físico/local só gera highlight dentro da janela horária configurada;
@@ -127,7 +134,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 
 - configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`;
 - `desired_config` deve ser um objeto completo de configuração operacional não sensível;
-- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC;
+- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC; rental exige `venue_id=null` e fixed exige a venue configurada;
 - a assinatura usa `DEVICE_SECRET`/`GN_DEVICE_SECRET`; sem esse segredo, o payload é rejeitado;
 - o report `config.reported` também é assinado com `DEVICE_SECRET`/`GN_DEVICE_SECRET` antes de ser enviado à API;
 - `config.request` válido deve gerar `config.state` assinado com snapshot sanitizado da configuração efetiva;

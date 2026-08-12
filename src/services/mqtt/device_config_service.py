@@ -158,7 +158,7 @@ class DeviceConfigService:
         *,
         device_id: str,
         client_id: str,
-        venue_id: str,
+        venue_id: str | None,
         desired_topic: str,
         reported_topic: str,
         request_topic: str | None = None,
@@ -273,7 +273,7 @@ class DeviceConfigService:
             raise RemoteConfigError("device_id divergente")
         if _required_str(payload, "client_id") != self.client_id:
             raise RemoteConfigError("client_id divergente")
-        if _required_str(payload, "venue_id") != self.venue_id:
+        if (payload.get("venue_id") or None) != self.venue_id:
             raise RemoteConfigError("venue_id divergente")
         if not isinstance(desired_config, dict):
             raise RemoteConfigError("desired_config deve ser um objeto")
@@ -426,7 +426,7 @@ class DeviceConfigService:
             raise RemoteConfigError("device_id divergente")
         if _required_str(payload, "client_id") != self.client_id:
             raise RemoteConfigError("client_id divergente")
-        if _required_str(payload, "venue_id") != self.venue_id:
+        if (payload.get("venue_id") or None) != self.venue_id:
             raise RemoteConfigError("venue_id divergente")
         _required_str(payload, "requested_at")
         _validate_request_signature(payload, self.device_secret)

@@ -1,6 +1,19 @@
 # Changelog
 
+## 2026-08-08
+
+### Added
+- `feat(rental)`: modo `GN_DEVICE_MODE=rental` para captura móvel sem `GN_VENUE_ID` e registro pela rota HMAC de locações.
+
+### Changed
+- `feat(edge)`: eventos MQTT aceitam venue ausente no modo rental e erros definitivos de período/locação são descartados sem retry.
+- `fix(rental)`: inicialização reforça as invariantes fixed/rental e configuração MQTT preserva `venue_id=null` de ponta a ponta.
+
 ## Unreleased
+
+### Fixed
+- `fix(rental)`: worker e retry normalizam o envelope oficial `{ data: { clip } }` do registro, preservando compatibilidade com o formato legado.
+- `fix(edge)`: inicialização com API configurada falha cedo sem client/device/segredo HMAC, e erros definitivos de finalize rental saem do loop de retry.
 
 ### Added
 - Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
@@ -9,6 +22,7 @@
 
 ### Changed
 - Cliente MQTT registra motivo/timestamp da última desconexão e notifica listeners internos sem interromper o pipeline de captura.
+- Troubleshooting MQTT documenta diagnostico separado de DNS, TCP e handshake TLS; certificado expirado deve ser corrigido no broker sem desabilitar `CERT_REQUIRED` no edge.
 - Rejeição de configuração por `config_version antiga ou já aplicada` agora é reportada via MQTT com `correlation_id`, versão local aplicada e snapshot efetivo quando disponível.
 
 ## 2026-05-02
