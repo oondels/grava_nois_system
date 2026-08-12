@@ -148,6 +148,65 @@ class FilesystemClipJobRepositoryTests(unittest.TestCase):
         self.assertEqual(make_job(state=ClipJobState.RETRY_PENDING, attempts=1), restored)
         self.assertEqual([], list(self.root.glob("*.tmp")))
 
+    def test_checkpoint_removes_legacy_signed_upload_credentials(self) -> None:
+        path = self.root / "clip-1.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "status": "registered",
+                    "upload_url": "https://signed.example/upload?secret=value",
+                    "upload_headers": {"authorization": "temporary-secret"},
+                    "remote_registration": {
+                        "response": {
+                            "upload_url": "https://nested.example/upload?secret=value"
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.repository.save(make_job(state=ClipJobState.PROCESSING))
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("upload_url", payload)
+        self.assertNotIn("upload_headers", payload)
+        self.assertNotIn("upload_url", payload["remote_registration"]["response"])
+
+    def test_legacy_successful_finalize_is_terminal_after_migration(self) -> None:
+        path = self.root / "legacy-finalized.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "created_at": "2026-07-27T12:00:00Z",
+                    "file_name": "legacy-finalized.mp4",
+                    "status": "uploaded",
+                    "remote_finalize": {"status": "ok"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        job = self.repository.get("legacy-finalized")
+
+        self.assertIsNotNone(job)
+        assert job is not None
+        self.assertEqual(ClipJobState.FINALIZED, job.state)
+
+    def test_upload_integrity_receipt_survives_restart(self) -> None:
+        job = make_job(state=ClipJobState.PROCESSING).transition_to(ClipJobState.WATERMARKED)
+        job = job.with_registration(remote_clip_id="remote-1")
+        job = job.with_upload_receipt(
+            size_bytes=1024,
+            sha256="a" * 64,
+            etag="etag-1",
+        )
+
+        self.repository.save(job)
+        restored = self.repository.get(job.job_id)
+
+        self.assertEqual(job, restored)
+
     def test_reads_legacy_v1_without_rewriting_it(self) -> None:
         path = self.root / "legacy.json"
         path.write_text(
@@ -218,7 +277,7 @@ class FilesystemClipJobRepositoryTests(unittest.TestCase):
             CameraId("camera-2"),
             "/queue/clip-2.mp4",
             NOW,
-            ClipJobState.FINALIZED,
+            state=ClipJobState.FINALIZED,
         )
         self.repository.save(other)
         (self.root / "invalid.json").write_text("[]", encoding="utf-8")

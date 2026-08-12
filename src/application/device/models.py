@@ -8,9 +8,18 @@ from typing import Any
 class DeviceIdentity:
     device_id: str
     client_id: str
-    venue_id: str
+    venue_id: str | None
     agent_version: str
     boot_id: str
+    device_mode: str = "fixed"
+
+    def __post_init__(self) -> None:
+        if self.device_mode not in {"fixed", "rental"}:
+            raise ValueError("device mode must be fixed or rental")
+        if self.device_mode == "fixed" and not self.venue_id:
+            raise ValueError("fixed device requires venue id")
+        if self.device_mode == "rental" and self.venue_id is not None:
+            raise ValueError("rental device must not have venue id")
 
 
 @dataclass(frozen=True)

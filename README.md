@@ -9,6 +9,7 @@
 > **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_VENUE_ID`; a API resolve o evento de locação a partir da identidade HMAC e do horário capturado.
 > Configuração remota continua disponível nesse modo e usa `venue_id: null` nos envelopes MQTT.
 > Com uma API base configurada, o processo exige `GN_CLIENT_ID`, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
+> Na clean architecture, URLs e headers assinados permanecem somente em memória; o checkpoint durável guarda apenas o ID remoto e o recibo de integridade necessário ao finalize.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 

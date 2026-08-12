@@ -16,6 +16,7 @@ from src.infrastructure.filesystem import LegacyArtifactStore
 from src.infrastructure.http import LegacyVideoBackendGateway
 
 NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
+SHA256 = "a" * 64
 
 
 class FakeClock:
@@ -96,13 +97,18 @@ class FakeBackend:
         self._fail("register")
         return RemoteClipRegistration("remote-1", "https://upload", {"x": "1"})
 
-    def upload(self, registration: RemoteClipRegistration, artifact_location: str) -> UploadReceipt:
+    def upload(
+        self,
+        registration: RemoteClipRegistration,
+        artifact_location: str,
+    ) -> UploadReceipt:
         self.uploads += 1
         self._fail("upload")
-        return UploadReceipt(200, {"etag": "abc"})
+        return UploadReceipt(200, {"etag": "abc"}, 1024, SHA256, "abc")
 
-    def finalize(self, remote_clip_id: str) -> None:
+    def finalize(self, remote_clip_id: str, receipt: UploadReceipt) -> None:
         self.finalizes += 1
+        self.last_finalize_receipt = receipt
         self._fail("finalize")
 
 
@@ -137,12 +143,14 @@ def make_job(state: ClipJobState = ClipJobState.QUEUED) -> ClipJob:
         return watermarked
     registered = watermarked.with_registration(
         remote_clip_id="remote-1",
-        upload_url="https://upload",
-        upload_headers={"x": "1"},
     )
     if state is ClipJobState.REGISTERED:
         return registered
-    uploaded = registered.transition_to(ClipJobState.UPLOADED)
+    uploaded = registered.with_upload_receipt(
+        size_bytes=1024,
+        sha256=SHA256,
+        etag="abc",
+    )
     if state is ClipJobState.UPLOADED:
         return uploaded
     return uploaded.transition_to(state)
@@ -205,7 +213,7 @@ class ProcessClipJobTests(unittest.TestCase):
     def test_restart_resumes_without_repeating_completed_steps(self) -> None:
         expected = {
             ClipJobState.WATERMARKED: (0, 1, 1, 1),
-            ClipJobState.REGISTERED: (0, 0, 1, 1),
+            ClipJobState.REGISTERED: (0, 1, 1, 1),
             ClipJobState.UPLOADED: (0, 0, 0, 1),
             ClipJobState.FINALIZED: (0, 0, 0, 0),
         }
@@ -225,6 +233,26 @@ class ProcessClipJobTests(unittest.TestCase):
                     ),
                 )
 
+    def test_legacy_registered_job_recovers_missing_remote_clip_id(self) -> None:
+        self.jobs.job = replace(
+            make_job(ClipJobState.REGISTERED),
+            remote_clip_id=None,
+        )
+
+        result = self.use_case().execute("job-1")
+
+        self.assertEqual(ClipJobState.FINALIZED, result.state)
+        self.assertEqual(
+            (1, 1, 1),
+            (
+                self.backend.registers,
+                self.backend.uploads,
+                self.backend.finalizes,
+            ),
+        )
+        assert self.jobs.job is not None
+        self.assertEqual("remote-1", self.jobs.job.remote_clip_id)
+
     def test_retryable_failure_is_scheduled_once_and_resumes_checkpoint(self) -> None:
         self.backend.failure = ("upload", True)
         first = self.use_case().execute("job-1")
@@ -241,7 +269,7 @@ class ProcessClipJobTests(unittest.TestCase):
         self.backend.failure = None
         completed = self.use_case().execute("job-1")
         self.assertEqual(ClipJobState.FINALIZED, completed.state)
-        self.assertEqual(1, self.backend.registers)
+        self.assertEqual(2, self.backend.registers)
         self.assertEqual(2, self.backend.uploads)
 
     def test_terminal_failure_discards_and_does_not_retry(self) -> None:
@@ -265,6 +293,7 @@ class ProcessClipJobTests(unittest.TestCase):
         self.assertEqual(ClipJobState.FINALIZED, completed.state)
         self.assertEqual(0, self.backend.uploads)
         self.assertEqual(2, self.backend.finalizes)
+        self.assertEqual(SHA256, self.backend.last_finalize_receipt.sha256)
 
     def test_crash_after_uploaded_checkpoint_resumes_at_finalize_without_reupload(self) -> None:
         self.jobs = CrashAfterCheckpointJobs(
@@ -333,16 +362,16 @@ class LegacyCallableAdapterTests(unittest.TestCase):
     def test_backend_gateway_delegates_without_reading_global_configuration(self) -> None:
         calls: list[str] = []
         registration = RemoteClipRegistration("remote", "https://upload", {})
-        receipt = UploadReceipt(200, {})
+        receipt = UploadReceipt(200, {}, 1024, SHA256)
         gateway = LegacyVideoBackendGateway(
             register=lambda job, metadata: calls.append("register") or registration,
             upload=lambda remote, artifact: calls.append("upload") or receipt,
-            finalize=lambda clip_id: calls.append("finalize"),
+            finalize=lambda clip_id, uploaded: calls.append("finalize"),
         )
 
         self.assertIs(registration, gateway.register(make_job(), {}))
         self.assertIs(receipt, gateway.upload(registration, "/artifact.mp4"))
-        gateway.finalize("remote")
+        gateway.finalize("remote", receipt)
         self.assertEqual(["register", "upload", "finalize"], calls)
 
     def test_artifact_store_delegates_all_lifecycle_operations(self) -> None:

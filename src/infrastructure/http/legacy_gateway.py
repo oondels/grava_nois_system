@@ -15,7 +15,7 @@ class LegacyVideoBackendGateway:
             RemoteClipRegistration,
         ],
         upload: Callable[[RemoteClipRegistration, str], UploadReceipt],
-        finalize: Callable[[str], None],
+        finalize: Callable[[str, UploadReceipt], None],
     ) -> None:
         self._register = register
         self._upload = upload
@@ -35,5 +35,5 @@ class LegacyVideoBackendGateway:
     ) -> UploadReceipt:
         return self._upload(registration, artifact_location)
 
-    def finalize(self, remote_clip_id: str) -> None:
-        self._finalize(remote_clip_id)
+    def finalize(self, remote_clip_id: str, receipt: UploadReceipt) -> None:
+        self._finalize(remote_clip_id, receipt)

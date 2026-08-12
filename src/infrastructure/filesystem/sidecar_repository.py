@@ -60,6 +60,9 @@ class FilesystemClipJobRepository:
         path = self._path(job.job_id)
         existing = self._read_payload(path) if path.exists() else {}
         payload = existing if existing is not None else {}
+        # Signed upload credentials are short-lived secrets and must never survive
+        # a checkpoint, including when upgrading a legacy sidecar in place.
+        _strip_signed_upload_credentials(payload)
         payload.update(self._encode(job))
         self._atomic_write(path, payload)
 
@@ -120,6 +123,9 @@ class FilesystemClipJobRepository:
             state = ClipJobState(raw_state.upper())
         except ValueError:
             state = _LEGACY_TO_STATE.get(raw_state.lower(), ClipJobState.QUEUED)
+        remote_finalize = payload.get("remote_finalize")
+        if isinstance(remote_finalize, dict) and remote_finalize.get("status") == "ok":
+            state = ClipJobState.FINALIZED
 
         created_at = _parse_datetime(payload.get("created_at")) or datetime.fromtimestamp(
             path.stat().st_mtime, tz=UTC
@@ -140,8 +146,9 @@ class FilesystemClipJobRepository:
             retry_from=_parse_state(payload.get("retry_from")),
             artifact_location=_optional_string(payload.get("artifact_location")),
             remote_clip_id=_optional_string(payload.get("remote_clip_id")),
-            upload_url=_optional_string(payload.get("upload_url")),
-            upload_headers=_string_mapping(payload.get("upload_headers")),
+            upload_size_bytes=_optional_positive_int(payload.get("upload_size_bytes")),
+            upload_sha256=_optional_sha256(payload.get("upload_sha256")),
+            upload_etag=_optional_string(payload.get("upload_etag")),
         )
 
     @staticmethod
@@ -161,8 +168,9 @@ class FilesystemClipJobRepository:
             "retry_from": job.retry_from.value if job.retry_from is not None else None,
             "artifact_location": job.artifact_location,
             "remote_clip_id": job.remote_clip_id,
-            "upload_url": job.upload_url,
-            "upload_headers": dict(job.upload_headers),
+            "upload_size_bytes": job.upload_size_bytes,
+            "upload_sha256": job.upload_sha256,
+            "upload_etag": job.upload_etag,
         }
 
     @staticmethod
@@ -205,7 +213,33 @@ def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _string_mapping(value: object) -> dict[str, str]:
-    if not isinstance(value, dict):
-        return {}
-    return {str(key): str(item) for key, item in value.items()}
+def _optional_positive_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _optional_sha256(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.lower()
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        return None
+    return normalized
+
+
+def _strip_signed_upload_credentials(value: object) -> None:
+    if isinstance(value, dict):
+        for key in tuple(value):
+            if str(key).lower() in {
+                "upload_url",
+                "signed_upload_url",
+                "presigned_url",
+                "upload_headers",
+            }:
+                value.pop(key, None)
+                continue
+            _strip_signed_upload_credentials(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            _strip_signed_upload_credentials(item)

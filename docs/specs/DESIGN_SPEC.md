@@ -5,6 +5,7 @@
 O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a dependência de venue e usa o endpoint de metadata específico; veja `system/CONFIGURATION.md`, `PIPELINE.md` e `BUSINESS_RULES.md`.
 Na configuração remota MQTT, o modo rental mantém `venue_id` presente com valor `null`.
 Registro inicial e retry compartilham a mesma normalização do envelope de clipe; rejeições definitivas no finalize encerram o item local em vez de reiniciar o ciclo.
+A identidade da clean architecture aplica as mesmas invariantes: `fixed` exige venue e `rental` exige venue ausente. Checkpoints de delivery nunca persistem credenciais temporárias da URL assinada.
 
 ## 1. Overview
 

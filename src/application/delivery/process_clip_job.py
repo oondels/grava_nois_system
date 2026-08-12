@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from src.application.delivery.retry_policy import RetryPolicy
-from src.application.dto import ClipJobSnapshot, RemoteClipRegistration
+from src.application.dto import ClipJobSnapshot, RemoteClipRegistration, UploadReceipt
 from src.application.exceptions import DeliveryStepError, NotFoundError
 from src.application.ports import (
     ArtifactStore,
@@ -64,6 +64,8 @@ class ProcessClipJob:
                 return self._handle_failure(job, retryable=True)
 
     def _advance(self, job: ClipJob) -> ClipJobSnapshot:
+        registration: RemoteClipRegistration | None = None
+
         if job.state is ClipJobState.QUEUED:
             job = job.transition_to(ClipJobState.PROCESSING)
             self.jobs.save(job)
@@ -86,21 +88,35 @@ class ProcessClipJob:
             registration = self.backend.register(job, self.media.probe(artifact))
             job = job.with_registration(
                 remote_clip_id=registration.clip_id,
-                upload_url=registration.upload_url,
-                upload_headers=registration.headers,
             )
             self.jobs.save(job)
 
         if job.state is ClipJobState.REGISTERED:
-            registration = self._registration(job)
-            self.backend.upload(registration, self._artifact(job))
-            job = job.transition_to(ClipJobState.UPLOADED)
+            if registration is None:
+                registration = self.backend.register(
+                    job,
+                    self.media.probe(self._artifact(job)),
+                )
+                if job.remote_clip_id is None:
+                    job = job.refresh_registration(registration.clip_id)
+                    self.jobs.save(job)
+                elif registration.clip_id != job.remote_clip_id:
+                    raise DeliveryStepError(
+                        "backend returned a different clip id while refreshing registration",
+                        retryable=False,
+                    )
+            receipt = self.backend.upload(registration, self._artifact(job))
+            job = job.with_upload_receipt(
+                size_bytes=receipt.size_bytes,
+                sha256=receipt.sha256,
+                etag=receipt.etag,
+            )
             self.jobs.save(job)
 
         if job.state is ClipJobState.UPLOADED:
             if job.remote_clip_id is None:
                 raise DeliveryStepError("uploaded job has no remote clip id", retryable=False)
-            self.backend.finalize(job.remote_clip_id)
+            self.backend.finalize(job.remote_clip_id, self._upload_receipt(job))
             job = job.transition_to(ClipJobState.FINALIZED)
             self.jobs.save(job)
             self.artifacts.cleanup(job, self._artifact(job))
@@ -130,13 +146,15 @@ class ProcessClipJob:
         return job.artifact_location or job.source_location
 
     @staticmethod
-    def _registration(job: ClipJob) -> RemoteClipRegistration:
-        if job.remote_clip_id is None or job.upload_url is None:
-            raise DeliveryStepError("registered job has incomplete registration", retryable=False)
-        return RemoteClipRegistration(
-            clip_id=job.remote_clip_id,
-            upload_url=job.upload_url,
-            headers=job.upload_headers,
+    def _upload_receipt(job: ClipJob) -> UploadReceipt:
+        if job.upload_size_bytes is None or job.upload_sha256 is None:
+            raise DeliveryStepError("uploaded job has no integrity receipt", retryable=False)
+        return UploadReceipt(
+            status_code=200,
+            response_headers={},
+            size_bytes=job.upload_size_bytes,
+            sha256=job.upload_sha256,
+            etag=job.upload_etag,
         )
 
     @classmethod

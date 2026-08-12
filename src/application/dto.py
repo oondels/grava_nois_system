@@ -42,3 +42,6 @@ class RemoteClipRegistration:
 class UploadReceipt:
     status_code: int
     response_headers: Mapping[str, str]
+    size_bytes: int
+    sha256: str
+    etag: str | None = None

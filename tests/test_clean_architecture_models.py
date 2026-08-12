@@ -318,10 +318,11 @@ class ApplicationModelTests(unittest.TestCase):
     def test_delivery_dtos_preserve_remote_data(self) -> None:
         snapshot = ClipJobSnapshot("job-1", ClipJobState.UPLOADED, 1, "/wm/job.mp4")
         registration = RemoteClipRegistration("clip-1", "https://upload", {"x-id": "1"})
-        receipt = UploadReceipt(200, {"etag": "abc"})
+        receipt = UploadReceipt(200, {"etag": "abc"}, 1024, "a" * 64, "abc")
         self.assertEqual(ClipJobState.UPLOADED, snapshot.state)
         self.assertEqual("clip-1", registration.clip_id)
         self.assertEqual(200, receipt.status_code)
+        self.assertEqual("a" * 64, receipt.sha256)
 
     def test_application_exception_hierarchy(self) -> None:
         self.assertTrue(issubclass(NotFoundError, ApplicationError))

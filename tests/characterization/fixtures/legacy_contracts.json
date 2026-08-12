@@ -1,0 +1,110 @@
+{
+  "enqueue_sidecar": {
+    "type": "highlight_raw",
+    "created_at": "<TIMESTAMP>",
+    "file_name": "highlight_cam-a_contract.mp4",
+    "size_bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "meta": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30.0,
+      "duration_sec": 8.5
+    },
+    "pre_seconds": 5,
+    "post_seconds": 3,
+    "seg_time": 1,
+    "pre_segments": 5,
+    "post_segments": 3,
+    "status": "queued"
+  },
+  "api_error_policy": [
+    {
+      "message": "invalid_signature_format",
+      "status_code": 400,
+      "delete_local_record": true
+    },
+    {
+      "message": "device_not_authorized_for_rental",
+      "status_code": 403,
+      "delete_local_record": true
+    },
+    {
+      "message": "rental_not_found_for_capture",
+      "status_code": 404,
+      "delete_local_record": true
+    },
+    {
+      "message": "request_outside_allowed_time_window",
+      "status_code": 409,
+      "delete_local_record": false
+    },
+    {
+      "message": "temporary_backend_failure",
+      "status_code": 500,
+      "delete_local_record": false
+    }
+  ],
+  "multi_camera_paths": [
+    {
+      "camera_id": "north",
+      "buffer_dir": "<BUFFER>/north",
+      "clips_dir": "<BASE>/recorded_clips/north",
+      "queue_dir": "<BASE>/queue_raw/north",
+      "failed_dir": "<BASE>/failed_clips/north"
+    },
+    {
+      "camera_id": "south",
+      "buffer_dir": "<BUFFER>/south",
+      "clips_dir": "<BASE>/recorded_clips/south",
+      "queue_dir": "<BASE>/queue_raw/south",
+      "failed_dir": "<BASE>/failed_clips/south"
+    }
+  ],
+  "signed_request": {
+    "body_sha256": "ETRLN8LtimCoU8+J5TwiJdSBAIFbw5sn18swMRTemmo=",
+    "canonical_string": "v1:POST:/api/videos/clip123/uploaded:1700000000:11111111-2222-4333-8444-555555555555:ETRLN8LtimCoU8+J5TwiJdSBAIFbw5sn18swMRTemmo=",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Device-Id": "device-01",
+      "X-Client-Id": "client-01",
+      "X-Timestamp": "1700000000",
+      "X-Nonce": "11111111-2222-4333-8444-555555555555",
+      "X-Body-SHA256": "ETRLN8LtimCoU8+J5TwiJdSBAIFbw5sn18swMRTemmo=",
+      "X-Signature": "TjgWoev97mZlVZvStlByNlATrez35JPVD2z3BPol8aI="
+    }
+  },
+  "rtsp_hq_command": [
+    "ffmpeg",
+    "-nostdin",
+    "-loglevel",
+    "warning",
+    "-rtsp_transport",
+    "tcp",
+    "-rtsp_flags",
+    "prefer_tcp",
+    "-fflags",
+    "+genpts",
+    "-err_detect",
+    "ignore_err",
+    "-i",
+    "<RTSP_URL>",
+    "-map",
+    "0:v:0",
+    "-an",
+    "-c:v",
+    "copy",
+    "-f",
+    "segment",
+    "-segment_format",
+    "mpegts",
+    "-segment_time",
+    "1",
+    "-segment_start_number",
+    "0",
+    "-reset_timestamps",
+    "1",
+    "<BUFFER>/buffer%06d.ts"
+  ]
+}

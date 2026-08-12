@@ -36,8 +36,12 @@ def device_identity_from_env(
             "",
         )
 
+    device_mode = first("GN_DEVICE_MODE") or "fixed"
+    venue_id = first("GN_VENUE_ID", "VENUE_ID") or None
+
     return DeviceIdentity(
         device_id=first("DEVICE_ID", "GN_DEVICE_ID", "GN_MQTT_CLIENT_ID"),
         client_id=first("GN_CLIENT_ID", "CLIENT_ID"),
-        venue_id=first("GN_VENUE_ID", "VENUE_ID"),
+        venue_id=venue_id,
+        device_mode=device_mode,
     )

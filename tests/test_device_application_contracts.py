@@ -115,6 +115,30 @@ class DeviceApplicationContractTests(unittest.TestCase):
                 current.state(diagnostics, heartbeat_seq=0),
             )
 
+    def test_rental_presence_keeps_null_venue_in_wire_contract(self) -> None:
+        identity = DeviceIdentity(
+            "edge-rental-01",
+            "client-rental",
+            None,
+            "1.4.0",
+            "boot-rental",
+            "rental",
+        )
+        current = BuildDevicePresence(
+            identity,
+            now_iso=lambda: "2026-08-12T12:00:00+00:00",
+            hostname=lambda: "rental-host",
+        )
+
+        payload = current.presence(
+            RuntimeDiagnostics(),
+            status="online",
+            heartbeat_seq=1,
+        )
+
+        self.assertIn("venue_id", payload)
+        self.assertIsNone(payload["venue_id"])
+
     def test_command_handler_matches_legacy_rejection_payload(self) -> None:
         raw = json.dumps({"command": "restart_service"}).encode()
         topic_in = "grn/devices/edge-01/commands/in"

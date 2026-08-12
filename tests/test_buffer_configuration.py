@@ -55,6 +55,7 @@ class BufferConfigurationTests(unittest.TestCase):
             patch.dict(
                 os.environ,
                 {
+                    "GN_CONFIG_PATH": str(Path(tmp) / "missing.json"),
                     "GN_SEG_TIME": "4",
                     "GN_RTSP_PRE_SEGMENTS": "8",
                     "GN_RTSP_POST_SEGMENTS": "4",
@@ -72,6 +73,7 @@ class BufferConfigurationTests(unittest.TestCase):
             patch.dict(
                 os.environ,
                 {
+                    "GN_CONFIG_PATH": str(Path(tmp) / "missing.json"),
                     "GN_SEG_TIME": "2",
                     "GN_RTSP_PRE_SEGMENTS": "8",
                     "GN_RTSP_POST_SEGMENTS": "4",

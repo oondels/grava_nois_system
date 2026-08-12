@@ -9,6 +9,7 @@ venv/
 *.json
 *.json.bak
 !config.example.json
+!tests/characterization/fixtures/legacy_contracts.json
 *.lock
 *.mp4
 *.jpg

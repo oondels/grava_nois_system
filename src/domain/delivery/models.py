@@ -1,10 +1,8 @@
 """Business vocabulary for durable clip delivery."""
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
-from types import MappingProxyType
 
 from src.domain.capture import CameraId
 from src.domain.exceptions import InvalidStateTransition, InvariantViolation
@@ -69,8 +67,9 @@ class ClipJob:
     retry_from: ClipJobState | None = None
     artifact_location: str | None = None
     remote_clip_id: str | None = None
-    upload_url: str | None = None
-    upload_headers: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    upload_size_bytes: int | None = None
+    upload_sha256: str | None = None
+    upload_etag: str | None = None
 
     def __post_init__(self) -> None:
         if not self.job_id.strip():
@@ -79,7 +78,10 @@ class ClipJob:
             raise InvariantViolation("job source location must not be empty")
         if self.attempts < 0:
             raise InvariantViolation("job attempts must not be negative")
-        object.__setattr__(self, "upload_headers", MappingProxyType(dict(self.upload_headers)))
+        if self.upload_size_bytes is not None and self.upload_size_bytes <= 0:
+            raise InvariantViolation("upload size must be positive")
+        if self.upload_sha256 is not None and not _is_sha256(self.upload_sha256):
+            raise InvariantViolation("upload sha256 must be a hexadecimal digest")
 
     def transition_to(self, state: ClipJobState) -> "ClipJob":
         if state not in _ALLOWED_TRANSITIONS[self.state]:
@@ -141,17 +143,38 @@ class ClipJob:
         self,
         *,
         remote_clip_id: str,
-        upload_url: str,
-        upload_headers: Mapping[str, str],
     ) -> "ClipJob":
-        if not remote_clip_id.strip() or not upload_url.strip():
-            raise InvariantViolation("remote registration must be complete")
+        if not remote_clip_id.strip():
+            raise InvariantViolation("remote clip id must not be empty")
         return replace(
             self.transition_to(ClipJobState.REGISTERED),
             remote_clip_id=remote_clip_id,
-            upload_url=upload_url,
-            upload_headers=MappingProxyType(dict(upload_headers)),
         )
+
+    def with_upload_receipt(
+        self,
+        *,
+        size_bytes: int,
+        sha256: str,
+        etag: str | None,
+    ) -> "ClipJob":
+        if size_bytes <= 0:
+            raise InvariantViolation("upload size must be positive")
+        if not _is_sha256(sha256):
+            raise InvariantViolation("upload sha256 must be a hexadecimal digest")
+        return replace(
+            self.transition_to(ClipJobState.UPLOADED),
+            upload_size_bytes=size_bytes,
+            upload_sha256=sha256.lower(),
+            upload_etag=etag,
+        )
+
+    def refresh_registration(self, remote_clip_id: str) -> "ClipJob":
+        if self.state is not ClipJobState.REGISTERED:
+            raise InvalidStateTransition(f"{self.state.value} -> {ClipJobState.REGISTERED.value}")
+        if not remote_clip_id.strip():
+            raise InvariantViolation("remote clip id must not be empty")
+        return replace(self, remote_clip_id=remote_clip_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,3 +182,9 @@ class RetryDecision:
     should_retry: bool
     next_attempt_at: datetime | None = None
     reason: str = ""
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdefABCDEF" for character in value
+    )

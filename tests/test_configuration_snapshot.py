@@ -51,8 +51,34 @@ class ConfigurationSnapshotTests(unittest.TestCase):
         self.assertEqual("device-primary", identity.device_id)
         self.assertEqual("client-1", identity.client_id)
         self.assertEqual("venue-1", identity.venue_id)
+        self.assertEqual("fixed", identity.device_mode)
         self.assertEqual({"SECRET": "value"}, dict(secrets.snapshot()))
         self.assertIsNone(secrets.get("NOT_ALLOWED"))
+
+    def test_rental_identity_requires_null_venue(self):
+        identity = device_identity_from_env(
+            {
+                "GN_DEVICE_MODE": "rental",
+                "DEVICE_ID": "rental-01",
+                "GN_CLIENT_ID": "client-1",
+                "GN_VENUE_ID": "",
+            }
+        )
+
+        self.assertEqual("rental", identity.device_mode)
+        self.assertTrue(identity.is_rental)
+        self.assertIsNone(identity.venue_id)
+
+    def test_rental_identity_rejects_fixed_venue(self):
+        with self.assertRaisesRegex(Exception, "must not have venue"):
+            device_identity_from_env(
+                {
+                    "GN_DEVICE_MODE": "rental",
+                    "DEVICE_ID": "rental-01",
+                    "GN_CLIENT_ID": "client-1",
+                    "GN_VENUE_ID": "venue-1",
+                }
+            )
 
 
 if __name__ == "__main__":

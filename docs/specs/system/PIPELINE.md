@@ -117,6 +117,9 @@ Campos típicos do sidecar:
 - `seg_time`
 - `status`
 
+No sidecar v2 da clean architecture, o checkpoint `REGISTERED` guarda apenas o ID remoto. A `upload_url` e seus headers assinados ficam somente em memória e são renovados por novo registro idempotente após restart. O checkpoint `UPLOADED` persiste tamanho, SHA-256 e ETag para que o finalize mantenha a validação de integridade sem repetir o upload.
+Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status intermediário e torna o job `FINALIZED`, evitando nova finalização.
+
 ## 6. Worker main path
 
 `ProcessingWorker._scan_once()`:

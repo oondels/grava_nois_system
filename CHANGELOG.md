@@ -14,8 +14,12 @@
 ### Fixed
 - `fix(rental)`: worker e retry normalizam o envelope oficial `{ data: { clip } }` do registro, preservando compatibilidade com o formato legado.
 - `fix(edge)`: inicialização com API configurada falha cedo sem client/device/segredo HMAC, e erros definitivos de finalize rental saem do loop de retry.
+- `fix(architecture)`: identidade da clean architecture agora representa `fixed`/`rental` com as mesmas invariantes do runtime legado.
+- `fix(delivery)`: checkpoints deixam de persistir URL/headers assinados e carregam tamanho, SHA-256 e ETag até o finalize.
+- `fix(sidecar)`: sidecars legados com `remote_finalize.status=ok` são reconhecidos como terminais durante a migração.
 
 ### Added
+- Fixture versionada dos contratos legados usada pelos testes de caracterização da refatoração.
 - Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
 - `boot_id`, sequência de heartbeat e contadores de reconexão MQTT no payload de presença/state para auditoria remota.
 - `config.reported` e `config.state` passam a expor `last_applied_version` e `pending_version` para reconciliação remota de versão.
