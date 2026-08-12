@@ -4,6 +4,7 @@
 
 - `fixed` exige `GN_VENUE_ID`; `rental` exige que ele esteja vazio.
 - Rejeições `rental_not_found_for_capture`, `rental_upload_grace_expired` e de proprietário/device são definitivas e não geram retry.
+- A mesma classificação definitiva se aplica quando a rejeição ocorre no finalize; o item não pode permanecer em `upload_failed`.
 - O device nunca escolhe `rental_id` ou usuário: envia `captured_at` assinado e a API faz a resolução autoritativa.
 
 ## Trigger and time-window rules

@@ -100,7 +100,7 @@ def retry_failed_uploads(
             logger.info(f"Retry: registrando metadados de {video_path.name}")
             resp = api_client.register_clip_metadados(payload, timeout=15.0)
 
-            resp_data = (resp or {}).get("data") or {}
+            resp_clip = api_client.extract_clip_registration(resp or {})
             meta.setdefault("remote_registration", {})
             meta["remote_registration"].update(
                 {
@@ -111,7 +111,7 @@ def retry_failed_uploads(
             )
             sidecar_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
-            upload_url = resp_data.get("upload_url")
+            upload_url = resp_clip.get("upload_url")
             if not upload_url:
                 logger.warning(
                     f"Retry: sem upload_url para {video_path.name}; pulando"
@@ -151,7 +151,7 @@ def retry_failed_uploads(
             sidecar_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
             if 200 <= status_code < 300:
-                clip_id = resp_data.get("clip_id")
+                clip_id = resp_clip.get("clip_id")
                 if clip_id:
                     etag = None
                     try:

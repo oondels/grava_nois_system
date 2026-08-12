@@ -3,6 +3,7 @@
 ## Registro no modo rental
 
 O processamento local é idêntico. Na reserva do upload, o cliente envia metadata para `POST /api/videos/rental/metadata`; upload S3 e finalize continuam usando os contratos assinados existentes. O `captured_at` original determina a locação, e não o horário do retry.
+Tanto o worker quanto `retry_upload.py` extraem o registro do envelope oficial `{ data: { clip } }` (com fallback legado). Erro definitivo de autorização/período/device no finalize é propagado para a política externa, que remove vídeo e sidecar locais.
 
 ## 1. Capture bootstrap
 

@@ -3,6 +3,7 @@
 ## Identidade operacional
 
 `GN_DEVICE_MODE=fixed` mantém a identidade cliente/venue. `GN_DEVICE_MODE=rental` mantém cliente/device/HMAC, omite venue e deixa a API associar a captura ao evento temporário.
+Quando a integração HTTP está habilitada, o bootstrap valida client, device e segredo antes de iniciar os workers.
 
 ## Overview
 

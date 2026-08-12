@@ -73,10 +73,30 @@ class GravaNoisAPIClient:
 
         if not self.api_base:
             logger.warning("API base URL não configurada (GN_API_BASE ou API_BASE_URL)")
+        else:
+            if not self.client_id:
+                raise RuntimeError("CLIENT_ID (ou GN_CLIENT_ID) não configurado")
+            if not self.device_id:
+                raise RuntimeError("DEVICE_ID não configurado para assinatura HMAC")
+            if not self.device_secret:
+                raise RuntimeError("DEVICE_SECRET não configurado para assinatura HMAC")
 
     @staticmethod
     def _is_truthy(value: Optional[str]) -> bool:
         return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def extract_clip_registration(response: Dict[str, Any]) -> Dict[str, Any]:
+        """Normaliza o envelope oficial e o formato legado de registro de clipe."""
+        data = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(data, dict):
+            raise RuntimeError("Resposta de registro sem objeto data")
+        clip = data.get("clip")
+        if isinstance(clip, dict):
+            return clip
+        if isinstance(data.get("clip_id"), str):
+            return data
+        raise RuntimeError("Resposta de registro sem objeto clip")
 
     @staticmethod
     def _extract_path(url: str) -> str:

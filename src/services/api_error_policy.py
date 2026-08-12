@@ -33,6 +33,8 @@ _DELETE_RECORD_MESSAGES = {
 
 _DELETE_RECORD_MESSAGE_SNIPPETS = {
     "forbidden - video does not belong to device client",
+    "forbidden - video does not belong to device venue",
+    "forbidden - video does not belong to rental device",
 }
 
 

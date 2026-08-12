@@ -439,8 +439,7 @@ class ProcessingWorker:
                     )
                     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 
-                resp_data = (resp or {}).get("data") or {}
-                resp_clip = resp_data.get("clip") or {}
+                resp_clip = api_client.extract_clip_registration(resp or {})
                 clip_id = resp_clip.get("clip_id")
                 logger.info(f"Registro remoto OK: clip_id={clip_id}")
 
@@ -539,6 +538,9 @@ class ProcessingWorker:
                             )
                             logger.info("Finalização confirmada pelo backend")
                         except Exception as e:
+                            api_error = extract_api_error_from_exception(e)
+                            if api_error and api_error.should_delete_local_record:
+                                raise
                             logger.error(f"Falha ao finalizar upload no backend: {e}")
                             meta.setdefault("remote_finalize", {})
                             meta["remote_finalize"].update(

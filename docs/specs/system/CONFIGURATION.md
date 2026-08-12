@@ -5,6 +5,7 @@
 - `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.
 - `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` continua identificando a frota e `GN_VENUE_ID` deve ficar vazio.
 - Em configuração remota rental, `venue_id` permanece presente nos envelopes com valor JSON `null`.
+- Se `GN_API_BASE`/`API_BASE_URL` estiver definido, `GN_CLIENT_ID`, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` são obrigatórios e validados antes do pipeline.
 
 ## Visão geral
 

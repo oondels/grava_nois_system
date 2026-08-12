@@ -11,6 +11,10 @@
 
 ## Unreleased
 
+### Fixed
+- `fix(rental)`: worker e retry normalizam o envelope oficial `{ data: { clip } }` do registro, preservando compatibilidade com o formato legado.
+- `fix(edge)`: inicialização com API configurada falha cedo sem client/device/segredo HMAC, e erros definitivos de finalize rental saem do loop de retry.
+
 ### Added
 - Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
 - `boot_id`, sequência de heartbeat e contadores de reconexão MQTT no payload de presença/state para auditoria remota.
