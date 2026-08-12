@@ -4,6 +4,7 @@
 
 - `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.
 - `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` continua identificando a frota e `GN_VENUE_ID` deve ficar vazio.
+- Em configuração remota rental, `venue_id` permanece presente nos envelopes com valor JSON `null`.
 
 ## Visão geral
 
@@ -183,7 +184,7 @@ Tópicos:
 Contrato de entrada:
 
 - `type`: `config.desired`
-- `device_id`, `client_id`, `venue_id`
+- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: inteiro monotônico
 - `desired_hash`: `sha256:<hex>` calculado sobre o JSON canônico do `desired_config` preparado com `version` e `updatedAt`
@@ -202,7 +203,7 @@ v1:CONFIG_DESIRED:{device_id}:{config_version}:{correlation_id}:{issued_at}:{exp
 Contrato de saída:
 
 - `type`: `config.reported`
-- `device_id`, `client_id`, `venue_id`
+- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: versão recebida em `config.desired`
 - `status`: `applied`, `pending_restart` ou `rejected`

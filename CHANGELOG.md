@@ -7,6 +7,7 @@
 
 ### Changed
 - `feat(edge)`: eventos MQTT aceitam venue ausente no modo rental e erros definitivos de período/locação são descartados sem retry.
+- `fix(rental)`: inicialização reforça as invariantes fixed/rental e configuração MQTT preserva `venue_id=null` de ponta a ponta.
 
 ## Unreleased
 

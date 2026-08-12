@@ -2,7 +2,7 @@
 
 ## Integração rental
 
-- Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT omitem `venue_id`.
+- Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT mantêm `venue_id` presente com valor `null`.
 - `client_id`, `device_id`, timestamp, nonce e assinatura HMAC permanecem obrigatórios; o backend resolve a locação pelo device e `captured_at`.
 
 ## Environment and settings

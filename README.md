@@ -7,6 +7,7 @@
 > **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
 >
 > **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_VENUE_ID`; a API resolve o evento de locação a partir da identidade HMAC e do horário capturado.
+> Configuração remota continua disponível nesse modo e usa `venue_id: null` nos envelopes MQTT.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 

@@ -66,6 +66,21 @@ class DeviceConfigServiceTests(unittest.TestCase):
             agent_version="1.2.3",
         )
 
+    def _rental_service(self, base: Path, client: _FakeMQTTClient | None = None) -> DeviceConfigService:
+        return DeviceConfigService(
+            client or _FakeMQTTClient(),
+            device_id="edge-rental-01",
+            client_id="client-rental",
+            venue_id=None,
+            desired_topic="grn/devices/edge-rental-01/config/desired",
+            reported_topic="grn/devices/edge-rental-01/config/reported",
+            request_topic="grn/devices/edge-rental-01/config/request",
+            state_topic="grn/devices/edge-rental-01/config/state",
+            config_path=base / "config.json",
+            device_secret="secret-rental",
+            agent_version="1.2.3",
+        )
+
     def _payload(
         self,
         desired_config: dict,
@@ -197,6 +212,59 @@ class DeviceConfigServiceTests(unittest.TestCase):
             "grn/devices/edge-01/config/request",
         )
         self.assertEqual(len(client.connect_listeners), 1)
+
+    def test_rental_accepts_null_venue_and_reports_null_venue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            client = _FakeMQTTClient()
+            service = self._rental_service(base, client)
+            desired = self._desired_config()
+            issued = datetime.now(timezone.utc).isoformat()
+            payload = {
+                "type": "config.desired",
+                "device_id": "edge-rental-01",
+                "client_id": "client-rental",
+                "venue_id": None,
+                "schema_version": 1,
+                "config_version": 2,
+                "desired_hash": hash_config({**desired, "version": 2, "updatedAt": issued}),
+                "correlation_id": "corr-rental",
+                "issued_at": issued,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+                "desired_config": desired,
+            }
+            payload["signature"] = sign_desired_config_payload(
+                payload=payload,
+                device_secret="secret-rental",
+            )
+
+            result = service.process_desired_config(payload)
+            service.publish_report(result)
+
+        self.assertEqual(client.published[-1][1]["venue_id"], None)
+
+    def test_rental_rejects_non_null_venue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._rental_service(Path(tmp))
+            desired = self._desired_config()
+            issued = datetime.now(timezone.utc).isoformat()
+            payload = {
+                "type": "config.desired",
+                "device_id": "edge-rental-01",
+                "client_id": "client-rental",
+                "venue_id": "unexpected-venue",
+                "schema_version": 1,
+                "config_version": 2,
+                "desired_hash": hash_config({**desired, "version": 2, "updatedAt": issued}),
+                "correlation_id": "corr-rental",
+                "issued_at": issued,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+                "desired_config": desired,
+            }
+            payload["signature"] = sign_desired_config_payload(payload=payload, device_secret="secret-rental")
+
+            with self.assertRaisesRegex(Exception, "venue_id divergente"):
+                service.process_desired_config(payload)
 
     def test_start_publishes_state_snapshot_when_client_is_connected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

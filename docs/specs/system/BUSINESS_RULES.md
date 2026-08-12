@@ -133,7 +133,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 
 - configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`;
 - `desired_config` deve ser um objeto completo de configuração operacional não sensível;
-- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC;
+- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC; rental exige `venue_id=null` e fixed exige a venue configurada;
 - a assinatura usa `DEVICE_SECRET`/`GN_DEVICE_SECRET`; sem esse segredo, o payload é rejeitado;
 - o report `config.reported` também é assinado com `DEVICE_SECRET`/`GN_DEVICE_SECRET` antes de ser enviado à API;
 - `config.request` válido deve gerar `config.state` assinado com snapshot sanitizado da configuração efetiva;

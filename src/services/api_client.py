@@ -58,6 +58,10 @@ class GravaNoisAPIClient:
         self.device_mode = (os.getenv("GN_DEVICE_MODE") or "fixed").strip().lower()
         if self.device_mode not in {"fixed", "rental"}:
             raise RuntimeError("GN_DEVICE_MODE deve ser fixed ou rental")
+        if self.device_mode == "fixed" and not self.venue_id:
+            raise RuntimeError("VENUE_ID (ou GN_VENUE_ID) não configurado")
+        if self.device_mode == "rental" and self.venue_id:
+            raise RuntimeError("GN_VENUE_ID deve ficar vazio para device rental")
         self.device_id = os.getenv("DEVICE_ID") or os.getenv("GN_DEVICE_ID") or ""
         self.device_secret = (
             os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
