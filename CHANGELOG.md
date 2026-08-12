@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-12
+
+### Changed
+- `refactor(rental)`: identidade técnica rental deixa cliente e venue vazios, omite `X-Client-Id` nas chamadas HMAC e envia ambos como `null` no MQTT.
+
+### Fixed
+- `docs(rental)`: requisitos de startup passam a distinguir `GN_CLIENT_ID` obrigatório em fixed e proibido em rental.
+
 ## 2026-08-08
 
 ### Added

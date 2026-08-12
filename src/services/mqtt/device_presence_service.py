@@ -24,7 +24,7 @@ class DevicePresenceService:
         config: MQTTConfig,
         *,
         device_id: str,
-        client_id: str,
+        client_id: str | None,
         venue_id: str | None,
         boot_id: str,
         runtime_snapshot_provider: RuntimeSnapshotProvider,

@@ -7,7 +7,7 @@ from typing import Any
 @dataclass(frozen=True)
 class DeviceIdentity:
     device_id: str
-    client_id: str
+    client_id: str | None
     venue_id: str | None
     agent_version: str
     boot_id: str
@@ -18,8 +18,12 @@ class DeviceIdentity:
             raise ValueError("device mode must be fixed or rental")
         if self.device_mode == "fixed" and not self.venue_id:
             raise ValueError("fixed device requires venue id")
+        if self.device_mode == "fixed" and not self.client_id:
+            raise ValueError("fixed device requires client id")
         if self.device_mode == "rental" and self.venue_id is not None:
             raise ValueError("rental device must not have venue id")
+        if self.device_mode == "rental" and self.client_id is not None:
+            raise ValueError("rental device must not have client id")
 
 
 @dataclass(frozen=True)

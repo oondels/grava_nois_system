@@ -157,7 +157,7 @@ class DeviceConfigService:
         mqtt_client: MQTTClient,
         *,
         device_id: str,
-        client_id: str,
+        client_id: str | None,
         venue_id: str | None,
         desired_topic: str,
         reported_topic: str,
@@ -271,7 +271,7 @@ class DeviceConfigService:
             raise RemoteConfigError("type inválido para config remota")
         if _required_str(payload, "device_id") != self.device_id:
             raise RemoteConfigError("device_id divergente")
-        if _required_str(payload, "client_id") != self.client_id:
+        if (payload.get("client_id") or None) != self.client_id:
             raise RemoteConfigError("client_id divergente")
         if (payload.get("venue_id") or None) != self.venue_id:
             raise RemoteConfigError("venue_id divergente")
@@ -424,7 +424,7 @@ class DeviceConfigService:
             raise RemoteConfigError("type inválido para solicitação de snapshot")
         if _required_str(payload, "device_id") != self.device_id:
             raise RemoteConfigError("device_id divergente")
-        if _required_str(payload, "client_id") != self.client_id:
+        if (payload.get("client_id") or None) != self.client_id:
             raise RemoteConfigError("client_id divergente")
         if (payload.get("venue_id") or None) != self.venue_id:
             raise RemoteConfigError("venue_id divergente")

@@ -10,7 +10,6 @@ class RentalApiClientTests(TestCase):
             "os.environ",
             {
                 "GN_DEVICE_MODE": "rental",
-                "GN_CLIENT_ID": "client-rental",
                 "GN_VENUE_ID": "venue-invalid",
             },
             clear=True,
@@ -32,7 +31,6 @@ class RentalApiClientTests(TestCase):
             "os.environ",
             {
                 "GN_DEVICE_MODE": "rental",
-                "GN_CLIENT_ID": "client-rental",
                 "GN_DEVICE_ID": "rental-01",
                 "GN_DEVICE_SECRET": "secret-rental",
             },
@@ -42,6 +40,7 @@ class RentalApiClientTests(TestCase):
 
         self.assertTrue(client.is_configured())
         self.assertEqual(client.venue_id, None)
+        self.assertIsNone(client.client_id)
 
     def test_extracts_official_clip_registration_envelope(self) -> None:
         clip = GravaNoisAPIClient.extract_clip_registration(

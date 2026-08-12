@@ -62,8 +62,6 @@ def sign_request(
         raise ValueError("path deve comecar com '/'")
 
     resolved_client_id = client_id or _derive_client_id_from_path(path)
-    if not resolved_client_id:
-        raise ValueError("nao foi possivel resolver client_id para assinatura")
 
     used_method = method.upper()
     used_timestamp = timestamp or make_timestamp_sec()
@@ -79,12 +77,13 @@ def sign_request(
     headers = {
         "Content-Type": content_type,
         "X-Device-Id": device_id,
-        "X-Client-Id": resolved_client_id,
         "X-Timestamp": used_timestamp,
         "X-Nonce": used_nonce,
         "X-Body-SHA256": body_sha256,
         "X-Signature": signature,
     }
+    if resolved_client_id:
+        headers["X-Client-Id"] = resolved_client_id
 
     return SignedRequest(
         headers=headers,

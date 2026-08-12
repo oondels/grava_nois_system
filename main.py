@@ -580,9 +580,11 @@ def main() -> int:
         raise RuntimeError("GN_VENUE_ID é obrigatório para device fixed")
     if device_mode == "rental" and venue_id:
         raise RuntimeError("GN_VENUE_ID deve ficar vazio para device rental")
+    if device_mode == "rental":
+        client_id = None
     api_base = (os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL") or "").strip()
     if api_base:
-        if not client_id:
+        if device_mode == "fixed" and not client_id:
             raise RuntimeError("GN_CLIENT_ID é obrigatório quando a API está habilitada")
         if not device_id:
             raise RuntimeError("DEVICE_ID é obrigatório quando a API está habilitada")

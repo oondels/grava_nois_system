@@ -3,9 +3,9 @@
 ## Seleção fixed/rental
 
 - `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.
-- `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` continua identificando a frota e `GN_VENUE_ID` deve ficar vazio.
-- Em configuração remota rental, `venue_id` permanece presente nos envelopes com valor JSON `null`.
-- Se `GN_API_BASE`/`API_BASE_URL` estiver definido, `GN_CLIENT_ID`, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` são obrigatórios e validados antes do pipeline.
+- `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` e `GN_VENUE_ID` devem ficar vazios; `DEVICE_ID` e `DEVICE_SECRET` formam a identidade técnica estável.
+- Em configuração remota rental, `client_id` e `venue_id` permanecem presentes nos envelopes com valor JSON `null`.
+- Se `GN_API_BASE`/`API_BASE_URL` estiver definido, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` são obrigatórios; `GN_CLIENT_ID` é exigido apenas em `fixed` e deve ficar vazio em `rental`.
 
 ## Visão geral
 
@@ -189,7 +189,7 @@ Tópicos:
 Contrato de entrada:
 
 - `type`: `config.desired`
-- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
+- `device_id`, `client_id`, `venue_id` (os dois últimos são `null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: inteiro monotônico
 - `desired_hash`: `sha256:<hex>` calculado sobre o JSON canônico do `desired_config` preparado com `version` e `updatedAt`
@@ -208,7 +208,7 @@ v1:CONFIG_DESIRED:{device_id}:{config_version}:{correlation_id}:{issued_at}:{exp
 Contrato de saída:
 
 - `type`: `config.reported`
-- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
+- `device_id`, `client_id`, `venue_id` (os dois últimos são `null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: versão recebida em `config.desired`
 - `status`: `applied`, `pending_restart` ou `rejected`

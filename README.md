@@ -6,9 +6,9 @@
 >
 > **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
 >
-> **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_VENUE_ID`; a API resolve o evento de locação a partir da identidade HMAC e do horário capturado.
+> **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_CLIENT_ID` nem `GN_VENUE_ID`; a API resolve cliente e evento a partir da identidade HMAC e do horário capturado.
 > Configuração remota continua disponível nesse modo e usa `venue_id: null` nos envelopes MQTT.
-> Com uma API base configurada, o processo exige `GN_CLIENT_ID`, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
+> Com uma API base configurada, o processo exige `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup; `GN_CLIENT_ID` também é obrigatório apenas no modo `fixed`. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
 > Na clean architecture, URLs e headers assinados permanecem somente em memória; o checkpoint durável guarda apenas o ID remoto e o recibo de integridade necessário ao finalize.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).

@@ -67,6 +67,7 @@ class ConfigurationSnapshotTests(unittest.TestCase):
 
         self.assertEqual("rental", identity.device_mode)
         self.assertTrue(identity.is_rental)
+        self.assertIsNone(identity.client_id)
         self.assertIsNone(identity.venue_id)
 
     def test_rental_identity_rejects_fixed_venue(self):
