@@ -69,14 +69,29 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_RUN_CAMERA_INTEGRATION` | — | Teste de integração manual |
 | `GN_CAMERA_INTEGRATION_OUTPUT_DIR` | — | Diretório de artefatos de teste |
 
+`GN_MQTT_BROKER_URL` aceita apenas `mqtt://` ou `mqtts://`. No `config.json`,
+`mqtt.broker.host` contém somente o hostname; protocolo e TLS são representados
+separadamente por `mqtt.broker.tls`.
+
 ---
 
 ## Ownership e identidade operacional
 
 - o `grava_nois_system` continua executando como **um device logico por processo/host provisionado**;
-- `GN_CLIENT_ID` e `GN_VENUE_ID` definem o contexto do cliente e da venue daquele host;
+- em `fixed`, `GN_CLIENT_ID` e `GN_VENUE_ID` definem o contexto permanente daquele host;
+- em `rental`, cliente e local pertencem à locação temporal e ambos permanecem vazios no host;
 - uma mesma venue pode ter varios devices no backend, entao esses dois valores podem se repetir em hosts diferentes;
 - `DEVICE_ID` e `DEVICE_SECRET` precisam permanecer exclusivos por host/device.
+
+O configurador pode verificar a compatibilidade da imagem sem iniciar o pipeline:
+
+```bash
+python -m src.cli.rental_compat_probe
+```
+
+O comando retorna JSON com `compatible`, `probe_schema_version`,
+`rental_identity_contract=tenantless-v1` e `agent_version` derivado de
+`GN_AGENT_VERSION`. Ele não abre câmera nem conexão MQTT/API.
 
 ---
 
@@ -92,7 +107,12 @@ Duas opções:
    ```
    O loader resolve `env:GN_CAM01_RTSP_URL` → `os.getenv("GN_CAM01_RTSP_URL")`.
 
-2. **Legado via `GN_CAMERAS_JSON`**: se o array `cameras` em `config.json` estiver vazio ou ausente, o sistema continua lendo `GN_CAMERAS_JSON` / `GN_RTSP_URLS` / `GN_RTSP_URL` do env, preservando total compatibilidade.
+2. **Legado via env**: somente quando o campo `cameras` estiver ausente do `config.json`, o sistema lê `GN_CAMERAS_JSON` / `GN_RTSP_URLS` / `GN_RTSP_URL`.
+
+O campo `cameras` é autoritativo quando presente. Um array vazio ou composto apenas
+por entradas `enabled=false` desabilita todas as câmeras e nunca aciona fallback.
+Uma câmera RTSP habilitada com `env:VAR_NAME` ausente causa falha explícita no startup;
+a mensagem contém apenas câmera e nome da variável, nunca seu valor.
 
 ---
 
@@ -292,7 +312,8 @@ O script converte apenas parâmetros operacionais não sensíveis. Segredos, ide
 tokens, credenciais MQTT e URLs RTSP com `user:pass@` permanecem no `.env`; nesses
 casos o `config.json` usa referência `env:VAR_NAME`.
 
-Não é necessário remover as variáveis de ambiente existentes — elas continuam válidas como fallback.
+Não é necessário remover as variáveis de ambiente existentes. As fontes legadas de
+câmera só funcionam como fallback enquanto o campo `cameras` estiver ausente.
 
 ---
 

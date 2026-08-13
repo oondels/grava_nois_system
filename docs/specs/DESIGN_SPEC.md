@@ -6,6 +6,8 @@ O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a depen
 Na configuração remota MQTT, o modo rental envia `client_id=null` e `venue_id=null`; a API resolve o cliente pelo contrato temporal.
 Registro inicial e retry compartilham a mesma normalização do envelope de clipe; rejeições definitivas no finalize encerram o item local em vez de reiniciar o ciclo.
 A identidade da clean architecture aplica as mesmas invariantes: `fixed` exige venue e `rental` exige venue ausente. Checkpoints de delivery nunca persistem credenciais temporárias da URL assinada.
+O probe `python -m src.cli.rental_compat_probe` confirma, sem iniciar o pipeline, o contrato rental tenantless e a versão declarada em `GN_AGENT_VERSION`.
+Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclusive vazio; fontes legadas só participam quando o campo está ausente.
 
 ## 1. Overview
 

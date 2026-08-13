@@ -5,7 +5,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
 
 from src.config.config_loader import (
     OperationalConfig,
@@ -113,31 +112,6 @@ def _env_str(name: str, default: str = "") -> str:
     return str(value).strip()
 
 
-def _parse_mqtt_host_and_port(
-    broker_url: str,
-    fallback_port: int,
-) -> tuple[str, int, bool]:
-    raw_value = broker_url.strip()
-    if not raw_value:
-        return "", fallback_port, False
-
-    if "://" not in raw_value:
-        if ":" in raw_value and raw_value.count(":") == 1:
-            host, raw_port = raw_value.split(":", 1)
-            try:
-                return host.strip(), max(1, int(raw_port)), False
-            except ValueError:
-                return host.strip(), fallback_port, False
-        return raw_value, fallback_port, False
-
-    parsed = urlparse(raw_value)
-    scheme = (parsed.scheme or "").lower()
-    host = parsed.hostname or ""
-    port = parsed.port or fallback_port
-    use_tls = scheme in {"mqtts", "ssl", "tls"}
-    return host, port, use_tls
-
-
 def load_mqtt_config() -> MQTTConfig:
     """Carrega configuração MQTT a partir do loader central + segredos de env.
 
@@ -179,8 +153,8 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
     """Carrega configurações de câmera a partir do loader central ou env legado.
 
     Política de fonte de câmeras:
-      1. Se config.json possui array 'cameras' não vazio → usa-o (gerenciado)
-      2. Caso contrário → fallback para GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL (env legado)
+      1. Se config.json possui o campo 'cameras' → usa-o como fonte autoritativa
+      2. Se o campo estiver ausente → fallback para env legado
       3. Se nenhuma fonte RTSP → câmera V4L2 local
 
     URLs RTSP com credenciais devem usar 'env:VAR_NAME' em config.json ou
@@ -258,7 +232,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
         )
 
     # --- Fonte 1: cameras de config.json ---
-    if cfg.cameras:
+    if cfg.cameras_managed:
         enabled = [c for c in cfg.cameras if c.enabled]
         configs: List[CaptureConfig] = []
         use_isolated_dirs = len(enabled) > 1
@@ -285,9 +259,16 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                 )
                 continue
 
-            rtsp_url = cam.resolve_rtsp_url()
+            try:
+                rtsp_url = cam.resolve_rtsp_url()
+            except ValueError as exc:
+                raise ValueError(
+                    f"camera gerenciada {cam.id!r} possui rtspUrl invalida: {exc}"
+                ) from exc
             if not rtsp_url:
-                continue
+                raise ValueError(
+                    f"camera gerenciada {cam.id!r} exige rtspUrl ou referencia env:VAR_NAME"
+                )
             configs.append(
                 _build_rtsp_cfg(
                     camera_id=cam.id,
@@ -299,8 +280,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                     post_seg_override=cam.post_segments,
                 )
             )
-        if configs:
-            return configs
+        return configs
 
     # --- Fonte 2: env legado (GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL) ---
     cameras_json = (os.getenv("GN_CAMERAS_JSON") or "").strip()

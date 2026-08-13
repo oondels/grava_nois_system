@@ -115,10 +115,10 @@ class DeviceApplicationContractTests(unittest.TestCase):
                 current.state(diagnostics, heartbeat_seq=0),
             )
 
-    def test_rental_presence_keeps_null_venue_in_wire_contract(self) -> None:
+    def test_rental_presence_keeps_null_tenant_in_wire_contract(self) -> None:
         identity = DeviceIdentity(
             "edge-rental-01",
-            "client-rental",
+            None,
             None,
             "1.4.0",
             "boot-rental",
@@ -136,6 +136,8 @@ class DeviceApplicationContractTests(unittest.TestCase):
             heartbeat_seq=1,
         )
 
+        self.assertIn("client_id", payload)
+        self.assertIsNone(payload["client_id"])
         self.assertIn("venue_id", payload)
         self.assertIsNone(payload["venue_id"])
 

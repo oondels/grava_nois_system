@@ -60,7 +60,7 @@ class ConfigurationSnapshotTests(unittest.TestCase):
             {
                 "GN_DEVICE_MODE": "rental",
                 "DEVICE_ID": "rental-01",
-                "GN_CLIENT_ID": "client-1",
+                "GN_CLIENT_ID": "",
                 "GN_VENUE_ID": "",
             }
         )
@@ -76,7 +76,7 @@ class ConfigurationSnapshotTests(unittest.TestCase):
                 {
                     "GN_DEVICE_MODE": "rental",
                     "DEVICE_ID": "rental-01",
-                    "GN_CLIENT_ID": "client-1",
+                    "GN_CLIENT_ID": "",
                     "GN_VENUE_ID": "venue-1",
                 }
             )

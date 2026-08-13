@@ -70,7 +70,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
         return DeviceConfigService(
             client or _FakeMQTTClient(),
             device_id="edge-rental-01",
-            client_id="client-rental",
+            client_id=None,
             venue_id=None,
             desired_topic="grn/devices/edge-rental-01/config/desired",
             reported_topic="grn/devices/edge-rental-01/config/reported",
@@ -213,7 +213,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(client.connect_listeners), 1)
 
-    def test_rental_accepts_null_venue_and_reports_null_venue(self) -> None:
+    def test_rental_accepts_and_reports_null_tenant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             client = _FakeMQTTClient()
@@ -223,7 +223,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
             payload = {
                 "type": "config.desired",
                 "device_id": "edge-rental-01",
-                "client_id": "client-rental",
+                "client_id": None,
                 "venue_id": None,
                 "schema_version": 1,
                 "config_version": 2,
@@ -241,7 +241,8 @@ class DeviceConfigServiceTests(unittest.TestCase):
             result = service.process_desired_config(payload)
             service.publish_report(result)
 
-        self.assertEqual(client.published[-1][1]["venue_id"], None)
+        self.assertIsNone(client.published[-1][1]["client_id"])
+        self.assertIsNone(client.published[-1][1]["venue_id"])
 
     def test_rental_rejects_non_null_venue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -251,7 +252,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
             payload = {
                 "type": "config.desired",
                 "device_id": "edge-rental-01",
-                "client_id": "client-rental",
+                "client_id": None,
                 "venue_id": "unexpected-venue",
                 "schema_version": 1,
                 "config_version": 2,

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-13
+
+### Added
+- `feat(rental)`: probe CLI sem efeitos colaterais expõe versão do agente e confirma suporte ao contrato rental tenantless.
+
+### Fixed
+- `fix(config)`: `cameras[]` gerenciado passa a ser autoritativo inclusive vazio, e referências `env:` ausentes falham sem expor credenciais.
+- `fix(mqtt)`: URL do broker aceita somente `mqtt://` e `mqtts://`, rejeitando WebSocket e aliases incompatíveis com o transporte TCP/TLS atual.
+- `test(rental)`: fixtures MQTT e de presença passam a representar rental com `client_id=null` e `venue_id=null`.
+
 ## 2026-08-12
 
 ### Changed

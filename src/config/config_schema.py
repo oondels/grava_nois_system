@@ -151,7 +151,7 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
 
     # --- cameras ---
     cameras = data.get("cameras")
-    if cameras is not None:
+    if "cameras" in data:
         if not isinstance(cameras, list):
             errors.append("cameras deve ser uma lista")
         else:
@@ -313,6 +313,16 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
     if not isinstance(broker, dict):
         errors.append("mqtt.broker deve ser um objeto")
         broker = {}
+
+    b_host = broker.get("host")
+    if b_host is not None:
+        if not isinstance(b_host, str):
+            errors.append("mqtt.broker.host deve ser string")
+        elif "://" in b_host:
+            errors.append(
+                "mqtt.broker.host deve conter somente hostname; "
+                "use GN_MQTT_BROKER_URL para mqtt:// ou mqtts://"
+            )
 
     b_port = broker.get("port")
     if b_port is not None and (not isinstance(b_port, int) or not (1 <= b_port <= 65535)):

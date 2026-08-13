@@ -7,7 +7,7 @@
 > **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
 >
 > **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_CLIENT_ID` nem `GN_VENUE_ID`; a API resolve cliente e evento a partir da identidade HMAC e do horário capturado.
-> Configuração remota continua disponível nesse modo e usa `venue_id: null` nos envelopes MQTT.
+> Configuração remota continua disponível nesse modo e usa `client_id: null` e `venue_id: null` nos envelopes MQTT.
 > Com uma API base configurada, o processo exige `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup; `GN_CLIENT_ID` também é obrigatório apenas no modo `fixed`. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
 > Na clean architecture, URLs e headers assinados permanecem somente em memória; o checkpoint durável guarda apenas o ID remoto e o recibo de integridade necessário ao finalize.
 
@@ -117,6 +117,7 @@ GN_RTSP_URL=rtsp://user:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype
 # API Backend (opcional, mas recomendado)
 GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=seu_token_jwt_aqui
+GN_DEVICE_MODE=fixed
 GN_CLIENT_ID=uuid-do-cliente
 GN_VENUE_ID=uuid-do-local
 DEVICE_ID=raspberrypi-001
@@ -152,6 +153,23 @@ GN_AGENT_VERSION=1.0.0-edge
 GN_SEG_TIME=1
 GN_RTSP_PRE_SEGMENTS=6
 GN_RTSP_POST_SEGMENTS=3
+```
+
+Para um device rental, mantenha a identidade técnica e remova o tenant permanente:
+
+```bash
+GN_DEVICE_MODE=rental
+GN_CLIENT_ID=
+GN_VENUE_ID=
+DEVICE_ID=uuid-do-device-rental
+DEVICE_SECRET=troque_por_um_segredo_forte
+```
+
+Uma imagem pode ser verificada sem iniciar câmeras, MQTT, API ou pipeline:
+
+```bash
+python -m src.cli.rental_compat_probe
+# {"agent_version":"...","compatible":true,...,"rental_identity_contract":"tenantless-v1"}
 ```
 
 Observacao operacional:
@@ -390,6 +408,8 @@ defaults → variáveis de ambiente (fallback legado) → config.json (vence qua
 ```
 
 Instalações existentes sem `config.json` continuam funcionando via env sem alteração.
+Quando `config.json` contém o campo `cameras`, esse array é autoritativo: `[]` ou todas
+as entradas desabilitadas resultam em zero câmeras e não reativam fontes do env legado.
 
 Para criar:
 ```bash
@@ -413,7 +433,7 @@ sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.js
 - Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
 - Para gerenciamento admin de `.env`, monte o diretório que contém o `.env` em `/usr/src/app/host_config:rw` e defina `GN_HOST_ENV_PATH=/usr/src/app/host_config/.env`. Se esse arquivo não existir no container, o edge responderá `env.reported` com `status=rejected`.
 
-**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
+**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`. A variável referenciada deve existir; do contrário, o startup falha informando somente o nome da câmera e da variável, sem expor seu conteúdo.
 
 ---
 
@@ -652,7 +672,8 @@ Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumi
 ### Variáveis principais
 
 - `GN_MQTT_ENABLED`: habilita/desabilita o serviço MQTT
-- `GN_MQTT_BROKER_URL` ou `GN_MQTT_HOST` + `GN_MQTT_PORT`: broker MQTT
+- `GN_MQTT_BROKER_URL`: URL `mqtt://` ou `mqtts://`; WebSocket não é suportado
+- `GN_MQTT_HOST` + `GN_MQTT_PORT`: host/porta legados para transporte MQTT TCP
 - `GN_MQTT_USERNAME` e `GN_MQTT_PASSWORD`: credenciais do broker
 - `GN_MQTT_CLIENT_ID`: identificador MQTT do cliente; default em `DEVICE_ID`
 - `GN_MQTT_KEEPALIVE`: keepalive MQTT

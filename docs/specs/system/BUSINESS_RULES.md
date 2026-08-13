@@ -111,6 +111,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 ## MQTT presence rules
 
 - MQTT deve poder ser desligado integralmente por configuração;
+- `GN_MQTT_BROKER_URL` aceita apenas `mqtt://` e `mqtts://`; `ws://`/`wss://` e aliases não TCP são rejeitados porque o cliente usa transporte Paho TCP/TLS;
 - indisponibilidade do broker não pode interromper captura, trigger, worker ou retry local;
 - falha de câmera, FFmpeg, backend, S3 ou internet não pode impedir publicação de status MQTT quando o broker estiver acessível;
 - MQTT deve iniciar antes das câmeras para reportar `UNAVAILABLE`/`ERROR` em vez de deixar o device invisível;
@@ -147,3 +148,5 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - mudanças em domínios hot-reload-safe podem ser promovidas atomicamente para `config.json`;
 - `config_version` antiga, já aplicada ou menor que a pendente não bloqueia aplicação; payload válido sobrescreve a configuração desejada local;
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.
+- `cameras` presente na configuração gerenciada é autoritativo inclusive como array vazio ou com todas as câmeras desabilitadas;
+- referência `env:` ausente em câmera habilitada rejeita o startup sem incluir credenciais no erro.
