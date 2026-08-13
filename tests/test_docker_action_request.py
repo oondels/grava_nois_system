@@ -46,6 +46,30 @@ class DockerActionRequestServiceTests(unittest.TestCase):
             self.assertEqual(payload["action"], "restart_container")
             self.assertEqual(payload["source"], "pico")
 
+    def test_shutdown_token_requires_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            request_path = Path(tmp) / "docker-action.request.json"
+            disabled = DockerActionRequestService(
+                enabled=True,
+                request_path=request_path,
+                pull_token="PULL_DOCKER",
+                restart_token="RESTART_DOCKER",
+                shutdown_enabled=False,
+            )
+            self.assertTrue(disabled.handle_token("SHUTDOWN_HOST"))
+            self.assertFalse(request_path.exists())
+
+            enabled = DockerActionRequestService(
+                enabled=True,
+                request_path=request_path,
+                pull_token="PULL_DOCKER",
+                restart_token="RESTART_DOCKER",
+                shutdown_enabled=True,
+            )
+            self.assertTrue(enabled.handle_token("SHUTDOWN_HOST"))
+            payload = json.loads(request_path.read_text())
+            self.assertEqual(payload["action"], "shutdown_host")
+
     def test_admin_env_restart_writes_request_file_without_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             request_path = Path(tmp) / "docker-action.request.json"

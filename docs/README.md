@@ -5,6 +5,7 @@
 - **Arquivos principais**: `main.py`, `src/video/*`, `src/workers/processing_worker.py` e `src/services/mqtt/*`
 - **Dependências**: Python 3.10+, FFmpeg/ffprobe
 - **Fluxo**: _MQTT/status_ → _Captura contínua_ → _Highlight on-demand_ → _Fila local_ → _Watermark_ → _Registro no backend_ → _Upload por URL assinada_
+- **Pico V1 e V2**: consulte [PICO_MODELS.md](./PICO_MODELS.md) para escolher o firmware, conferir pinagem, gestos, protocolo serial e estados dos LEDs.
 
 ---
 

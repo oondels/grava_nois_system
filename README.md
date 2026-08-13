@@ -545,11 +545,19 @@ GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado
 Comunicação bidirecional com o Pico:
 - **Edge → Pico:** ao abrir a serial, o edge envia `GRN_STARTED` para sinalizar que o runtime está operacional. O envio é repetido até o Pico responder `ACK_GRN_STARTED`; o ACK é a confirmação real de que o Pico recebeu o comando e acendeu o LED.
 - **Pico → Edge:** tokens de botão, Docker e trigger são enviados pelo firmware.
-- Após `PULL_DOCKER`/`RESTART_DOCKER`, o LED apaga e só reacende quando o novo container reenviar `GRN_STARTED` e receber `ACK_GRN_STARTED`.
 
-Lógica de roteamento ao receber um token pela serial:
+Existem dois modelos de firmware, com comportamento visual e gestos diferentes:
+
+| Modelo | Firmware | Escopo |
+|---|---|---|
+| V1 legado | `raspberry_pico/main.py` | Triggers, restart/pull e LED unico de handshake. |
+| V2 operacional | `raspberry_pico/main_operational_v2.py` | Dois LEDs, estados de camera/MQTT/upload, diagnostico, manutencao, watchdog e poweroff confirmado. |
+
+Pinagem, gestos, LEDs, protocolo e compatibilidade estao documentados separadamente em [`docs/PICO_MODELS.md`](docs/PICO_MODELS.md). Nao use a leitura de LED do V1 para diagnosticar um Pico V2.
+
+Lógica comum de roteamento ao receber um token pela serial:
 1. `ACK_GRN_STARTED` → log info, ignorado (confirmação do handshake)
-2. Token de manutenção Docker (`PULL_DOCKER`/`RESTART_DOCKER`) → grava uma solicitação em `runtime_config` para o host executar via systemd
+2. Token de manutenção host (`PULL_DOCKER`/`RESTART_DOCKER` e, no V2 autorizado, `SHUTDOWN_HOST`) → grava uma solicitação em `runtime_config` para o host executar via systemd
 3. Token está no mapa dedicado → dispara só a câmera correspondente
 4. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
 5. Token desconhecido → `warning` no log, listener continua sem interrupção
@@ -560,10 +568,14 @@ Tokens de manutenção Docker:
 GN_PICO_DOCKER_ACTIONS_ENABLED=1
 GN_PICO_DOCKER_PULL_TOKEN=PULL_DOCKER
 GN_PICO_DOCKER_RESTART_TOKEN=RESTART_DOCKER
+GN_PICO_HOST_SHUTDOWN_ENABLED=0  # opt-in; requer runner privilegiado no host
+GN_PICO_HOST_SHUTDOWN_TOKEN=SHUTDOWN_HOST
 GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
 ```
 
-O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --force-recreate --remove-orphans` ou `docker compose up -d --force-recreate --remove-orphans`. Antes de recriar, o runner do host regenera `config.json` a partir do `.env`, preservando identidade e segredos somente no `.env`. O `RESTART_DOCKER` recria o container para reler `env_file` e aplicar alterações no `.env`; não baixa imagem nova. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
+
+Como o JSON e reconstruido, campos operacionais aplicados somente em `config.json` por configuracao remota serao substituidos pelos valores do `.env` no proximo pull/restart.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:

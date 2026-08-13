@@ -61,6 +61,9 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_BUFFER_DIR` | — | Path de volume/container |
 | `GN_LOG_DIR` | — | Path de logs de container |
 | `GN_PICO_PORT` | — | Path de device serial no host |
+| `GN_PICO_DOCKER_ACTIONS_ENABLED` | — | Habilita intents host-only de restart/pull via Pico |
+| `GN_PICO_HOST_SHUTDOWN_ENABLED` | — | Opt-in para poweroff confirmado via Pico; default `0` |
+| `GN_PICO_HOST_SHUTDOWN_TOKEN` | — | Token serial de poweroff; default `SHUTDOWN_HOST` |
 | `DEV` | — | Flag de desenvolvimento |
 | `DEV_VIDEO_MODE` | — | Flag de teste |
 | `GN_HMAC_DRY_RUN` | `HMAC_DRY_RUN` | Flag de auditoria/debug |
@@ -139,7 +142,9 @@ O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env`
 
 O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
 
-Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. No fluxo instalado pelo `grava_nois_config`, esse runner regenera `/opt/.grn/config/runtime/config.json` a partir de `/opt/.grn/config/.env` antes do `docker compose up -d --force-recreate --remove-orphans`. Identidade e segredos permanecem somente no `.env` e não são migrados para `config.json`.
+Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. Antes do recreate, o runner executa o conversor persistente e regenera atomicamente `config.json` a partir do `.env`; falha na conversao interrompe a acao. Identidade e segredos permanecem somente no `.env`.
+
+Esse contrato torna o `.env` autoritativo para campos operacionais durante `restart_container` e `pull_and_recreate`. Configuracao aplicada somente no JSON por MQTT sera substituida pelos valores equivalentes do `.env` nessas acoes.
 
 ---
 

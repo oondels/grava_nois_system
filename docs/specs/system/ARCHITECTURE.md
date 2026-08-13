@@ -37,7 +37,7 @@ Bootstrap em [`main.py`](../../../main.py):
 4. **inicia MQTT (presence, dispatcher, config service) antes das câmeras**;
 5. cria `CameraRuntime` por câmera sem abrir RTSP/FFmpeg;
 6. inicia `ProcessingWorker` por câmera;
-7. resolve trigger source e listeners; quando Pico serial é aberto, reenvia `GRN_STARTED` até receber `ACK_GRN_STARTED` para handshake/LED;
+7. resolve trigger source e inicia `PicoSerialController` como proprietário único da serial; ele reenvia `GRN_STARTED` até o ACK, serializa comandos e mantém heartbeat V2;
 8. inicia supervisor por câmera em background; a primeira tentativa de FFmpeg ocorre no supervisor, sem bloquear MQTT/Pico;
 9. orquestra trigger fan-out até shutdown.
 
@@ -81,11 +81,13 @@ Bootstrap em [`main.py`](../../../main.py):
 - `src/services/mqtt/device_presence_service.py`
 - `src/services/mqtt/device_config_service.py`
 - `src/services/mqtt/command_dispatcher.py`
+- `src/services/pico_serial_controller.py` — I/O serial, negociação V1/V2 e heartbeat
+- `src/services/pico_operations.py` — manutenção temporária, arm confirmado, diagnóstico e publicação de estados
 
 ### Utilities
 
 - `logger.py`
-- `pico.py` — descoberta de porta; a comunicação serial bidirecional é orquestrada em `main.py`
+- `pico.py` — descoberta de porta; o I/O bidirecional pertence ao `PicoSerialController`
 - `device.py`
 - `time_utils.py`
 

@@ -13,6 +13,8 @@ Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclu
 
 `grava_nois_system` é o software edge de captura e upload do ecossistema Grava Nóis. Esta spec é a entrada principal para lookup por code agents e auditoria técnica.
 
+O Pico possui modelos V1 legado e V2 operacional separados. O contrato de pinagem, gestos, LEDs e protocolo está em [`docs/PICO_MODELS.md`](../PICO_MODELS.md); regras e configuração ficam em `system/BUSINESS_RULES.md` e `system/CONFIGURATION.md`.
+
 Objetivo desta estrutura:
 
 - localizar rapidamente a área correta do edge;

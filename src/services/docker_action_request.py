@@ -28,12 +28,16 @@ class DockerActionRequestService:
         request_path: Path,
         pull_token: str,
         restart_token: str,
+        shutdown_enabled: bool = False,
+        shutdown_token: str = "SHUTDOWN_HOST",
         logger: Any | None = None,
     ) -> None:
         self.enabled = enabled
         self.request_path = request_path
         self.pull_token = pull_token.strip().upper()
         self.restart_token = restart_token.strip().upper()
+        self.shutdown_enabled = shutdown_enabled
+        self.shutdown_token = shutdown_token.strip().upper()
         self.logger = logger
 
     @classmethod
@@ -48,6 +52,10 @@ class DockerActionRequestService:
             ),
             pull_token=os.getenv("GN_PICO_DOCKER_PULL_TOKEN", "PULL_DOCKER"),
             restart_token=os.getenv("GN_PICO_DOCKER_RESTART_TOKEN", "RESTART_DOCKER"),
+            shutdown_enabled=_is_truthy(
+                os.getenv("GN_PICO_HOST_SHUTDOWN_ENABLED"), False
+            ),
+            shutdown_token=os.getenv("GN_PICO_HOST_SHUTDOWN_TOKEN", "SHUTDOWN_HOST"),
             logger=logger,
         )
 
@@ -67,12 +75,16 @@ class DockerActionRequestService:
         token: str | None = None,
         fallback_on_failure: bool = False,
     ) -> bool:
-        if action not in {"pull_and_recreate", "restart_container"}:
+        if action not in {"pull_and_recreate", "restart_container", "shutdown_host"}:
             self._log("warning", "Acao Docker invalida ignorada: %s", action)
             return False
 
         if not self.enabled:
             self._log("warning", "Acao Docker ignorada: recurso desabilitado")
+            return not fallback_on_failure
+
+        if action == "shutdown_host" and not self.shutdown_enabled:
+            self._log("warning", "Desligamento do host ignorado: recurso desabilitado")
             return not fallback_on_failure
 
         if self.request_path.exists():
@@ -120,6 +132,8 @@ class DockerActionRequestService:
             return "pull_and_recreate"
         if token == self.restart_token:
             return "restart_container"
+        if token == self.shutdown_token:
+            return "shutdown_host"
         return None
 
     def _log(self, level: str, message: str, *args: object) -> None:

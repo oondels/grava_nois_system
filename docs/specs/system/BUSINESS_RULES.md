@@ -29,6 +29,21 @@
 - cada câmera possui `capture_lock` próprio — um highlight novo não sobrepõe outro em construção da mesma câmera;
 - cooldown de trigger físico (GPIO/Pico) é por câmera via `_cooldown_until`; câmeras em cooldown são ignoradas individualmente sem bloquear as demais.
 
+## Regras do Pico V2 operacional
+
+O contrato completo dos dois modelos esta em [`docs/PICO_MODELS.md`](../../../docs/PICO_MODELS.md). As regras abaixo se aplicam somente ao V2.
+
+- `raspberry_pico/main.py` permanece como firmware V1 de fallback; o V2 opt-in fica em `raspberry_pico/main_operational_v2.py`;
+- BTN1/BTN2 continuam dedicados a câmeras; o botão administrativo usa 2 cliques para diagnóstico, 3 para manutenção temporária e 5 para restart do container;
+- holds de 2-3 s, 4-5 s, 8-10 s e >=12 s executam respectivamente self-test, trigger global, arm de poweroff e pull/recreate;
+- poweroff exige um clique de confirmação em até 5 s e `GN_PICO_HOST_SHUTDOWN_ENABLED=1`;
+- manutenção dura até 15 minutos, toggle explícito ou restart, e bloqueia ENTER, GPIO e triggers Pico sem interromper câmera, buffer ou worker;
+- câmera `READY` exige todas as câmeras habilitadas com FFmpeg vivo e buffer recente; subconjunto pronto é `DEGRADED`;
+- diagnóstico local valida serial, câmera e buffer; MQTT desconectado é informado pelo LED, mas não reprova o diagnóstico;
+- heartbeat edge-Pico ocorre a cada 2 s; ausência por 10 s gera alerta visual, sem restart automático;
+- estado de locação está reservado no protocolo, mas não é publicado enquanto não existir manifesto local confiável para operação rental offline.
+- rejeições definitivas por locação inexistente, grace period ou janela permitida geram feedback visual quando o Pico V2 está conectado.
+
 ## Queue and retry rules
 
 - `queue_raw` é a fila de entrada do worker;

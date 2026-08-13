@@ -7,10 +7,9 @@ Foco: falhas de autenticacao/HMAC e client mismatch.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
-
 
 _DELETE_RECORD_MESSAGES = {
     "missing_headers",
@@ -40,7 +39,7 @@ _DELETE_RECORD_MESSAGE_SNIPPETS = {
 
 @dataclass(frozen=True)
 class APIErrorInfo:
-    status_code: Optional[int]
+    status_code: int | None
     message: str
     error_code: str
     request_id: str
@@ -52,7 +51,10 @@ class APIErrorInfo:
     @property
     def should_delete_local_record(self) -> bool:
         message = self.message_normalized
-        if message in _DELETE_RECORD_MESSAGES:
+        if (
+            message in _DELETE_RECORD_MESSAGES
+            or self.error_code.strip().lower() in _DELETE_RECORD_MESSAGES
+        ):
             return True
         return any(snippet in message for snippet in _DELETE_RECORD_MESSAGE_SNIPPETS)
 
@@ -70,12 +72,12 @@ def _coerce_text(value: Any) -> str:
     return str(value).strip()
 
 
-def parse_api_error_from_response(response: Any) -> Optional[APIErrorInfo]:
+def parse_api_error_from_response(response: Any) -> APIErrorInfo | None:
     if response is None:
         return None
 
     status_code = getattr(response, "status_code", None)
-    payload: Dict[str, Any] = {}
+    payload: dict[str, Any] = {}
     try:
         raw_payload = response.json()
         if isinstance(raw_payload, dict):
@@ -107,8 +109,8 @@ def parse_api_error_from_response(response: Any) -> Optional[APIErrorInfo]:
     )
 
 
-def extract_api_error_from_exception(exc: BaseException) -> Optional[APIErrorInfo]:
-    current: Optional[BaseException] = exc
+def extract_api_error_from_exception(exc: BaseException) -> APIErrorInfo | None:
+    current: BaseException | None = exc
     while current is not None:
         if isinstance(current, requests.exceptions.HTTPError):
             return parse_api_error_from_response(getattr(current, "response", None))

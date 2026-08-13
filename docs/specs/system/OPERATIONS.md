@@ -24,6 +24,10 @@ Falha de hardware de câmera, rede do broker ou API não deve ser condição blo
 - listeners e workers usam `Event`/threads daemon;
 - locks e threads devem ser liberados sem deixar arquivo `.lock` preso;
 - o sistema deve tolerar interrupção sem corromper a fila local.
+- `SHUTDOWN_HOST` exige opt-in, arm no edge e confirmação física em até 5 segundos;
+- o container grava somente a intent; o runner root do `grava_nois_config` para o compose com timeout de 30 segundos, persiste o resultado e só então chama `systemctl poweroff`;
+- restart e pull/recreate regeneram `config.json` a partir do `.env` antes de alterar o container e abortam quando a conversao falha;
+- o resultado registra `config_json=regenerado` ou a etapa `config_json` como causa da falha.
 
 ## Logging
 
@@ -56,6 +60,7 @@ Testes visíveis:
 - `test_multi_camera_settings.py`
 - `test_no_file_collisions.py`
 - `test_pico_utils.py`
+- `test_pico_operational_v2.py`
 - `test_retry_upload.py`
 - `test_security_signing.py`
 - `test_trigger_fanout.py`

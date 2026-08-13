@@ -6,6 +6,7 @@ import shutil
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +41,7 @@ class ProcessingWorker:
         retry_failed: bool = True,
         retry_min_age_sec: float = 120.0,  # idade mínima do arquivo/sidecar p/ tentar de novo
         retry_backoff_base_sec: float = 30.0,
+        operational_event_callback: Callable[[str], None] | None = None,
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
@@ -55,6 +57,7 @@ class ProcessingWorker:
         self.retry_failed = retry_failed
         self.retry_min_age_sec = retry_min_age_sec
         self.retry_backoff_base_sec = retry_backoff_base_sec
+        self.operational_event_callback = operational_event_callback
         self._last_noapi_log = 0.0
 
         self._stop = threading.Event()
@@ -575,6 +578,20 @@ class ProcessingWorker:
 
                 api_error = extract_api_error_from_exception(e)
                 if api_error and api_error.should_delete_local_record:
+                    rental_reasons = {
+                        "rental_not_found_for_capture",
+                        "rental_upload_grace_expired",
+                        "rental_owner_unavailable",
+                        "device_not_authorized_for_rental",
+                    }
+                    matched_reasons = rental_reasons.intersection(
+                        {
+                            api_error.message_normalized,
+                            api_error.error_code.strip().lower(),
+                        }
+                    )
+                    if matched_reasons:
+                        self._notify_operational_event(sorted(matched_reasons)[0])
                     _delete_blocked_clip(
                         "Registro removido por erro não-retriável da API "
                         f"({api_error.short_label()})."
@@ -643,6 +660,9 @@ class ProcessingWorker:
                         http_response.status_code == 403
                         and (code_is_time_window or msg_is_time_window)
                     ):
+                        self._notify_operational_event(
+                            "request_outside_allowed_time_window"
+                        )
                         _delete_blocked_clip("Upload rejeitado por horário.")
                         return
 
@@ -864,3 +884,11 @@ class ProcessingWorker:
             meta["status"] = "queued_retry"
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
             time.sleep(1.0 * meta["attempts"])  # backoff linear simples
+
+    def _notify_operational_event(self, reason: str) -> None:
+        if self.operational_event_callback is None:
+            return
+        try:
+            self.operational_event_callback(reason)
+        except Exception as exc:
+            logger.warning("Falha ao publicar feedback operacional: %s", exc)

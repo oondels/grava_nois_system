@@ -4,15 +4,21 @@
 
 ### Added
 - `feat(rental)`: probe CLI sem efeitos colaterais expõe versão do agente e confirma suporte ao contrato rental tenantless.
+- `feat(pico)`: firmware operacional V2 opt-in adiciona LEDs de estado, gestos administrativos, diagnóstico local, manutenção temporária e watchdog visual.
+- `feat(pico)`: controlador serial único publica câmera/MQTT/upload, mantém heartbeat e preserva os tokens V1 de restart/pull e botões dedicados.
+- `feat(device)`: poweroff confirmado via Pico usa intent host-only e permanece desabilitado por padrão.
+- `docs(pico)`: guia canônico separa firmware V1 legado e V2 operacional, incluindo pinagem, gestos, LEDs e protocolo.
 
 ### Fixed
 - `fix(config)`: `cameras[]` gerenciado passa a ser autoritativo inclusive vazio, e referências `env:` ausentes falham sem expor credenciais.
 - `fix(mqtt)`: URL do broker aceita somente `mqtt://` e `mqtts://`, rejeitando WebSocket e aliases incompatíveis com o transporte TCP/TLS atual.
+- `fix(rental)`: rejeições definitivas identificadas pelo `error.code` também saem do retry e geram feedback visual no Pico V2.
 - `test(rental)`: fixtures MQTT e de presença passam a representar rental com `client_id=null` e `venue_id=null`.
 
 ## 2026-08-12
 
 ### Changed
+- `fix(config)`: pull e restart regeneram `config.json` a partir do `.env` antes do recreate; falha no conversor cancela a ação.
 - `refactor(rental)`: identidade técnica rental deixa cliente e venue vazios, omite `X-Client-Id` nas chamadas HMAC e envia ambos como `null` no MQTT.
 
 ### Fixed
