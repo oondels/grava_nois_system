@@ -5,6 +5,8 @@
 O processamento local é idêntico. Na reserva do upload, o cliente envia metadata para `POST /api/videos/rental/metadata`; upload S3 e finalize continuam usando os contratos assinados existentes. O `captured_at` original determina a locação, e não o horário do retry.
 Tanto o worker quanto `retry_upload.py` extraem o registro do envelope oficial `{ data: { clip } }` (com fallback legado). Erro definitivo de autorização/período/device no finalize é propagado para a política externa, que remove vídeo e sidecar locais.
 
+Quando o envio rental falha, o worker move o artefato já processado e o sidecar para `rental_clips_generated/{rentalId}`. Sem agenda assinada válida, usa `quarantine/` por no máximo 48 horas. A reconexão apenas atualiza o manifesto; `rental/clips/request` com ação `upload` é o único gatilho de reenvio e reutiliza o artefato sem aplicar watermark novamente.
+
 ## 1. Capture bootstrap
 
 O bootstrap de captura é resiliente e não deve bloquear MQTT/presença nem o handshake Pico/LED. Para cada `CaptureConfig`:

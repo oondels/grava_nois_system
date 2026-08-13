@@ -124,6 +124,8 @@ Diretórios principais:
 
 O sistema usa o filesystem como fila, lock e trilha de auditoria local.
 
+No modo rental, `RentalOfflineService` mantém o manifesto de agenda HMAC, classifica falhas de upload na fila persistente exclusiva, remove expirados/cancelados e executa inventário ou reupload somente sob comando MQTT assinado.
+
 ## MQTT presence layer
 
 Camada opcional e isolada do pipeline principal:

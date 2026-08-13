@@ -43,6 +43,7 @@ from src.services.pico_serial_controller import (
     PicoSerialController,
     PicoStartedHandshake,
 )
+from src.services.rental_offline_service import RentalOfflineService
 from src.services.pico_serial_controller import (
     send_pico_command as _send_pico_command_impl,
 )
@@ -509,6 +510,7 @@ def main() -> int:
     mqtt_env_service: DeviceEnvService | None = None
     capture_event_service: CaptureEventService | None = None
     diagnostic_event_service: DeviceDiagnosticEventService | None = None
+    rental_offline_service: RentalOfflineService | None = None
     boot_id = str(uuid.uuid4())
 
     if mqtt_config.enabled and not device_id:
@@ -678,6 +680,40 @@ def main() -> int:
     # Workers são iniciados antes dos triggers para qualquer clipe gerado já ter fila ativa.
     workers: list[ProcessingWorker] = []
 
+    def _upload_rental_pending(rental_id: str) -> dict[str, int]:
+        directory = Path(
+            os.getenv("GN_RENTAL_CLIPS_DIR", str(base / "rental_clips_generated"))
+        ) / rental_id
+        processed = uploaded = failed = 0
+        worker = workers[0] if workers else None
+        if worker is None:
+            return {"processed": 0, "uploaded": 0, "failed": 0}
+        for video in sorted(directory.glob("*.mp4")) if directory.exists() else []:
+            processed += 1
+            if worker.process_manual_pending(video):
+                uploaded += 1
+            else:
+                failed += 1
+        return {"processed": processed, "uploaded": uploaded, "failed": failed}
+
+    if device_mode == "rental":
+        rental_offline_service = RentalOfflineService(
+            mqtt_client=mqtt_client,
+            device_id=device_id,
+            device_secret=(
+                os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
+            ),
+            topic_for=lambda suffix: mqtt_config.topic_for(device_id, suffix),
+            root_dir=Path(
+                os.getenv("GN_RENTAL_CLIPS_DIR", str(base / "rental_clips_generated"))
+            ),
+            upload_callback=_upload_rental_pending,
+            logger=logger,
+            quarantine_ttl_hours=int(
+                os.getenv("GN_RENTAL_QUARANTINE_TTL_HOURS", "48")
+            ),
+        )
+
     def _publish_worker_operational_event(reason: str) -> None:
         if pico_monitor is not None:
             pico_monitor.publish_feedback("TRIGGER", f"REJECTED:{reason}")
@@ -696,11 +732,20 @@ def main() -> int:
             wm_opacity=wm_opacity,
             wm_rel_width=wm_rel_width,
             light_mode=light_mode,
+            retry_failed=device_mode != "rental",
             operational_event_callback=_publish_worker_operational_event,
+            pending_destination=(
+                rental_offline_service.destination_for
+                if rental_offline_service is not None
+                else None
+            ),
         )
         worker.start()
         workers.append(worker)
         logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
+
+    if rental_offline_service is not None:
+        rental_offline_service.start()
 
     # Mapa de roteamento: token Pico dedicado → handler de câmera específica.
     # Câmeras sem pico_trigger_token participam apenas do fan-out global.
@@ -1042,6 +1087,8 @@ def main() -> int:
             pico_monitor.stop()
         if pico_controller is not None:
             pico_controller.stop()
+        if rental_offline_service is not None:
+            rental_offline_service.stop()
         if mqtt_dispatcher is not None:
             try:
                 mqtt_dispatcher.stop()

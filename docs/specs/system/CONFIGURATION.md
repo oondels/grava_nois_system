@@ -83,6 +83,7 @@ separadamente por `mqtt.broker.tls`.
 - o `grava_nois_system` continua executando como **um device logico por processo/host provisionado**;
 - em `fixed`, `GN_CLIENT_ID` e `GN_VENUE_ID` definem o contexto permanente daquele host;
 - em `rental`, cliente e local pertencem à locação temporal e ambos permanecem vazios no host;
+- `GN_RENTAL_CLIPS_DIR` define a fila persistente offline (default `/usr/src/app/rental_clips_generated`) e `GN_RENTAL_QUARANTINE_TTL_HOURS` limita itens sem manifesto (default `48`).
 - uma mesma venue pode ter varios devices no backend, entao esses dois valores podem se repetir em hosts diferentes;
 - `DEVICE_ID` e `DEVICE_SECRET` precisam permanecer exclusivos por host/device.
 

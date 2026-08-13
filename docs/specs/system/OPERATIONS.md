@@ -15,6 +15,7 @@ No startup, o serviço:
 - marca câmeras indisponíveis com `camera_status=UNAVAILABLE` e erro sanitizado no snapshot MQTT;
 - inicia supervisor por câmera em background para reiniciar FFmpeg com backoff;
 - inicia um `ProcessingWorker` por câmera;
+- em rental, inicia `RentalOfflineService`, solicita a agenda assinada e executa a limpeza periódica da fila exclusiva;
 - inicializa listeners de ENTER/GPIO/Pico.
 
 Falha de hardware de câmera, rede do broker ou API não deve ser condição bloqueante do runtime principal. O container deve permanecer vivo enquanto o processo Python estiver executando; saúde de câmera é reportada por payload MQTT e logs.
@@ -24,6 +25,7 @@ Falha de hardware de câmera, rede do broker ou API não deve ser condição blo
 - listeners e workers usam `Event`/threads daemon;
 - locks e threads devem ser liberados sem deixar arquivo `.lock` preso;
 - o sistema deve tolerar interrupção sem corromper a fila local.
+- `rental_clips_generated` deve ser volume persistente; restart/recreate não pode apagá-lo. Clipes identificados vencem em `endsAt + uploadGraceHours`, cancelados são removidos ao aplicar a agenda e a quarentena vence em até 48 horas;
 - `SHUTDOWN_HOST` exige opt-in, arm no edge e confirmação física em até 5 segundos;
 - o container grava somente a intent; o runner root do `grava_nois_config` para o compose com timeout de 30 segundos, persiste o resultado e só então chama `systemctl poweroff`;
 - restart e pull/recreate regeneram `config.json` a partir do `.env` antes de alterar o container e abortam quando a conversao falha;

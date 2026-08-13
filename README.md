@@ -4,6 +4,8 @@
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
 >
+> **Rental offline:** falhas de upload ficam em `rental_clips_generated/{rentalId}` e só são reenviadas por solicitação do responsável/admin. Itens sem agenda assinada ficam em quarentena por até 48 horas.
+>
 > **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
 >
 > **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_CLIENT_ID` nem `GN_VENUE_ID`; a API resolve cliente e evento a partir da identidade HMAC e do horário capturado.

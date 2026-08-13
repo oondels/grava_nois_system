@@ -42,6 +42,7 @@ class ProcessingWorker:
         retry_min_age_sec: float = 120.0,  # idade mínima do arquivo/sidecar p/ tentar de novo
         retry_backoff_base_sec: float = 30.0,
         operational_event_callback: Callable[[str], None] | None = None,
+        pending_destination: Callable[[dict], tuple[Path, dict]] | None = None,
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
@@ -58,6 +59,7 @@ class ProcessingWorker:
         self.retry_min_age_sec = retry_min_age_sec
         self.retry_backoff_base_sec = retry_backoff_base_sec
         self.operational_event_callback = operational_event_callback
+        self.pending_destination = pending_destination
         self._last_noapi_log = 0.0
 
         self._stop = threading.Event()
@@ -186,6 +188,25 @@ class ProcessingWorker:
         if self._t:
             self._t.join(timeout=timeout)
 
+    def process_manual_pending(self, video: Path) -> bool:
+        meta_path = video.with_suffix(".json")
+        lock_path = video.with_suffix(".lock")
+        if not video.exists() or not meta_path.exists():
+            return False
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(fd)
+        except FileExistsError:
+            return False
+        try:
+            self._process_one(video, meta_path)
+            return not video.exists()
+        except Exception as exc:
+            logger.warning("Upload manual rental falhou para %s: %s", video.name, exc)
+            return False
+        finally:
+            lock_path.unlink(missing_ok=True)
+
     def _loop(self):
         while not self._stop.is_set():
             try:
@@ -312,8 +333,15 @@ class ProcessingWorker:
             encode_crf = _proc_cfg.hq_crf
             encode_preset = _proc_cfg.hq_preset
 
-        out_mp4 = self.out_wm_dir / mp4.name
-        if out_mp4.exists():
+        is_manual_pending = (
+            meta.get("offline_state") == "pending_manual_upload"
+            and isinstance(meta.get("meta_wm"), dict)
+            and mp4.parent != self.queue_dir
+        )
+        out_mp4 = mp4 if is_manual_pending else self.out_wm_dir / mp4.name
+        if is_manual_pending:
+            logger.info("Reutilizando artefato processado para upload manual: %s", mp4.name)
+        elif out_mp4.exists():
             meta.update(
                 {
                     "status": "watermarked",
@@ -774,7 +802,11 @@ class ProcessingWorker:
                     )
         else:
             # Cria pasta para pendências de upload dentro de failed_clips/
-            pend_dir = self.failed_dir_highlight / "upload_failed"
+            pending_patch: dict = {}
+            if self.pending_destination is not None:
+                pend_dir, pending_patch = self.pending_destination(meta)
+            else:
+                pend_dir = self.failed_dir_highlight / "upload_failed"
             pend_dir.mkdir(parents=True, exist_ok=True)
 
             # Determina motivo para log/sidecar
@@ -803,6 +835,7 @@ class ProcessingWorker:
                     }
                 )
                 meta["status"] = "upload_pending"
+                meta.update(pending_patch)
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
             except Exception:
                 pass
@@ -810,11 +843,10 @@ class ProcessingWorker:
             # Decide qual arquivo preservar: prioriza o arquivo realmente usado no upload
             file_to_preserve = None
             try:
-                # Se existiu arquivo processado (watermarked) use-o, senão o da fila
-                if not self.light_mode:
-                    cand = self.out_wm_dir / mp4.name
-                    if cand.exists():
-                        file_to_preserve = cand
+                # Se existiu arquivo processado (watermarked) use-o, senão o da fila.
+                cand = self.out_wm_dir / mp4.name
+                if cand.exists():
+                    file_to_preserve = cand
                 if file_to_preserve is None:
                     file_to_preserve = mp4
             except Exception:

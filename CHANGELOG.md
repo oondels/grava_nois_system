@@ -3,6 +3,7 @@
 ## 2026-08-13
 
 ### Added
+- `feat(rental)`: fila persistente `rental_clips_generated`, manifesto de agenda assinado e inventário/upload manual via MQTT para clipes gerados offline.
 - `feat(rental)`: probe CLI sem efeitos colaterais expõe versão do agente e confirma suporte ao contrato rental tenantless.
 - `feat(pico)`: firmware operacional V2 opt-in adiciona LEDs de estado, gestos administrativos, diagnóstico local, manutenção temporária e watchdog visual.
 - `feat(pico)`: controlador serial único publica câmera/MQTT/upload, mantém heartbeat e preserva os tokens V1 de restart/pull e botões dedicados.

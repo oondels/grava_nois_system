@@ -6,6 +6,8 @@
 - Rejeições `rental_not_found_for_capture`, `rental_upload_grace_expired` e de proprietário/device são definitivas e não geram retry.
 - A mesma classificação definitiva se aplica quando a rejeição ocorre no finalize; o item não pode permanecer em `upload_failed`.
 - O device nunca escolhe `rental_id` ou usuário: envia `captured_at` assinado e a API faz a resolução autoritativa.
+- A associação local offline usa somente manifesto de agenda HMAC emitido pela API; sem correspondência, o clipe fica em quarentena por até `GN_RENTAL_QUARANTINE_TTL_HOURS`.
+- Não existe retry automático da fila rental ao reconectar. Inventário/upload exigem comando MQTT assinado; `endsAt + uploadGraceHours` e cancelamento excluem os arquivos locais.
 
 ## Trigger and time-window rules
 
@@ -41,7 +43,7 @@ O contrato completo dos dois modelos esta em [`docs/PICO_MODELS.md`](../../../do
 - câmera `READY` exige todas as câmeras habilitadas com FFmpeg vivo e buffer recente; subconjunto pronto é `DEGRADED`;
 - diagnóstico local valida serial, câmera e buffer; MQTT desconectado é informado pelo LED, mas não reprova o diagnóstico;
 - heartbeat edge-Pico ocorre a cada 2 s; ausência por 10 s gera alerta visual, sem restart automático;
-- estado de locação está reservado no protocolo, mas não é publicado enquanto não existir manifesto local confiável para operação rental offline.
+- o manifesto rental local já é confiável e assinado, mas o estado visual de locação permanece reservado até ser integrado ao monitor operacional do Pico;
 - rejeições definitivas por locação inexistente, grace period ou janela permitida geram feedback visual quando o Pico V2 está conectado.
 
 ## Queue and retry rules

@@ -5,6 +5,9 @@
 - Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT mantêm `client_id=null` e `venue_id=null`.
 - `device_id`, timestamp, nonce e assinatura HMAC permanecem obrigatórios; `X-Client-Id` é omitido e o backend resolve cliente/locação pelo device e `captured_at`.
 - A resposta de metadata segue `{ data: { clip: { clip_id, upload_url, ... } } }`; worker e retry usam um extrator comum e rejeitam respostas sem objeto de clipe.
+- Na conexão MQTT, o edge publica `rental/schedule/request`; a API responde em `rental/schedule/desired` com intervalos, tolerâncias e locações canceladas.
+- A API publica `rental/clips/request` com ação `inventory` ou `upload`; o edge responde em `rental/clips/reported` com contagem, bytes e resultado, sem expor paths locais.
+- Os quatro tópicos usam JSON canônico, HMAC-SHA256/base64 por `DEVICE_SECRET`, `device_id`, `request_id` e expiração curta nos comandos da API. Mensagem inválida, expirada ou divergente é rejeitada sem executar upload/exclusão.
 
 ## Environment and settings
 
@@ -56,6 +59,8 @@ Variáveis importantes:
 - `DEV`
 - `GN_TRIGGER_MAX_WORKERS`
 - `GN_AGENT_VERSION`
+- `GN_RENTAL_CLIPS_DIR`
+- `GN_RENTAL_QUARANTINE_TTL_HOURS`
 
 ### RTSP tuning
 
