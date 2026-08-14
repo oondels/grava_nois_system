@@ -68,6 +68,12 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
     if post is not None and (not isinstance(post, int) or not (1 <= post <= 60)):
         errors.append("capture.postSegments deve ser inteiro entre 1 e 60")
 
+    buffer_seconds = capture.get("bufferSeconds")
+    if buffer_seconds is not None and (
+        not isinstance(buffer_seconds, int) or isinstance(buffer_seconds, bool) or buffer_seconds < 1
+    ):
+        errors.append("capture.bufferSeconds deve ser inteiro >= 1")
+
     rtsp = capture.get("rtsp") or {}
     if not isinstance(rtsp, dict):
         errors.append("capture.rtsp deve ser um objeto")
@@ -145,7 +151,7 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
 
     # --- cameras ---
     cameras = data.get("cameras")
-    if cameras is not None:
+    if "cameras" in data:
         if not isinstance(cameras, list):
             errors.append("cameras deve ser uma lista")
         else:
@@ -167,6 +173,37 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
                 cam_post = cam.get("postSegments")
                 if cam_post is not None and (not isinstance(cam_post, int) or not (1 <= cam_post <= 60)):
                     errors.append(f"cameras[{i}].postSegments deve ser inteiro entre 1 e 60")
+
+    if (
+        isinstance(buffer_seconds, int)
+        and not isinstance(buffer_seconds, bool)
+        and buffer_seconds >= 1
+        and isinstance(seg, int)
+        and 1 <= seg <= 10
+    ):
+        global_pre = pre if isinstance(pre, int) and 1 <= pre <= 60 else 6
+        global_post = post if isinstance(post, int) and 1 <= post <= 60 else 3
+        required_segments = global_pre + global_post + 2
+        if isinstance(cameras, list):
+            for cam in cameras:
+                if not isinstance(cam, dict):
+                    continue
+                cam_pre = cam.get("preSegments", global_pre)
+                cam_post = cam.get("postSegments", global_post)
+                if (
+                    isinstance(cam_pre, int)
+                    and 1 <= cam_pre <= 60
+                    and isinstance(cam_post, int)
+                    and 1 <= cam_post <= 60
+                ):
+                    required_segments = max(required_segments, cam_pre + cam_post + 2)
+        required_seconds = required_segments * seg
+        if buffer_seconds < required_seconds:
+            errors.append(
+                "capture.bufferSeconds deve ser >= "
+                f"{required_seconds} para comportar preSegments + postSegments "
+                "+ margem de 2 segmentos"
+            )
 
     # --- triggers ---
     triggers = data.get("triggers") or {}
@@ -276,6 +313,16 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
     if not isinstance(broker, dict):
         errors.append("mqtt.broker deve ser um objeto")
         broker = {}
+
+    b_host = broker.get("host")
+    if b_host is not None:
+        if not isinstance(b_host, str):
+            errors.append("mqtt.broker.host deve ser string")
+        elif "://" in b_host:
+            errors.append(
+                "mqtt.broker.host deve conter somente hostname; "
+                "use GN_MQTT_BROKER_URL para mqtt:// ou mqtts://"
+            )
 
     b_port = broker.get("port")
     if b_port is not None and (not isinstance(b_port, int) or not (1 <= b_port <= 65535)):

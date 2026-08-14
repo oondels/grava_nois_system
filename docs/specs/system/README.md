@@ -29,6 +29,13 @@ Este arquivo é a porta de entrada do edge system para leitura humana e lookup p
 - Source: [`main.py`](../../../main.py), [`src/utils/pico.py`](../../../src/utils/pico.py), [`src/utils/time_utils.py`](../../../src/utils/time_utils.py)
 - Related: cooldown, GN_TRIGGER_SOURCE, GN_PICO_PORT
 
+## Pico V1 and V2
+
+- Keywords: pico v1, pico v2, firmware, led, gesture, maintenance, watchdog, shutdown
+- File: [PICO_MODELS.md](../../PICO_MODELS.md), [BUSINESS_RULES.md](./BUSINESS_RULES.md), [INTEGRATIONS.md](./INTEGRATIONS.md)
+- Source: [`raspberry_pico/main.py`](../../../raspberry_pico/main.py), [`raspberry_pico/main_operational_v2.py`](../../../raspberry_pico/main_operational_v2.py), [`src/services/pico_serial_controller.py`](../../../src/services/pico_serial_controller.py), [`src/services/pico_operations.py`](../../../src/services/pico_operations.py)
+- Related: compatibilidade V1, protocolo V2, estados visuais, ações administrativas, watchdog
+
 ## Worker and Queue
 
 - Keywords: queue_raw, processing worker, retry, failed_clips, sidecar, lock

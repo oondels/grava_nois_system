@@ -7,13 +7,16 @@ import json
 import logging
 import os
 import shutil
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from src.config.config_loader import get_config_path, get_effective_config, reset_config_cache
 from src.config.config_schema import validate_config_dict
+from src.config.operational_env import persist_operational_config, restore_env_content
 from src.security.hmac import hmac_sha256_base64
+from src.services.docker_action_request import DockerActionRequestService
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
 from src.utils.logger import setup_logger
 
@@ -157,13 +160,14 @@ class DeviceConfigService:
         mqtt_client: MQTTClient,
         *,
         device_id: str,
-        client_id: str,
+        client_id: str | None,
         venue_id: str | None,
         desired_topic: str,
         reported_topic: str,
         request_topic: str | None = None,
         state_topic: str | None = None,
         config_path: Path | None = None,
+        env_path: Path | None = None,
         device_secret: str | None = None,
         agent_version: str = "local-dev",
     ):
@@ -176,6 +180,8 @@ class DeviceConfigService:
         self.request_topic = request_topic
         self.state_topic = state_topic or reported_topic.replace("/reported", "/state")
         self.config_path = config_path or get_config_path()
+        configured_env_path = env_path or os.getenv("GN_HOST_ENV_PATH")
+        self.env_path = Path(configured_env_path) if configured_env_path else None
         self.pending_path = self.config_path.with_name("config.pending.json")
         self.backup_path = self.config_path.with_name("config.backup.json")
         self.state_path = self.config_path.with_name("config.state.json")
@@ -234,7 +240,9 @@ class DeviceConfigService:
             )
             if topic == self.desired_topic:
                 result = self.process_desired_config(payload)
-                self.publish_report(result)
+                published = self.publish_report(result)
+                if published and result.restart_after_apply:
+                    self._schedule_restart()
                 return
             if self.request_topic and topic == self.request_topic:
                 self.process_config_request(payload)
@@ -271,7 +279,7 @@ class DeviceConfigService:
             raise RemoteConfigError("type inválido para config remota")
         if _required_str(payload, "device_id") != self.device_id:
             raise RemoteConfigError("device_id divergente")
-        if _required_str(payload, "client_id") != self.client_id:
+        if (payload.get("client_id") or None) != self.client_id:
             raise RemoteConfigError("client_id divergente")
         if (payload.get("venue_id") or None) != self.venue_id:
             raise RemoteConfigError("venue_id divergente")
@@ -298,60 +306,76 @@ class DeviceConfigService:
             requires_restart = bool(requires_restart) or _requires_restart(
                 current_config, desired_config
             )
+        restart_after_apply = bool(payload.get("restart_after_apply", False))
+        if restart_after_apply and not requires_restart:
+            raise RemoteConfigError("restart_after_apply sem configuração pendente de restart")
 
-        self._write_pending(desired_config)
-        _audit_log(
-            "config_pending_written",
-            deviceId=self.device_id,
-            configVersion=config_version,
-            desiredHash=desired_hash,
-            pendingPath=str(self.pending_path),
-            requiresRestart=bool(requires_restart),
-        )
-        if requires_restart:
+        previous_env: str | None = None
+        previous_pending = self.pending_path.read_bytes() if self.pending_path.exists() else None
+        try:
+            if self.env_path is not None:
+                previous_env = persist_operational_config(self.env_path, desired_config)
+                _audit_log(
+                    "config_persisted_to_env",
+                    deviceId=self.device_id,
+                    configVersion=config_version,
+                    envPath=str(self.env_path),
+                )
+
+            self._write_pending(desired_config)
+            _audit_log(
+                "config_pending_written",
+                deviceId=self.device_id,
+                configVersion=config_version,
+                desiredHash=desired_hash,
+                pendingPath=str(self.pending_path),
+                requiresRestart=bool(requires_restart),
+            )
+            if requires_restart:
+                self._write_state(
+                    {
+                        **state,
+                        "pendingVersion": config_version,
+                        "pendingHash": desired_hash,
+                        "pendingCorrelationId": correlation_id,
+                        "lastStatus": "pending_restart",
+                        "lastUpdatedAt": _now_iso(),
+                    }
+                )
+                return _ReportResult(
+                    status="pending_restart",
+                    config_version=config_version,
+                    correlation_id=correlation_id,
+                    requires_restart=True,
+                    reported_hash=desired_hash,
+                    reported_config=None,
+                    rejection_reason=None,
+                    pending_version=config_version,
+                    restart_after_apply=restart_after_apply,
+                )
+
+            self._promote_pending(desired_config)
             self._write_state(
                 {
                     **state,
-                    "pendingVersion": config_version,
-                    "pendingHash": desired_hash,
-                    "pendingCorrelationId": correlation_id,
-                    "lastStatus": "pending_restart",
+                    "lastAppliedVersion": config_version,
+                    "lastAppliedHash": desired_hash,
+                    "lastAppliedAt": _now_iso(),
+                    "pendingVersion": None,
+                    "pendingHash": None,
+                    "pendingCorrelationId": None,
+                    "lastStatus": "applied",
                     "lastUpdatedAt": _now_iso(),
                 }
             )
-            _audit_log(
-                "config_state_updated",
-                deviceId=self.device_id,
-                configVersion=config_version,
-                statePath=str(self.state_path),
-                lastStatus="pending_restart",
-                pendingVersion=config_version,
-            )
-            return _ReportResult(
-                status="pending_restart",
-                config_version=config_version,
-                correlation_id=correlation_id,
-                requires_restart=True,
-                reported_hash=desired_hash,
-                reported_config=None,
-                rejection_reason=None,
-                pending_version=config_version,
-            )
-
-        self._promote_pending(desired_config)
-        self._write_state(
-            {
-                **state,
-                "lastAppliedVersion": config_version,
-                "lastAppliedHash": desired_hash,
-                "lastAppliedAt": _now_iso(),
-                "pendingVersion": None,
-                "pendingHash": None,
-                "pendingCorrelationId": None,
-                "lastStatus": "applied",
-                "lastUpdatedAt": _now_iso(),
-            }
-        )
+        except Exception:
+            if self.env_path is not None and previous_env is not None:
+                restore_env_content(self.env_path, previous_env)
+            if previous_pending is None:
+                self.pending_path.unlink(missing_ok=True)
+            else:
+                self.pending_path.write_bytes(previous_pending)
+            raise
         _audit_log(
             "config_applied_immediately",
             deviceId=self.device_id,
@@ -370,6 +394,18 @@ class DeviceConfigService:
             rejection_reason=None,
             last_applied_version=config_version,
         )
+
+    def _schedule_restart(self) -> None:
+        def request_restart() -> None:
+            requested = DockerActionRequestService.from_env(logger=mqtt_logger).request_action(
+                "restart_container",
+                source="remote_config",
+                fallback_on_failure=True,
+            )
+            if not requested:
+                mqtt_logger.warning("Runner Docker indisponível para aplicar configuração")
+
+        threading.Timer(3.0, request_restart).start()
 
     def publish_report(self, result: "_ReportResult") -> bool:
         payload: dict[str, Any] = {
@@ -424,7 +460,7 @@ class DeviceConfigService:
             raise RemoteConfigError("type inválido para solicitação de snapshot")
         if _required_str(payload, "device_id") != self.device_id:
             raise RemoteConfigError("device_id divergente")
-        if _required_str(payload, "client_id") != self.client_id:
+        if (payload.get("client_id") or None) != self.client_id:
             raise RemoteConfigError("client_id divergente")
         if (payload.get("venue_id") or None) != self.venue_id:
             raise RemoteConfigError("venue_id divergente")
@@ -593,6 +629,7 @@ class _ReportResult:
         rejection_reason: str | None,
         last_applied_version: int | None = None,
         pending_version: int | None = None,
+        restart_after_apply: bool = False,
     ):
         self.status = status
         self.config_version = config_version
@@ -603,6 +640,7 @@ class _ReportResult:
         self.rejection_reason = rejection_reason
         self.last_applied_version = last_applied_version
         self.pending_version = pending_version
+        self.restart_after_apply = restart_after_apply
 
 
 def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:
@@ -728,8 +766,7 @@ def _validate_signature(
 
 
 def _canonical_signature_payload(payload: dict[str, Any], desired_hash: str) -> str:
-    return ":".join(
-        [
+    parts = [
             "v1",
             "CONFIG_DESIRED",
             _required_str(payload, "device_id"),
@@ -739,7 +776,9 @@ def _canonical_signature_payload(payload: dict[str, Any], desired_hash: str) -> 
             _required_str(payload, "expires_at"),
             desired_hash,
         ]
-    )
+    if "restart_after_apply" in payload:
+        parts.append("restart" if payload.get("restart_after_apply") else "no_restart")
+    return ":".join(parts)
 
 
 def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:

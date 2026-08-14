@@ -84,7 +84,7 @@ class DeviceEnvService:
         mqtt_client: MQTTClient,
         *,
         device_id: str,
-        client_id: str,
+        client_id: str | None,
         venue_id: str | None,
         request_topic: str,
         desired_topic: str,

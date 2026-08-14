@@ -18,8 +18,8 @@ from src.services.docker_action_request import DockerActionRequestService
 class SendPicoCommandTests(unittest.TestCase):
     """Unit tests for the _send_pico_command helper."""
 
-    @patch("main.os.write")
-    @patch("main.select.select")
+    @patch("src.services.pico_serial_controller.os.write")
+    @patch("src.services.pico_serial_controller.select.select")
     def test_sends_command_with_newline(
         self, mock_select: MagicMock, mock_write: MagicMock
     ) -> None:
@@ -31,8 +31,8 @@ class SendPicoCommandTests(unittest.TestCase):
         self.assertTrue(result)
         mock_write.assert_called_once_with(42, b"GRN_STARTED\n")
 
-    @patch("main.select.select")
-    @patch("main.os.write", side_effect=BlockingIOError)
+    @patch("src.services.pico_serial_controller.select.select")
+    @patch("src.services.pico_serial_controller.os.write", side_effect=BlockingIOError)
     def test_returns_false_on_blocking_io(
         self, _mock_write: MagicMock, mock_select: MagicMock
     ) -> None:
@@ -43,8 +43,11 @@ class SendPicoCommandTests(unittest.TestCase):
         self.assertFalse(result)
         mock_logger.warning.assert_not_called()
 
-    @patch("main.select.select")
-    @patch("main.os.write", side_effect=OSError("device not available"))
+    @patch("src.services.pico_serial_controller.select.select")
+    @patch(
+        "src.services.pico_serial_controller.os.write",
+        side_effect=OSError("device not available"),
+    )
     def test_returns_false_on_os_error(
         self, _mock_write: MagicMock, mock_select: MagicMock
     ) -> None:
@@ -55,8 +58,11 @@ class SendPicoCommandTests(unittest.TestCase):
         self.assertFalse(result)
         mock_logger.error.assert_called()
 
-    @patch("main.select.select")
-    @patch("main.os.write", side_effect=OSError("device not available"))
+    @patch("src.services.pico_serial_controller.select.select")
+    @patch(
+        "src.services.pico_serial_controller.os.write",
+        side_effect=OSError("device not available"),
+    )
     def test_does_not_propagate_exception(
         self, _mock_write: MagicMock, mock_select: MagicMock
     ) -> None:
@@ -67,8 +73,8 @@ class SendPicoCommandTests(unittest.TestCase):
         except Exception:
             self.fail("_send_pico_command must not propagate exceptions")
 
-    @patch("main.os.write")
-    @patch("main.select.select")
+    @patch("src.services.pico_serial_controller.os.write")
+    @patch("src.services.pico_serial_controller.select.select")
     def test_strips_whitespace_from_command(
         self, mock_select: MagicMock, mock_write: MagicMock
     ) -> None:
@@ -77,8 +83,8 @@ class SendPicoCommandTests(unittest.TestCase):
         _send_pico_command(42, "  GRN_STARTED  ", _logger=MagicMock())
         mock_write.assert_called_once_with(42, b"GRN_STARTED\n")
 
-    @patch("main.os.write")
-    @patch("main.select.select")
+    @patch("src.services.pico_serial_controller.os.write")
+    @patch("src.services.pico_serial_controller.select.select")
     def test_completes_partial_write(
         self, mock_select: MagicMock, mock_write: MagicMock
     ) -> None:
@@ -96,7 +102,7 @@ class SendPicoCommandTests(unittest.TestCase):
 class PicoStartedHandshakeTests(unittest.TestCase):
     """Unit tests for retrying GRN_STARTED until ACK is received."""
 
-    @patch("main._send_pico_command")
+    @patch("src.services.pico_serial_controller.send_pico_command")
     def test_retries_after_initial_failure(self, mock_send: MagicMock) -> None:
         mock_send.side_effect = [False, True]
         handshake = PicoStartedHandshake()
@@ -107,7 +113,7 @@ class PicoStartedHandshakeTests(unittest.TestCase):
         self.assertTrue(handshake.maybe_send(42, now=0.25, _logger=MagicMock()))
         self.assertEqual(mock_send.call_count, 2)
 
-    @patch("main._send_pico_command")
+    @patch("src.services.pico_serial_controller.send_pico_command")
     def test_ack_stops_retries(self, mock_send: MagicMock) -> None:
         handshake = PicoStartedHandshake()
 
@@ -116,7 +122,7 @@ class PicoStartedHandshakeTests(unittest.TestCase):
         self.assertFalse(handshake.maybe_send(42, now=10.0, _logger=MagicMock()))
         mock_send.assert_called_once()
 
-    @patch("main._send_pico_command", return_value=False)
+    @patch("src.services.pico_serial_controller.send_pico_command", return_value=False)
     def test_warning_is_throttled_until_ack_timeout(
         self,
         mock_send: MagicMock,

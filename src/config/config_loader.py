@@ -136,6 +136,8 @@ class CaptureParams:
     # pre/post_segments usados quando há fonte RTSP detectada
     pre_segments: int = 6
     post_segments: int = 3
+    # None calcula max(40, janela de replay + margem de dois segmentos).
+    buffer_seconds: Optional[int] = None
     rtsp: RtspConfig = field(default_factory=RtspConfig)
     v4l2: V4l2Config = field(default_factory=V4l2Config)
 
@@ -269,8 +271,10 @@ class OperationalConfig:
     # updated_at: preenchido pelo loader quando carregado de config.json
     updated_at: Optional[str] = None
     capture: CaptureParams = field(default_factory=CaptureParams)
-    # cameras: lista de câmeras de config.json; vazia = usar fontes legadas de env
+    # cameras_managed distingue `cameras` ausente de `cameras: []` no config.json.
+    # Quando True, a lista gerenciada e autoritativa, inclusive vazia.
     cameras: list[CameraConfig] = field(default_factory=list)
+    cameras_managed: bool = False
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     operation_window: OperationWindowConfig = field(default_factory=OperationWindowConfig)
@@ -295,7 +299,12 @@ def _resolve_env_ref(value: Optional[str]) -> Optional[str]:
     stripped = value.strip()
     if stripped.startswith("env:"):
         var_name = stripped[4:].strip()
-        return (os.getenv(var_name) or "").strip() or None
+        if not var_name:
+            raise ValueError("referencia env: sem nome de variavel")
+        resolved = (os.getenv(var_name) or "").strip()
+        if not resolved:
+            raise ValueError(f"variavel de ambiente referenciada ausente: {var_name}")
+        return resolved
     if stripped.startswith("secretRef:"):
         _logger.warning(
             "secretRef não resolvido nesta fase: %r. "
@@ -383,9 +392,14 @@ def _parse_mqtt_host_and_port(
 
     parsed = urlparse(raw)
     scheme = (parsed.scheme or "").lower()
+    if scheme not in {"mqtt", "mqtts"}:
+        raise ValueError(
+            "GN_MQTT_BROKER_URL aceita somente mqtt:// ou mqtts://; "
+            f"protocolo recebido: {scheme or 'ausente'}"
+        )
     host = parsed.hostname or ""
     port = parsed.port or fallback_port
-    use_tls = scheme in {"mqtts", "ssl", "tls"}
+    use_tls = scheme == "mqtts"
     return host, port, use_tls
 
 
@@ -426,6 +440,7 @@ def _build_from_env() -> OperationalConfig:
             segment_seconds=_env_int("GN_SEG_TIME", 1),
             pre_segments=_env_int("GN_RTSP_PRE_SEGMENTS", 6),
             post_segments=_env_int("GN_RTSP_POST_SEGMENTS", 3),
+            buffer_seconds=_env_int_nullable("GN_MAX_BUFFER_SECONDS"),
             rtsp=RtspConfig(
                 max_retries=_env_int("GN_RTSP_MAX_RETRIES", 10),
                 timeout_seconds=_env_int("GN_RTSP_TIMEOUT", 5),
@@ -448,8 +463,9 @@ def _build_from_env() -> OperationalConfig:
                 video_size=_env_str("GN_VIDEO_SIZE", "1280x720") or "1280x720",
             ),
         ),
-        # cameras vazia = load_capture_configs() usará GN_CAMERAS_JSON/GN_RTSP_URLS/GN_RTSP_URL
+        # Sem config.json gerenciado, load_capture_configs() usa as fontes legadas.
         cameras=[],
+        cameras_managed=False,
         triggers=TriggerConfig(
             source=(_env_str("GN_TRIGGER_SOURCE", "auto") or "auto").lower(),
             max_workers=_env_int_nullable("GN_TRIGGER_MAX_WORKERS"),
@@ -564,14 +580,16 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
         segment_seconds=max(1, _get(cap_d, "segmentSeconds", base.capture.segment_seconds)),
         pre_segments=max(1, _get(cap_d, "preSegments", base.capture.pre_segments)),
         post_segments=max(1, _get(cap_d, "postSegments", base.capture.post_segments)),
+        buffer_seconds=_get(cap_d, "bufferSeconds", base.capture.buffer_seconds),
         rtsp=rtsp,
         v4l2=v4l2,
     )
 
     # cameras
+    cameras_managed = "cameras" in data
     cameras_raw = data.get("cameras")
     cameras: list[CameraConfig] = base.cameras
-    if isinstance(cameras_raw, list) and cameras_raw:
+    if isinstance(cameras_raw, list):
         cameras = []
         for cam in cameras_raw:
             if not isinstance(cam, dict):
@@ -676,6 +694,7 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
         updated_at=data.get("updatedAt"),
         capture=capture,
         cameras=cameras,
+        cameras_managed=cameras_managed,
         triggers=triggers,
         processing=processing,
         operation_window=operation_window,

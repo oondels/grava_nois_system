@@ -12,6 +12,7 @@
     "segmentSeconds": 1,
     "preSegments": 6,
     "postSegments": 3,
+    "bufferSeconds": 40,
     "rtsp": {
       "_comment": "Tuning de captura RTSP. Todos exigem restart.",
       "_profiles": "profile=hq: passthrough (-c:v copy), ideal para câmeras com timestamps estáveis. profile=compatible: reencode libx264 com fps_mode=vfr, tolerante a DTS/PTS ruins. null = inferido por lightMode (false→hq, true→compatible).",
@@ -82,7 +83,7 @@
 
   "processing": {
     "_comment": "Processamento de clips. lightMode e maxAttempts exigem restart do worker.",
-    "_modes": "lightMode=false: alta qualidade (hqCrf+hqPreset). lightMode=true: modo leve para hardware fraco (lmCrf+lmPreset). Watermark sempre ativa em ambos os modos.",
+    "_modes": "lightMode=false: alta qualidade (hqCrf+hqPreset). lightMode=true: modo leve para hardware fraco (lmCrf+lmPreset). Marca Grava Nois sempre ativa; logo do cliente controlada por GN_CLIENT_WATERMARK_ENABLED no .env.",
     "lightMode": false,
     "maxAttempts": 3,
     "verticalFormat": false,

@@ -62,6 +62,8 @@ class GravaNoisAPIClient:
             raise RuntimeError("VENUE_ID (ou GN_VENUE_ID) não configurado")
         if self.device_mode == "rental" and self.venue_id:
             raise RuntimeError("GN_VENUE_ID deve ficar vazio para device rental")
+        if self.device_mode == "rental":
+            self.client_id = None
         self.device_id = os.getenv("DEVICE_ID") or os.getenv("GN_DEVICE_ID") or ""
         self.device_secret = (
             os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
@@ -73,10 +75,30 @@ class GravaNoisAPIClient:
 
         if not self.api_base:
             logger.warning("API base URL não configurada (GN_API_BASE ou API_BASE_URL)")
+        else:
+            if self.device_mode == "fixed" and not self.client_id:
+                raise RuntimeError("CLIENT_ID (ou GN_CLIENT_ID) não configurado")
+            if not self.device_id:
+                raise RuntimeError("DEVICE_ID não configurado para assinatura HMAC")
+            if not self.device_secret:
+                raise RuntimeError("DEVICE_SECRET não configurado para assinatura HMAC")
 
     @staticmethod
     def _is_truthy(value: Optional[str]) -> bool:
         return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def extract_clip_registration(response: Dict[str, Any]) -> Dict[str, Any]:
+        """Normaliza o envelope oficial e o formato legado de registro de clipe."""
+        data = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(data, dict):
+            raise RuntimeError("Resposta de registro sem objeto data")
+        clip = data.get("clip")
+        if isinstance(clip, dict):
+            return clip
+        if isinstance(data.get("clip_id"), str):
+            return data
+        raise RuntimeError("Resposta de registro sem objeto clip")
 
     @staticmethod
     def _extract_path(url: str) -> str:
@@ -121,7 +143,7 @@ class GravaNoisAPIClient:
             raise RuntimeError(
                 "client_id inconsistente: path e configuração do device divergem"
             )
-        if not resolved_client_id:
+        if self.device_mode == "fixed" and not resolved_client_id:
             raise RuntimeError("CLIENT_ID não configurado para assinatura HMAC")
 
         return sign_request(
@@ -130,7 +152,7 @@ class GravaNoisAPIClient:
             body_string=body_string,
             device_id=self.device_id,
             device_secret=self.device_secret,
-            client_id=resolved_client_id,
+            client_id=resolved_client_id if self.device_mode == "fixed" else None,
             content_type="application/json",
         )
 
@@ -249,7 +271,7 @@ class GravaNoisAPIClient:
         """
         if not self.api_base:
             raise RuntimeError("API base URL não configurada")
-        if not self.client_id:
+        if self.device_mode == "fixed" and not self.client_id:
             raise RuntimeError("CLIENT_ID (ou GN_CLIENT_ID) não configurado")
         if self.device_mode == "fixed" and not self.venue_id:
             raise RuntimeError("VENUE_ID (ou GN_VENUE_ID) não configurado")
@@ -357,7 +379,7 @@ class GravaNoisAPIClient:
         """
         if not self.api_base:
             raise RuntimeError("API base URL não configurada")
-        if not self.client_id:
+        if self.device_mode == "fixed" and not self.client_id:
             raise RuntimeError("CLIENT_ID (ou GN_CLIENT_ID) não configurado")
         if not str(sha256).strip():
             raise RuntimeError("sha256 inválido para finalização de upload")

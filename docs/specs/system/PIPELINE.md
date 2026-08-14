@@ -3,6 +3,9 @@
 ## Registro no modo rental
 
 O processamento local é idêntico. Na reserva do upload, o cliente envia metadata para `POST /api/videos/rental/metadata`; upload S3 e finalize continuam usando os contratos assinados existentes. O `captured_at` original determina a locação, e não o horário do retry.
+Tanto o worker quanto `retry_upload.py` extraem o registro do envelope oficial `{ data: { clip } }` (com fallback legado). Erro definitivo de autorização/período/device no finalize é propagado para a política externa, que remove vídeo e sidecar locais.
+
+Quando o envio rental falha, o worker move o artefato já processado e o sidecar para `rental_clips_generated/{rentalId}`. Sem agenda assinada válida, usa `quarantine/` por no máximo 48 horas. A reconexão apenas atualiza o manifesto; `rental/clips/request` com ação `upload` é o único gatilho de reenvio e reutiliza o artefato sem aplicar watermark novamente.
 
 ## 1. Capture bootstrap
 
@@ -26,7 +29,11 @@ Entradas possíveis:
 
 ## 2. Continuous capture
 
-FFmpeg gera segmentos contínuos de 1s ou `GN_SEG_TIME`.
+FFmpeg gera segmentos contínuos de 1s ou `capture.segmentSeconds`
+(`GN_SEG_TIME` no modo legado). O buffer circular usa
+`capture.bufferSeconds`/`GN_MAX_BUFFER_SECONDS`; sem override, sua capacidade é
+`max(40, (preSegments + postSegments + 2) × segmentSeconds)`, incluindo dois
+segmentos de margem.
 
 Perfis de captura RTSP (`capture.rtsp.profile`):
 
@@ -112,6 +119,9 @@ Campos típicos do sidecar:
 - `seg_time`
 - `status`
 
+No sidecar v2 da clean architecture, o checkpoint `REGISTERED` guarda apenas o ID remoto. A `upload_url` e seus headers assinados ficam somente em memória e são renovados por novo registro idempotente após restart. O checkpoint `UPLOADED` persiste tamanho, SHA-256 e ETag para que o finalize mantenha a validação de integridade sem repetir o upload.
+Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status intermediário e torna o job `FINALIZED`, evitando nova finalização.
+
 ## 6. Worker main path
 
 `ProcessingWorker._scan_once()`:
@@ -125,7 +135,7 @@ Campos típicos do sidecar:
 
 ### Normal mode (light_mode=false)
 
-1. aplica watermark com `hqCrf` + `hqPreset` (alta qualidade);
+1. aplica a watermark Grava Nóis e, quando `GN_CLIENT_WATERMARK_ENABLED=1`, a logo do cliente, usando `hqCrf` + `hqPreset` (alta qualidade);
 2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 3. salva resultado em `highlights_wm/`;
 4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
@@ -137,9 +147,9 @@ Campos típicos do sidecar:
 
 ### Light mode (light_mode=true)
 
-Modo para hardware fraco — watermark é sempre aplicada, mas com encode mais leve:
+Modo para hardware fraco — a regra de branding é a mesma do modo normal, mas com encode mais leve:
 
-1. aplica watermark com `lmCrf` + `lmPreset` (menor custo de CPU);
+1. aplica a watermark Grava Nóis e a logo opcional do cliente com `lmCrf` + `lmPreset` (menor custo de CPU);
 2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 3. salva resultado em `highlights_wm/`;
 4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;

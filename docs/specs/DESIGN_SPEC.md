@@ -3,11 +3,21 @@
 ## Modo rental
 
 O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a dependência de venue e usa o endpoint de metadata específico; veja `system/CONFIGURATION.md`, `PIPELINE.md` e `BUSINESS_RULES.md`.
-Na configuração remota MQTT, o modo rental mantém `venue_id` presente com valor `null`.
+Na configuração remota MQTT, o modo rental envia `client_id=null` e `venue_id=null`; a API resolve o cliente pelo contrato temporal.
+Registro inicial e retry compartilham a mesma normalização do envelope de clipe; rejeições definitivas no finalize encerram o item local em vez de reiniciar o ciclo.
+A identidade da clean architecture aplica as mesmas invariantes: `fixed` exige venue e `rental` exige venue ausente. Checkpoints de delivery nunca persistem credenciais temporárias da URL assinada.
+O probe `python -m src.cli.rental_compat_probe` confirma, sem iniciar o pipeline, o contrato rental tenantless e a versão declarada em `GN_AGENT_VERSION`.
+Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclusive vazio; fontes legadas só participam quando o campo está ausente.
+O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
+No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
 
 ## 1. Overview
 
 `grava_nois_system` é o software edge de captura e upload do ecossistema Grava Nóis. Esta spec é a entrada principal para lookup por code agents e auditoria técnica.
+
+A watermark institucional permanece em todos os novos clipes processados. A logo secundária do cliente é controlada exclusivamente pelo `.env` com `GN_CLIENT_WATERMARK_ENABLED`, habilitada por padrão.
+
+O Pico possui modelos V1 legado e V2 operacional separados. O contrato de pinagem, gestos, LEDs e protocolo está em [`docs/PICO_MODELS.md`](../PICO_MODELS.md); regras e configuração ficam em `system/BUSINESS_RULES.md` e `system/CONFIGURATION.md`.
 
 Objetivo desta estrutura:
 

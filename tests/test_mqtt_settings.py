@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import src.config.config_loader as config_loader
 from src.config.config_loader import reset_config_cache
+from src.config.config_schema import validate_config_dict
 from src.config.settings import load_mqtt_config
 
 
@@ -72,6 +73,41 @@ class MQTTSettingsTests(unittest.TestCase):
         self.assertEqual(config.host, "broker.internal")
         self.assertEqual(config.port, 1884)
         self.assertEqual(config.qos, 2)
+
+    def test_rejects_websocket_and_unsupported_broker_url_schemes(self) -> None:
+        for scheme in ("ws", "wss", "http", "ssl", "tls"):
+            with self.subTest(scheme=scheme):
+                reset_config_cache()
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "GN_MQTT_ENABLED": "1",
+                            "GN_MQTT_BROKER_URL": f"{scheme}://broker.example.com:8883",
+                        },
+                        clear=True,
+                    ),
+                    self.assertRaisesRegex(
+                        ValueError,
+                        "aceita somente mqtt:// ou mqtts://",
+                    ),
+                ):
+                    load_mqtt_config()
+
+    def test_managed_broker_host_rejects_url_instead_of_treating_it_as_tcp_host(self) -> None:
+        errors = validate_config_dict(
+            {
+                "mqtt": {
+                    "broker": {
+                        "host": "wss://broker.example.com/mqtt",
+                        "port": 8883,
+                        "tls": True,
+                    }
+                }
+            }
+        )
+
+        self.assertTrue(any("mqtt.broker.host deve conter somente hostname" in e for e in errors))
 
     def test_topic_for_rejects_device_id_with_topic_separators_or_wildcards(self) -> None:
         with patch.dict(

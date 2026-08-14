@@ -200,14 +200,13 @@ flowchart TD
 
     Process --> Mode{light_mode?}
 
-    Mode -->|Não| WM[add_image_watermark<br/>centro]
-    WM --> SaveWM[Atomic replace para<br/>highlights_wm/]
+    Mode -->|Não| WMHQ[Branding obrigatório +<br/>logo cliente opcional<br/>encode HQ]
+    Mode -->|Sim| WMLight[Mesmo branding<br/>encode light]
+    WMHQ --> SaveWM[Atomic replace para<br/>highlights_wm/]
+    WMLight --> SaveWM
     SaveWM --> UpdateJSON1[Atualiza JSON:<br/>status=watermarked<br/>wm_path, meta_wm]
 
-    Mode -->|Sim| UpdateJSON2[Atualiza JSON:<br/>status=ready_for_upload<br/>meta_raw]
-
     UpdateJSON1 --> Register
-    UpdateJSON2 --> Register
 
     Register[POST /api/videos/metadados] --> RegResult{Sucesso?}
 
@@ -434,13 +433,13 @@ grava_nois_system/
 ## Modos de Operação
 
 ### Light Mode (GN_LIGHT_MODE=1)
-- Aplica watermark com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
+- Aplica sempre a marca Grava Nóis e inclui a logo do cliente quando `GN_CLIENT_WATERMARK_ENABLED=1`, com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
 - Mantém upload do arquivo final processado
 - Menor uso de CPU/disco que o modo HQ
 - Ideal para Raspberry Pi 3B/4B com recursos limitados
 
 ### Modo Completo (GN_LIGHT_MODE=0)
-- Aplica watermark no centro
+- Aplica sempre a marca Grava Nóis e inclui a logo do cliente quando `GN_CLIENT_WATERMARK_ENABLED=1`
 - Reencoda vídeo com H.264 usando `GN_HQ_CRF` + `GN_HQ_PRESET`
 - Maior qualidade visual, porém mais pesado
 
@@ -451,6 +450,7 @@ grava_nois_system/
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `GN_LIGHT_MODE` | `0` | Ativa modo leve (1=sim, 0=não) |
+| `GN_CLIENT_WATERMARK_ENABLED` | `1` | Inclui a logo secundária do cliente; `0` mantém somente a marca Grava Nóis. Exige restart |
 | `GN_SEG_TIME` | `1` | Duração de cada segmento em segundos |
 | `GN_RTSP_URL` | - | URL da câmera RTSP (ex: rtsp://user:pass@ip:554/...) |
 | `GN_RTSP_MAX_RETRIES` | `10` | Tentativas de conexão com câmera |

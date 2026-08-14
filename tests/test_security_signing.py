@@ -75,16 +75,16 @@ class SecuritySigningTests(unittest.TestCase):
         )
         self.assertEqual(signed.headers["X-Client-Id"], "client-99")
 
-    def test_sign_request_requires_client_id_when_not_in_path(self) -> None:
-        with self.assertRaisesRegex(ValueError, "client_id"):
-            sign_request(
-                method="POST",
-                path="/api/videos/clip123/uploaded",
-                body_string="{}",
-                device_id="device-01",
-                device_secret="secret",
-                client_id=None,
-            )
+    def test_sign_request_omits_client_header_for_rental_path(self) -> None:
+        signed = sign_request(
+            method="POST",
+            path="/api/videos/clip123/uploaded",
+            body_string="{}",
+            device_id="device-01",
+            device_secret="secret",
+            client_id=None,
+        )
+        self.assertNotIn("X-Client-Id", signed.headers)
 
 
 if __name__ == "__main__":

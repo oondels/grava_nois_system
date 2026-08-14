@@ -5,6 +5,7 @@
 - **Arquivos principais**: `main.py`, `src/video/*`, `src/workers/processing_worker.py` e `src/services/mqtt/*`
 - **Dependências**: Python 3.10+, FFmpeg/ffprobe
 - **Fluxo**: _MQTT/status_ → _Captura contínua_ → _Highlight on-demand_ → _Fila local_ → _Watermark_ → _Registro no backend_ → _Upload por URL assinada_
+- **Pico V1 e V2**: consulte [PICO_MODELS.md](./PICO_MODELS.md) para escolher o firmware, conferir pinagem, gestos, protocolo serial e estados dos LEDs.
 
 ---
 
@@ -272,14 +273,15 @@ Gera uma imagem `.jpg` (meio do vídeo ou tempo específico) usando ffmpeg (`-ss
 
 ### `ProcessingWorker`
 
-Worker de varredura de diretório para preparar e enviar highlights. Em modo leve, mantém watermark, mas usa parâmetros de encode mais leves (`GN_LM_CRF`/`GN_LM_PRESET`).
+Worker de varredura de diretório para preparar e enviar highlights. A marca Grava Nóis é obrigatória; a logo secundária do cliente é opcional. Em modo leve, mantém a mesma regra de branding, mas usa parâmetros de encode mais leves (`GN_LM_CRF`/`GN_LM_PRESET`).
 
-**`__init__(queue_dir, out_wm_dir, failed_dir, watermark_path, scan_interval=1.5, max_attempts=3, wm_margin=24, wm_opacity=0.6, wm_rel_width=0.2, *, light_mode=False)`**
+**`__init__(queue_dir, out_wm_dir, failed_dir_highlight, watermark_path, client_watermark_path=None, scan_interval=1, max_attempts=3, wm_margin=24, wm_opacity=0.8, wm_rel_width=0.18, light_mode=True, ...)`**
 
 - **queue_dir**: pasta de entrada (`queue_raw/`).
 - **out_wm_dir**: pasta de saída com watermark (`highlights_wm/`) usada nos modos normal e leve.
-- **failed_dir**: pasta para falhas definitivas (`failed_clips/`).
-- **watermark_path**: caminho do PNG da logo.
+- **failed_dir_highlight**: pasta para falhas definitivas (`failed_clips/`).
+- **watermark_path**: caminho do PNG obrigatório da marca Grava Nóis.
+- **client_watermark_path**: caminho opcional da logo secundária; `None` omite apenas a logo do cliente.
 - **scan_interval**: período da varredura.
 - **max_attempts**: número máximo de tentativas por item.
 - **wm_margin/opacidade/rel_width**: parâmetros da marca d’água.

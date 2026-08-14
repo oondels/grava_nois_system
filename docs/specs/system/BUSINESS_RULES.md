@@ -2,9 +2,12 @@
 
 ## Captura rental
 
-- `fixed` exige `GN_VENUE_ID`; `rental` exige que ele esteja vazio.
+- `fixed` exige `GN_CLIENT_ID` e `GN_VENUE_ID`; `rental` exige ambos vazios.
 - Rejeições `rental_not_found_for_capture`, `rental_upload_grace_expired` e de proprietário/device são definitivas e não geram retry.
+- A mesma classificação definitiva se aplica quando a rejeição ocorre no finalize; o item não pode permanecer em `upload_failed`.
 - O device nunca escolhe `rental_id` ou usuário: envia `captured_at` assinado e a API faz a resolução autoritativa.
+- A associação local offline usa somente manifesto de agenda HMAC emitido pela API; sem correspondência, o clipe fica em quarentena por até `GN_RENTAL_QUARANTINE_TTL_HOURS`.
+- Não existe retry automático da fila rental ao reconectar. Inventário/upload exigem comando MQTT assinado; `endsAt + uploadGraceHours` e cancelamento excluem os arquivos locais.
 
 ## Trigger and time-window rules
 
@@ -27,6 +30,21 @@
 - token Pico dedicado dispara apenas a câmera correspondente, não as demais;
 - cada câmera possui `capture_lock` próprio — um highlight novo não sobrepõe outro em construção da mesma câmera;
 - cooldown de trigger físico (GPIO/Pico) é por câmera via `_cooldown_until`; câmeras em cooldown são ignoradas individualmente sem bloquear as demais.
+
+## Regras do Pico V2 operacional
+
+O contrato completo dos dois modelos esta em [`docs/PICO_MODELS.md`](../../../docs/PICO_MODELS.md). As regras abaixo se aplicam somente ao V2.
+
+- `raspberry_pico/main.py` permanece como firmware V1 de fallback; o V2 opt-in fica em `raspberry_pico/main_operational_v2.py`;
+- BTN1/BTN2 continuam dedicados a câmeras; o botão administrativo usa 2 cliques para diagnóstico, 3 para manutenção temporária e 5 para restart do container;
+- holds de 2-3 s, 4-5 s, 8-10 s e >=12 s executam respectivamente self-test, trigger global, arm de poweroff e pull/recreate;
+- poweroff exige um clique de confirmação em até 5 s e `GN_PICO_HOST_SHUTDOWN_ENABLED=1`;
+- manutenção dura até 15 minutos, toggle explícito ou restart, e bloqueia ENTER, GPIO e triggers Pico sem interromper câmera, buffer ou worker;
+- câmera `READY` exige todas as câmeras habilitadas com FFmpeg vivo e buffer recente; subconjunto pronto é `DEGRADED`;
+- diagnóstico local valida serial, câmera e buffer; MQTT desconectado é informado pelo LED, mas não reprova o diagnóstico;
+- heartbeat edge-Pico ocorre a cada 2 s; ausência por 10 s gera alerta visual, sem restart automático;
+- o manifesto rental local já é confiável e assinado, mas o estado visual de locação permanece reservado até ser integrado ao monitor operacional do Pico;
+- rejeições definitivas por locação inexistente, grace period ou janela permitida geram feedback visual quando o Pico V2 está conectado.
 
 ## Queue and retry rules
 
@@ -110,6 +128,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 ## MQTT presence rules
 
 - MQTT deve poder ser desligado integralmente por configuração;
+- `GN_MQTT_BROKER_URL` aceita apenas `mqtt://` e `mqtts://`; `ws://`/`wss://` e aliases não TCP são rejeitados porque o cliente usa transporte Paho TCP/TLS;
 - indisponibilidade do broker não pode interromper captura, trigger, worker ou retry local;
 - falha de câmera, FFmpeg, backend, S3 ou internet não pode impedir publicação de status MQTT quando o broker estiver acessível;
 - MQTT deve iniciar antes das câmeras para reportar `UNAVAILABLE`/`ERROR` em vez de deixar o device invisível;
@@ -133,7 +152,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 
 - configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`;
 - `desired_config` deve ser um objeto completo de configuração operacional não sensível;
-- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC; rental exige `venue_id=null` e fixed exige a venue configurada;
+- o edge valida `device_id`, `client_id`, `venue_id`, `schema_version`, `config_version`, `desired_hash`, expiração e assinatura HMAC; rental exige `client_id=null`/`venue_id=null`, e fixed exige o tenant/venue configurados;
 - a assinatura usa `DEVICE_SECRET`/`GN_DEVICE_SECRET`; sem esse segredo, o payload é rejeitado;
 - o report `config.reported` também é assinado com `DEVICE_SECRET`/`GN_DEVICE_SECRET` antes de ser enviado à API;
 - `config.request` válido deve gerar `config.state` assinado com snapshot sanitizado da configuração efetiva;
@@ -143,6 +162,10 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - o cálculo de `reported_hash` do snapshot deve normalizar `float` inteiros para manter compatibilidade de hash com o backend;
 - secrets, credenciais MQTT, tokens, `DEVICE_SECRET` e RTSP com `user:pass@` são rejeitados;
 - campos que exigem restart são gravados em `config.pending.json` e reportados como `pending_restart`;
+- antes de reportar `applied` ou `pending_restart`, o edge deve persistir os equivalentes operacionais no `.env` indicado por `GN_HOST_ENV_PATH`; falha restaura o estado anterior e resulta em `rejected`;
+- `restart_after_apply` integra o canonical HMAC e só pode gerar intenção host-side após persistência e report bem-sucedidos;
 - mudanças em domínios hot-reload-safe podem ser promovidas atomicamente para `config.json`;
 - `config_version` antiga, já aplicada ou menor que a pendente não bloqueia aplicação; payload válido sobrescreve a configuração desejada local;
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.
+- `cameras` presente na configuração gerenciada é autoritativo inclusive como array vazio ou com todas as câmeras desabilitadas;
+- referência `env:` ausente em câmera habilitada rejeita o startup sem incluir credenciais no erro.

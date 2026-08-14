@@ -5,7 +5,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
 
 from src.config.config_loader import (
     OperationalConfig,
@@ -113,29 +112,9 @@ def _env_str(name: str, default: str = "") -> str:
     return str(value).strip()
 
 
-def _parse_mqtt_host_and_port(
-    broker_url: str,
-    fallback_port: int,
-) -> tuple[str, int, bool]:
-    raw_value = broker_url.strip()
-    if not raw_value:
-        return "", fallback_port, False
-
-    if "://" not in raw_value:
-        if ":" in raw_value and raw_value.count(":") == 1:
-            host, raw_port = raw_value.split(":", 1)
-            try:
-                return host.strip(), max(1, int(raw_port)), False
-            except ValueError:
-                return host.strip(), fallback_port, False
-        return raw_value, fallback_port, False
-
-    parsed = urlparse(raw_value)
-    scheme = (parsed.scheme or "").lower()
-    host = parsed.hostname or ""
-    port = parsed.port or fallback_port
-    use_tls = scheme in {"mqtts", "ssl", "tls"}
-    return host, port, use_tls
+def load_client_watermark_enabled() -> bool:
+    """Return whether the client logo should be included in new clips."""
+    return _env_bool("GN_CLIENT_WATERMARK_ENABLED", True)
 
 
 def load_mqtt_config() -> MQTTConfig:
@@ -179,8 +158,8 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
     """Carrega configurações de câmera a partir do loader central ou env legado.
 
     Política de fonte de câmeras:
-      1. Se config.json possui array 'cameras' não vazio → usa-o (gerenciado)
-      2. Caso contrário → fallback para GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL (env legado)
+      1. Se config.json possui o campo 'cameras' → usa-o como fonte autoritativa
+      2. Se o campo estiver ausente → fallback para env legado
       3. Se nenhuma fonte RTSP → câmera V4L2 local
 
     URLs RTSP com credenciais devem usar 'env:VAR_NAME' em config.json ou
@@ -194,6 +173,35 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
     post_seg_cfg = capture.post_segments
     pre_sec_cfg = pre_seg_cfg * seg_time
     post_sec_cfg = post_seg_cfg * seg_time
+    default_buffer_seconds = max(
+        40,
+        pre_sec_cfg + post_sec_cfg + (2 * seg_time),
+    )
+
+    def _buffer_seconds_for(pre_segments: int, post_segments: int) -> int:
+        required = (pre_segments + post_segments + 2) * seg_time
+        effective = (
+            capture.buffer_seconds
+            if capture.buffer_seconds is not None
+            else max(default_buffer_seconds, required)
+        )
+        if effective < required:
+            raise ValueError(
+                "capture.bufferSeconds/GN_MAX_BUFFER_SECONDS deve ser >= "
+                f"{required}s para comportar a janela da câmera "
+                f"({pre_segments} pre + {post_segments} post + 2 segmentos de margem)"
+            )
+        return effective
+
+    def _buffer_seconds_for_window(pre_seconds: int, post_seconds: int) -> int:
+        required = pre_seconds + post_seconds + (2 * seg_time)
+        effective = capture.buffer_seconds or max(40, required)
+        if effective < required:
+            raise ValueError(
+                "capture.bufferSeconds/GN_MAX_BUFFER_SECONDS deve ser >= "
+                f"{required}s para comportar a janela V4L2 e 2 segmentos de margem"
+            )
+        return effective
 
     buffer_base = Path(os.getenv("GN_BUFFER_DIR", "/dev/shm/grn_buffer"))
 
@@ -222,14 +230,14 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
             pre_seconds=_pre_seg * seg_time,
             post_seconds=_post_seg * seg_time,
             scan_interval=1,
-            max_buffer_seconds=40,
+            max_buffer_seconds=_buffer_seconds_for(_pre_seg, _post_seg),
             pre_segments=_pre_seg,
             post_segments=_post_seg,
             pico_trigger_token=pico_trigger_token,
         )
 
     # --- Fonte 1: cameras de config.json ---
-    if cfg.cameras:
+    if cfg.cameras_managed:
         enabled = [c for c in cfg.cameras if c.enabled]
         configs: List[CaptureConfig] = []
         use_isolated_dirs = len(enabled) > 1
@@ -248,7 +256,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                         pre_seconds=pre_sec_cfg,
                         post_seconds=post_sec_cfg,
                         scan_interval=1,
-                        max_buffer_seconds=40,
+                        max_buffer_seconds=_buffer_seconds_for(pre_seg_cfg, post_seg_cfg),
                         failed_dir_highlight=base / "failed_clips",
                         pre_segments=pre_seg_cfg,
                         post_segments=post_seg_cfg,
@@ -256,9 +264,16 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                 )
                 continue
 
-            rtsp_url = cam.resolve_rtsp_url()
+            try:
+                rtsp_url = cam.resolve_rtsp_url()
+            except ValueError as exc:
+                raise ValueError(
+                    f"camera gerenciada {cam.id!r} possui rtspUrl invalida: {exc}"
+                ) from exc
             if not rtsp_url:
-                continue
+                raise ValueError(
+                    f"camera gerenciada {cam.id!r} exige rtspUrl ou referencia env:VAR_NAME"
+                )
             configs.append(
                 _build_rtsp_cfg(
                     camera_id=cam.id,
@@ -270,8 +285,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                     post_seg_override=cam.post_segments,
                 )
             )
-        if configs:
-            return configs
+        return configs
 
     # --- Fonte 2: env legado (GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL) ---
     cameras_json = (os.getenv("GN_CAMERAS_JSON") or "").strip()
@@ -353,7 +367,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
             pre_seconds=pre_sec_cfg,
             post_seconds=post_sec_cfg,
             scan_interval=1,
-            max_buffer_seconds=40,
+            max_buffer_seconds=_buffer_seconds_for_window(pre_sec_cfg, post_sec_cfg),
             failed_dir_highlight=base / "failed_clips",
             pre_segments=pre_seg_cfg,
             post_segments=post_seg_cfg,

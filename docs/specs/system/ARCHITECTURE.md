@@ -2,7 +2,9 @@
 
 ## Identidade operacional
 
-`GN_DEVICE_MODE=fixed` mantém a identidade cliente/venue. `GN_DEVICE_MODE=rental` mantém cliente/device/HMAC, omite venue e deixa a API associar a captura ao evento temporário.
+`GN_DEVICE_MODE=fixed` mantém a identidade cliente/venue. `GN_DEVICE_MODE=rental` mantém somente device/HMAC, omite cliente/venue e deixa a API associar a captura ao contrato temporário.
+Quando a integração HTTP está habilitada, o bootstrap valida client, device e segredo antes de iniciar os workers.
+O snapshot imutável inclui `device_mode`; `client_id` e `venue_id` são obrigatórios em `fixed` e devem ser `None` em `rental`.
 
 ## Overview
 
@@ -35,7 +37,7 @@ Bootstrap em [`main.py`](../../../main.py):
 4. **inicia MQTT (presence, dispatcher, config service) antes das câmeras**;
 5. cria `CameraRuntime` por câmera sem abrir RTSP/FFmpeg;
 6. inicia `ProcessingWorker` por câmera;
-7. resolve trigger source e listeners; quando Pico serial é aberto, reenvia `GRN_STARTED` até receber `ACK_GRN_STARTED` para handshake/LED;
+7. resolve trigger source e inicia `PicoSerialController` como proprietário único da serial; ele reenvia `GRN_STARTED` até o ACK, serializa comandos e mantém heartbeat V2;
 8. inicia supervisor por câmera em background; a primeira tentativa de FFmpeg ocorre no supervisor, sem bloquear MQTT/Pico;
 9. orquestra trigger fan-out até shutdown.
 
@@ -79,11 +81,13 @@ Bootstrap em [`main.py`](../../../main.py):
 - `src/services/mqtt/device_presence_service.py`
 - `src/services/mqtt/device_config_service.py`
 - `src/services/mqtt/command_dispatcher.py`
+- `src/services/pico_serial_controller.py` — I/O serial, negociação V1/V2 e heartbeat
+- `src/services/pico_operations.py` — manutenção temporária, arm confirmado, diagnóstico e publicação de estados
 
 ### Utilities
 
 - `logger.py`
-- `pico.py` — descoberta de porta; a comunicação serial bidirecional é orquestrada em `main.py`
+- `pico.py` — descoberta de porta; o I/O bidirecional pertence ao `PicoSerialController`
 - `device.py`
 - `time_utils.py`
 
@@ -120,6 +124,8 @@ Diretórios principais:
 
 O sistema usa o filesystem como fila, lock e trilha de auditoria local.
 
+No modo rental, `RentalOfflineService` mantém o manifesto de agenda HMAC, classifica falhas de upload na fila persistente exclusiva, remove expirados/cancelados e executa inventário ou reupload somente sob comando MQTT assinado.
+
 ## MQTT presence layer
 
 Camada opcional e isolada do pipeline principal:
@@ -145,13 +151,13 @@ Ponto de integração:
 
 ### Normal mode (light_mode=false)
 
-- aplica watermark sempre, com encode de alta qualidade (`hqCrf` + `hqPreset`, padrão CRF 18 + medium);
+- aplica a marca Grava Nóis sempre e a logo secundária do cliente somente quando `GN_CLIENT_WATERMARK_ENABLED=1`, com encode de alta qualidade (`hqCrf` + `hqPreset`, padrão CRF 18 + medium);
 - crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 - register/upload/finalize.
 
 ### Light mode (light_mode=true)
 
-- aplica watermark sempre, com encode leve para hardware fraco (`lmCrf` + `lmPreset`, padrão CRF 26 + veryfast);
+- aplica a marca Grava Nóis sempre e a logo secundária opcional do cliente com encode leve para hardware fraco (`lmCrf` + `lmPreset`, padrão CRF 26 + veryfast);
 - crop 9:16 quando `VERTICAL_FORMAT=1` (mesmo reframe do modo normal);
 - register/upload/finalize (idêntico ao modo normal após o encode).
 

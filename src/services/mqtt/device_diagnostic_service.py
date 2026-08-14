@@ -43,7 +43,7 @@ class DeviceDiagnosticEventService:
         *,
         topic: str,
         device_id: str,
-        client_id: str,
+        client_id: str | None,
         venue_id: str | None,
         device_secret: str,
         boot_id: str,

@@ -1,40 +1,57 @@
 from __future__ import annotations
 
-import sys
-import shutil
-from pathlib import Path
-import os
 import json
+import os
+import queue
+import shutil
+import subprocess
+import sys
+import threading
 import time
 import uuid
-import select
-import termios
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
-import subprocess
-import threading
-import queue
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
-
 from src.config.config_loader import get_effective_config
-from src.config.settings import CaptureConfig, load_capture_configs, load_mqtt_config
+from src.config.settings import (
+    CaptureConfig,
+    load_capture_configs,
+    load_client_watermark_enabled,
+    load_mqtt_config,
+)
+from src.services.docker_action_request import DockerActionRequestService
+from src.services.mqtt.capture_event_service import CaptureEventService
 from src.services.mqtt.command_dispatcher import CommandDispatcher
 from src.services.mqtt.device_config_service import (
     DeviceConfigService,
     apply_pending_config_on_startup,
 )
-from src.services.mqtt.device_env_service import DeviceEnvService
-from src.services.mqtt.capture_event_service import CaptureEventService
 from src.services.mqtt.device_diagnostic_service import DeviceDiagnosticEventService
+from src.services.mqtt.device_env_service import DeviceEnvService
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
 )
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
-from src.services.docker_action_request import DockerActionRequestService
+from src.services.pico_operations import (
+    ConfirmedActionArm,
+    MaintenanceMode,
+    PicoOperationalMonitor,
+)
+from src.services.pico_serial_controller import (
+    PICO_ACK_STARTED,
+    PICO_STARTED_COMMAND,
+    PicoSerialController,
+    PicoStartedHandshake,
+)
+from src.services.rental_offline_service import RentalOfflineService
+from src.services.pico_serial_controller import (
+    send_pico_command as _send_pico_command_impl,
+)
 from src.utils.logger import logger
 from src.utils.pico import get_pico_serial_port, resolve_trigger_source
 from src.utils.time_utils import is_within_business_hours
@@ -43,38 +60,19 @@ from src.video.capture import start_ffmpeg
 from src.video.processor import build_highlight, enqueue_clip
 from src.workers.processing_worker import ProcessingWorker
 
+__all__ = (
+    "PICO_ACK_STARTED",
+    "PICO_STARTED_COMMAND",
+    "PicoStartedHandshake",
+)
+
 load_dotenv()
 
-# Comando enviado ao Pico quando a serial é aberta para sinalizar que o edge está operacional.
-# O firmware responde com ACK_GRN_STARTED e acende o LED.
-PICO_STARTED_COMMAND = "GRN_STARTED"
-PICO_ACK_STARTED = "ACK_GRN_STARTED"
-PICO_STARTED_INITIAL_DELAY_SEC = 0.8
-PICO_STARTED_RETRY_DELAYS_SEC = (0.25, 0.5, 1.0, 2.0, 5.0)
-PICO_STARTED_WARNING_INTERVAL_SEC = 10.0
 CAMERA_STALE_AFTER_SEC = 10.0
 CAMERA_STALE_RESTART_AFTER_SEC = 30.0
 CAMERA_STALE_RESTART_CYCLES = 3
 CAMERA_STALE_RESTART_STATUSES = {"STALE", "MISSING", "UNKNOWN"}
 CAMERA_SUPERVISOR_INTERVAL_SEC = 5.0
-
-
-def _configure_pico_serial(fd: int, _logger: object | None = None) -> None:
-    """Best-effort serial setup for USB CDC devices across Linux hosts."""
-    log = _logger or logger
-    try:
-        attrs = termios.tcgetattr(fd)
-        attrs[0] = 0  # iflag: no input translations
-        attrs[1] = 0  # oflag: no output translations
-        attrs[3] = 0  # lflag: non-canonical, no echo
-        attrs[2] |= termios.CLOCAL | termios.CREAD
-        if hasattr(termios, "HUPCL"):
-            attrs[2] &= ~termios.HUPCL
-        attrs[6][termios.VMIN] = 0
-        attrs[6][termios.VTIME] = 0
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-    except Exception as exc:
-        log.warning("[Pico] Não foi possível configurar modo serial: %s", exc)
 
 
 def _send_pico_command(
@@ -83,94 +81,12 @@ def _send_pico_command(
     _logger: object | None = None,
     write_timeout_sec: float = 0.2,
 ) -> bool:
-    """Write a command to the Pico serial fd. Returns True only if all bytes were accepted."""
-    log = _logger or logger
-    payload = f"{command.strip()}\n".encode("utf-8")
-    offset = 0
-    try:
-        while offset < len(payload):
-            _, writable, _ = select.select([], [fd], [], write_timeout_sec)
-            if not writable:
-                return False
-            written = os.write(fd, payload[offset:])
-            if written <= 0:
-                return False
-            offset += written
-        return True
-    except BlockingIOError:
-        return False
-    except OSError as exc:
-        log.error("[Pico] Falha ao enviar comando %s: %s", command, exc)
-        return False
-
-
-@dataclass
-class PicoStartedHandshake:
-    """Retries GRN_STARTED until the Pico confirms with ACK_GRN_STARTED."""
-
-    command: str = PICO_STARTED_COMMAND
-    ack_received: bool = False
-    attempts: int = 0
-    next_send_at: float = 0.0
-    retry_delay: float = PICO_STARTED_RETRY_DELAYS_SEC[0]
-    first_attempt_at: float | None = None
-    last_warning_at: float = 0.0
-
-    def mark_ack(self) -> None:
-        self.ack_received = True
-
-    def maybe_send(
-        self,
-        fd: int,
-        now: float | None = None,
-        _logger: object | None = None,
-    ) -> bool:
-        if self.ack_received:
-            return False
-
-        log = _logger or logger
-        current = time.monotonic() if now is None else now
-        if current < self.next_send_at:
-            return False
-
-        self.attempts += 1
-        if self.first_attempt_at is None:
-            self.first_attempt_at = current
-        sent = _send_pico_command(fd, self.command, _logger=log)
-        if sent:
-            log.info(
-                "[Pico] %s escrito na serial; aguardando %s (tentativa=%s)",
-                self.command,
-                PICO_ACK_STARTED,
-                self.attempts,
-            )
-
-        ack_wait_elapsed = (
-            current - self.first_attempt_at if self.first_attempt_at is not None else 0.0
-        )
-        should_warn = (
-            self.attempts > 1
-            and ack_wait_elapsed >= PICO_STARTED_WARNING_INTERVAL_SEC
-            and (
-                self.last_warning_at == 0.0
-                or current - self.last_warning_at >= PICO_STARTED_WARNING_INTERVAL_SEC
-            )
-        )
-        if should_warn:
-            log.warning(
-                "[Pico] %s ainda sem ACK; reenviando (tentativa=%s)",
-                self.command,
-                self.attempts,
-            )
-            self.last_warning_at = current
-
-        self.next_send_at = current + self.retry_delay
-        next_delay_index = min(
-            len(PICO_STARTED_RETRY_DELAYS_SEC) - 1,
-            PICO_STARTED_RETRY_DELAYS_SEC.index(self.retry_delay) + 1,
-        )
-        self.retry_delay = PICO_STARTED_RETRY_DELAYS_SEC[next_delay_index]
-        return sent
+    return _send_pico_command_impl(
+        fd,
+        command,
+        _logger or logger,
+        write_timeout_sec=write_timeout_sec,
+    )
 
 
 @dataclass
@@ -580,6 +496,16 @@ def main() -> int:
         raise RuntimeError("GN_VENUE_ID é obrigatório para device fixed")
     if device_mode == "rental" and venue_id:
         raise RuntimeError("GN_VENUE_ID deve ficar vazio para device rental")
+    if device_mode == "rental":
+        client_id = None
+    api_base = (os.getenv("GN_API_BASE") or os.getenv("API_BASE_URL") or "").strip()
+    if api_base:
+        if device_mode == "fixed" and not client_id:
+            raise RuntimeError("GN_CLIENT_ID é obrigatório quando a API está habilitada")
+        if not device_id:
+            raise RuntimeError("DEVICE_ID é obrigatório quando a API está habilitada")
+        if not (os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or "").strip():
+            raise RuntimeError("DEVICE_SECRET é obrigatório quando a API está habilitada")
 
     mqtt_config = load_mqtt_config()
     mqtt_client = MQTTClient(mqtt_config)
@@ -589,6 +515,7 @@ def main() -> int:
     mqtt_env_service: DeviceEnvService | None = None
     capture_event_service: CaptureEventService | None = None
     diagnostic_event_service: DeviceDiagnosticEventService | None = None
+    rental_offline_service: RentalOfflineService | None = None
     boot_id = str(uuid.uuid4())
 
     if mqtt_config.enabled and not device_id:
@@ -640,6 +567,9 @@ def main() -> int:
                 reported_topic=mqtt_config.topic_for(device_id, "config/reported"),
                 request_topic=mqtt_config.topic_for(device_id, "config/request"),
                 state_topic=mqtt_config.topic_for(device_id, "config/state"),
+                env_path=Path(
+                    os.getenv("GN_HOST_ENV_PATH", "/usr/src/app/host_config/.env")
+                ),
                 device_secret=(
                     os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
                 ),
@@ -725,13 +655,15 @@ def main() -> int:
     optimized_wm_path = base / "files" / "replay_grava_nois_wm.png"
     watermark_path = optimized_wm_path if optimized_wm_path.exists() else default_wm_path
 
-    default_client_wm_path = base / "files" / "client_logo.png"
-    optimized_client_wm_path = base / "files" / "client_logo_wm.png"
-    client_watermark_path = (
-        optimized_client_wm_path
-        if optimized_client_wm_path.exists()
-        else default_client_wm_path
-    )
+    client_watermark_path: Path | None = None
+    if load_client_watermark_enabled():
+        default_client_wm_path = base / "files" / "client_logo.png"
+        optimized_client_wm_path = base / "files" / "client_logo_wm.png"
+        client_watermark_path = (
+            optimized_client_wm_path
+            if optimized_client_wm_path.exists()
+            else default_client_wm_path
+        )
     wm_margin = op_cfg.processing.watermark.margin
     wm_opacity = op_cfg.processing.watermark.opacity
     wm_rel_width = op_cfg.processing.watermark.relative_width
@@ -750,9 +682,52 @@ def main() -> int:
     pico_trigger_token = op_cfg.triggers.pico.global_token or "BTN_REPLAY"
     docker_action_requests = DockerActionRequestService.from_env(logger=logger)
     pico_serial_port: str | None = None
+    pico_controller: PicoSerialController | None = None
+    pico_monitor: PicoOperationalMonitor | None = None
+    maintenance_mode = MaintenanceMode(duration_sec=15 * 60)
+    shutdown_arm = ConfirmedActionArm(window_sec=5.0)
 
     # Workers são iniciados antes dos triggers para qualquer clipe gerado já ter fila ativa.
     workers: list[ProcessingWorker] = []
+
+    def _upload_rental_pending(rental_id: str) -> dict[str, int]:
+        directory = Path(
+            os.getenv("GN_RENTAL_CLIPS_DIR", str(base / "rental_clips_generated"))
+        ) / rental_id
+        processed = uploaded = failed = 0
+        worker = workers[0] if workers else None
+        if worker is None:
+            return {"processed": 0, "uploaded": 0, "failed": 0}
+        for video in sorted(directory.glob("*.mp4")) if directory.exists() else []:
+            processed += 1
+            if worker.process_manual_pending(video):
+                uploaded += 1
+            else:
+                failed += 1
+        return {"processed": processed, "uploaded": uploaded, "failed": failed}
+
+    if device_mode == "rental":
+        rental_offline_service = RentalOfflineService(
+            mqtt_client=mqtt_client,
+            device_id=device_id,
+            device_secret=(
+                os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
+            ),
+            topic_for=lambda suffix: mqtt_config.topic_for(device_id, suffix),
+            root_dir=Path(
+                os.getenv("GN_RENTAL_CLIPS_DIR", str(base / "rental_clips_generated"))
+            ),
+            upload_callback=_upload_rental_pending,
+            logger=logger,
+            quarantine_ttl_hours=int(
+                os.getenv("GN_RENTAL_QUARANTINE_TTL_HOURS", "48")
+            ),
+        )
+
+    def _publish_worker_operational_event(reason: str) -> None:
+        if pico_monitor is not None:
+            pico_monitor.publish_feedback("TRIGGER", f"REJECTED:{reason}")
+
     for rt in runtimes:
         cfg = rt.cfg
         worker = ProcessingWorker(
@@ -767,10 +742,20 @@ def main() -> int:
             wm_opacity=wm_opacity,
             wm_rel_width=wm_rel_width,
             light_mode=light_mode,
+            retry_failed=device_mode != "rental",
+            operational_event_callback=_publish_worker_operational_event,
+            pending_destination=(
+                rental_offline_service.destination_for
+                if rental_offline_service is not None
+                else None
+            ),
         )
         worker.start()
         workers.append(worker)
         logger.info(f"Worker iniciado para {cfg.camera_id}: fila={cfg.queue_dir}")
+
+    if rental_offline_service is not None:
+        rental_offline_service.start()
 
     # Mapa de roteamento: token Pico dedicado → handler de câmera específica.
     # Câmeras sem pico_trigger_token participam apenas do fan-out global.
@@ -780,10 +765,24 @@ def main() -> int:
         if _token:
             def _make_handler(rt: CameraRuntime) -> Callable[[], None]:
                 def _handler() -> None:
+                    if maintenance_mode.active:
+                        logger.warning(
+                            "[Pico][%s] Trigger bloqueado: modo manutencao ativo",
+                            rt.cfg.camera_id,
+                        )
+                        if pico_monitor is not None:
+                            pico_monitor.publish_feedback(
+                                "TRIGGER", "REJECTED:maintenance_mode"
+                            )
+                        return
                     if not is_within_business_hours():
                         logger.warning(
                             f"[Pico][{rt.cfg.camera_id}] Token dedicado ignorado: fora do horário de funcionamento"
                         )
+                        if pico_monitor is not None:
+                            pico_monitor.publish_feedback(
+                                "TRIGGER", "REJECTED:outside_allowed_window"
+                            )
                         return
                     tid = uuid.uuid4().hex[:8]
                     logger.info(
@@ -901,76 +900,98 @@ def main() -> int:
         if pico_serial_port:
             logger.info(f"Porta serial Pico selecionada: {pico_serial_port}")
 
-            def _pico_serial_listener() -> None:
-                try:
-                    fd = os.open(
-                        pico_serial_port,
-                        os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY,
-                    )
-                except OSError as e:
-                    logger.error(
-                        f"Falha ao abrir porta serial do Pico ({pico_serial_port}): {e}"
+            def _pico_snapshot_provider() -> dict[str, object]:
+                return build_runtime_snapshot(
+                    runtimes=runtimes,
+                    light_mode=light_mode,
+                    dev_mode=dev_mode,
+                    trigger_source=trigger_source,
+                    camera_stale_after_sec=CAMERA_STALE_AFTER_SEC,
+                )
+
+            def _handle_pico_token(line_upper: str) -> None:
+                if line_upper in {"REQUEST_DIAGNOSTIC", "RUN_SELF_TEST"}:
+                    if pico_monitor is not None:
+                        threading.Thread(
+                            target=pico_monitor.run_diagnostic,
+                            daemon=True,
+                            name="pico-diagnostic",
+                        ).start()
+                    return
+                if line_upper == "TOGGLE_MAINTENANCE":
+                    active = maintenance_mode.toggle()
+                    logger.warning(
+                        "[Pico] Modo manutencao %s",
+                        "ativado por 15 minutos" if active else "desativado",
                     )
                     return
-
-                _configure_pico_serial(fd, _logger=logger)
-                time.sleep(PICO_STARTED_INITIAL_DELAY_SEC)
-
-                buffer = b""
-                started_handshake = PicoStartedHandshake()
-                with os.fdopen(fd, "rb", buffering=0) as serial_stream:
-                    logger.info(
-                        f"Listener Pico serial ativo em {pico_serial_port} (token={pico_trigger_token!r})"
-                    )
-                    while not stop_evt.is_set():
-                        started_handshake.maybe_send(fd, _logger=logger)
-                        try:
-                            ready, _, _ = select.select([serial_stream], [], [], 0.3)
-                        except Exception as e:
-                            logger.error(f"Erro no select() da serial Pico: {e}")
-                            return
-                        if not ready:
-                            continue
-
-                        try:
-                            chunk = serial_stream.read(256)
-                        except BlockingIOError:
-                            continue
-                        except OSError as e:
-                            logger.error(
-                                f"Erro lendo serial Pico ({pico_serial_port}): {e}"
+                if line_upper == "ARM_SHUTDOWN":
+                    shutdown_arm.arm(docker_action_requests.shutdown_enabled)
+                    if pico_monitor is not None:
+                        result = (
+                            "ARMED"
+                            if docker_action_requests.shutdown_enabled
+                            else "DENIED:shutdown_disabled"
+                        )
+                        pico_monitor.publish_feedback("ACTION", result)
+                    return
+                if line_upper == docker_action_requests.shutdown_token:
+                    if not shutdown_arm.consume():
+                        logger.warning(
+                            "[Pico] Desligamento negado: confirmacao ausente ou expirada"
+                        )
+                        if pico_monitor is not None:
+                            pico_monitor.publish_feedback(
+                                "ACTION", "DENIED:shutdown_not_armed"
                             )
-                            return
+                        return
+                action_tokens = {
+                    docker_action_requests.pull_token,
+                    docker_action_requests.restart_token,
+                    docker_action_requests.shutdown_token,
+                }
+                if line_upper in action_tokens:
+                    allowed = docker_action_requests.enabled and (
+                        line_upper != docker_action_requests.shutdown_token
+                        or docker_action_requests.shutdown_enabled
+                    )
+                    docker_action_requests.handle_token(line_upper)
+                    if pico_monitor is not None:
+                        pico_monitor.publish_feedback(
+                            "ACTION",
+                            "ACCEPTED" if allowed else "DENIED:action_disabled",
+                        )
+                    return
+                if line_upper in token_map:
+                    threading.Thread(
+                        target=token_map[line_upper],
+                        daemon=True,
+                        name=f"pico-trigger-{line_upper.lower()}",
+                    ).start()
+                elif line_upper == "TRIGGER_GLOBAL" or _serial_line_is_trigger(
+                    line_upper, pico_trigger_token
+                ):
+                    logger.info("[Pico] Token '%s' -> fan-out global", line_upper)
+                    trigger_q.put("pico")
+                else:
+                    logger.warning("[Pico] Token desconhecido: %r", line_upper)
 
-                        if not chunk:
-                            continue
-                        buffer += chunk
-
-                        while b"\n" in buffer:
-                            raw_line, buffer = buffer.split(b"\n", 1)
-                            line = raw_line.decode("utf-8", errors="ignore").strip()
-                            if not line:
-                                continue
-                            line_upper = line.upper()
-                            if line_upper == PICO_ACK_STARTED:
-                                started_handshake.mark_ack()
-                                logger.info("[Pico] Recebido ACK_GRN_STARTED — LED aceso no Pico")
-                                continue
-                            if docker_action_requests.handle_token(line_upper):
-                                continue
-                            if line_upper in token_map:
-                                token_map[line_upper]()
-                            elif _serial_line_is_trigger(line, pico_trigger_token):
-                                logger.info(
-                                    f"[Pico] Token '{line_upper}' → fan-out global"
-                                )
-                                trigger_q.put("pico")
-                            else:
-                                logger.warning(
-                                    f"[Pico] Token desconhecido: {line_upper!r}"
-                                )
-
-            threading.Thread(target=_pico_serial_listener, daemon=True).start()
+            pico_controller = PicoSerialController(
+                port=pico_serial_port,
+                on_token=_handle_pico_token,
+                logger=logger,
+            )
+            pico_monitor = PicoOperationalMonitor(
+                send=pico_controller.send,
+                snapshot_provider=_pico_snapshot_provider,
+                mqtt_enabled=mqtt_config.enabled,
+                mqtt_connected=lambda: mqtt_client.is_connected,
+                maintenance=maintenance_mode,
+                serial_healthy=pico_controller.has_recent_pong,
+                logger=logger,
+            )
+            pico_controller.start()
+            pico_monitor.start()
             pico_enabled = True
         else:
             logger.warning("Trigger Pico selecionado, mas nenhuma porta serial foi detectada")
@@ -1003,7 +1024,7 @@ def main() -> int:
         trigger_hints.append(f"Pico serial ({pico_serial_port})")
 
     prompt = (
-        f"Gravando… pressione ENTER"
+        "Gravando… pressione ENTER"
         + (f" ou {' ou '.join(trigger_hints)}" if trigger_hints else "")
         + f" para capturar {capture_desc} (Ctrl+C sai)"
     )
@@ -1014,6 +1035,14 @@ def main() -> int:
             try:
                 trig = trigger_q.get(timeout=0.3)
             except queue.Empty:
+                continue
+
+            if maintenance_mode.active:
+                logger.warning("Trigger %s bloqueado: modo manutencao ativo", trig)
+                if trig == "pico" and pico_monitor is not None:
+                    pico_monitor.publish_feedback(
+                        "TRIGGER", "REJECTED:maintenance_mode"
+                    )
                 continue
 
             # Cooldown por câmera para triggers físicos (gpio/pico global).
@@ -1042,6 +1071,10 @@ def main() -> int:
 
             if not is_within_business_hours():
                 logger.warning("Fora do horário de funcionamento")
+                if trig == "pico" and pico_monitor is not None:
+                    pico_monitor.publish_feedback(
+                        "TRIGGER", "REJECTED:outside_allowed_window"
+                    )
                 continue
 
             trigger_id = uuid.uuid4().hex[:8]
@@ -1053,11 +1086,19 @@ def main() -> int:
                 trigger_source=trig,
                 capture_event_service=capture_event_service,
             )
+            if trig == "pico" and pico_monitor is not None:
+                pico_monitor.publish_feedback("TRIGGER", "ACCEPTED")
 
     except KeyboardInterrupt:
         logger.info("Encerrando...")
     finally:
         stop_evt.set()
+        if pico_monitor is not None:
+            pico_monitor.stop()
+        if pico_controller is not None:
+            pico_controller.stop()
+        if rental_offline_service is not None:
+            rental_offline_service.stop()
         if mqtt_dispatcher is not None:
             try:
                 mqtt_dispatcher.stop()

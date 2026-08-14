@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 import requests
-
 from src.services.api_error_policy import (
     extract_api_error_from_exception,
     parse_api_error_from_response,
@@ -65,6 +64,36 @@ class APIErrorPolicyTests(unittest.TestCase):
         self.assertIsNotNone(info)
         assert info is not None
         self.assertFalse(info.should_delete_local_record)
+
+    def test_should_delete_for_rental_device_mismatch(self) -> None:
+        response = _FakeResponse(
+            403,
+            {
+                "success": False,
+                "message": "Forbidden - video does not belong to rental device",
+                "error": {"code": "FORBIDDEN"},
+                "requestId": "req-rental",
+            },
+        )
+        info = parse_api_error_from_response(response)
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertTrue(info.should_delete_local_record)
+
+    def test_should_delete_when_rental_reason_is_in_error_code(self) -> None:
+        response = _FakeResponse(
+            403,
+            {
+                "success": False,
+                "message": "Locacao indisponivel",
+                "error": {"code": "rental_not_found_for_capture"},
+                "requestId": "req-rental-code",
+            },
+        )
+        info = parse_api_error_from_response(response)
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertTrue(info.should_delete_local_record)
 
     def test_extract_from_exception_chain(self) -> None:
         response = _FakeResponse(

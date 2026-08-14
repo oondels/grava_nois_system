@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-13
+
+### Added
+- `feat(config)`: configuração operacional MQTT passa a persistir atomicamente também no `.env` gerenciado, preservando segredos e permitindo restart remoto assinado após confirmação.
+- `feat(rental)`: fila persistente `rental_clips_generated`, manifesto de agenda assinado e inventário/upload manual via MQTT para clipes gerados offline.
+- `feat(rental)`: probe CLI sem efeitos colaterais expõe versão do agente e confirma suporte ao contrato rental tenantless.
+- `feat(pico)`: firmware operacional V2 opt-in adiciona LEDs de estado, gestos administrativos, diagnóstico local, manutenção temporária e watchdog visual.
+- `feat(pico)`: controlador serial único publica câmera/MQTT/upload, mantém heartbeat e preserva os tokens V1 de restart/pull e botões dedicados.
+- `feat(device)`: poweroff confirmado via Pico usa intent host-only e permanece desabilitado por padrão.
+- `docs(pico)`: guia canônico separa firmware V1 legado e V2 operacional, incluindo pinagem, gestos, LEDs e protocolo.
+
+### Fixed
+- `fix(config)`: backup do `.env` operacional recebe permissão `0600`; falha de persistência restaura `.env` e estado pendente antes de reportar rejeição.
+- `fix(config)`: `cameras[]` gerenciado passa a ser autoritativo inclusive vazio, e referências `env:` ausentes falham sem expor credenciais.
+- `fix(mqtt)`: URL do broker aceita somente `mqtt://` e `mqtts://`, rejeitando WebSocket e aliases incompatíveis com o transporte TCP/TLS atual.
+- `fix(rental)`: rejeições definitivas identificadas pelo `error.code` também saem do retry e geram feedback visual no Pico V2.
+- `test(rental)`: fixtures MQTT e de presença passam a representar rental com `client_id=null` e `venue_id=null`.
+
+## 2026-08-12
+
+### Changed
+- `fix(config)`: pull e restart regeneram `config.json` a partir do `.env` antes do recreate; falha no conversor cancela a ação.
+- `refactor(rental)`: identidade técnica rental deixa cliente e venue vazios, omite `X-Client-Id` nas chamadas HMAC e envia ambos como `null` no MQTT.
+
+### Fixed
+- `docs(rental)`: requisitos de startup passam a distinguir `GN_CLIENT_ID` obrigatório em fixed e proibido em rental.
+
 ## 2026-08-08
 
 ### Added
@@ -12,6 +39,20 @@
 ## Unreleased
 
 ### Added
+- `feat(edge)`: `GN_CLIENT_WATERMARK_ENABLED` controla a exibição da logo do cliente, mantendo a marca Grava Nóis e compatibilidade com instalações existentes.
+
+### Changed
+- `docs(edge)`: documentação do worker, arquitetura, testes e fluxo funcional passa a distinguir a marca Grava Nóis obrigatória da logo opcional do cliente nos modos HQ e light.
+
+### Fixed
+- `fix(rental)`: worker e retry normalizam o envelope oficial `{ data: { clip } }` do registro, preservando compatibilidade com o formato legado.
+- `fix(edge)`: inicialização com API configurada falha cedo sem client/device/segredo HMAC, e erros definitivos de finalize rental saem do loop de retry.
+- `fix(architecture)`: identidade da clean architecture agora representa `fixed`/`rental` com as mesmas invariantes do runtime legado.
+- `fix(delivery)`: checkpoints deixam de persistir URL/headers assinados e carregam tamanho, SHA-256 e ETag até o finalize.
+- `fix(sidecar)`: sidecars legados com `remote_finalize.status=ok` são reconhecidos como terminais durante a migração.
+
+### Added
+- Fixture versionada dos contratos legados usada pelos testes de caracterização da refatoração.
 - Serviço `DeviceDiagnosticEventService` para publicar eventos MQTT assinados em `diagnostics/events`, incluindo boot, shutdown limpo, conexão e desconexão do broker.
 - `boot_id`, sequência de heartbeat e contadores de reconexão MQTT no payload de presença/state para auditoria remota.
 - `config.reported` e `config.state` passam a expor `last_applied_version` e `pending_version` para reconciliação remota de versão.

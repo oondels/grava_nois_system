@@ -2,8 +2,12 @@
 
 ## Integração rental
 
-- Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT mantêm `venue_id` presente com valor `null`.
-- `client_id`, `device_id`, timestamp, nonce e assinatura HMAC permanecem obrigatórios; o backend resolve a locação pelo device e `captured_at`.
+- Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT mantêm `client_id=null` e `venue_id=null`.
+- `device_id`, timestamp, nonce e assinatura HMAC permanecem obrigatórios; `X-Client-Id` é omitido e o backend resolve cliente/locação pelo device e `captured_at`.
+- A resposta de metadata segue `{ data: { clip: { clip_id, upload_url, ... } } }`; worker e retry usam um extrator comum e rejeitam respostas sem objeto de clipe.
+- Na conexão MQTT, o edge publica `rental/schedule/request`; a API responde em `rental/schedule/desired` com intervalos, tolerâncias e locações canceladas.
+- A API publica `rental/clips/request` com ação `inventory` ou `upload`; o edge responde em `rental/clips/reported` com contagem, bytes e resultado, sem expor paths locais.
+- Os quatro tópicos usam JSON canônico, HMAC-SHA256/base64 por `DEVICE_SECRET`, `device_id`, `request_id` e expiração curta nos comandos da API. Mensagem inválida, expirada ou divergente é rejeitada sem executar upload/exclusão.
 
 ## Environment and settings
 
@@ -55,6 +59,8 @@ Variáveis importantes:
 - `DEV`
 - `GN_TRIGGER_MAX_WORKERS`
 - `GN_AGENT_VERSION`
+- `GN_RENTAL_CLIPS_DIR`
+- `GN_RENTAL_QUARANTINE_TTL_HOURS`
 
 ### RTSP tuning
 
@@ -232,16 +238,18 @@ Canonical string:
 ### Pico serial
 
 - descoberta automática por `/dev/serial/by-id`, `/dev/ttyACM*`, `/dev/ttyUSB*`;
-- ao abrir a porta serial com sucesso, o edge envia `GRN_STARTED` ao Pico para sinalizar que o runtime está operacional; o envio é repetido até o Pico responder `ACK_GRN_STARTED` e acender o LED;
-- o LED do Pico indica que o edge está iniciado e comunicando pela serial — não garante que câmera, MQTT ou API estejam todos OK;
-- após `PULL_DOCKER`/`RESTART_DOCKER`, o firmware apaga o LED; o novo container reenvia `GRN_STARTED` até receber `ACK_GRN_STARTED`;
+- V1 e V2 preservam `GRN_STARTED`/`ACK_GRN_STARTED`, tokens dedicados e acoes Docker legadas;
+- no V1, o LED unico confirma apenas o handshake serial;
+- no V2, `PICO_CAPS`, `PING/PONG`, `STATE:*` e `FEEDBACK:*` controlam dois LEDs e a saude operacional;
 - token global configurável por `GN_PICO_TRIGGER_TOKEN` (fan-out para câmeras sem token dedicado);
 - cada câmera em `GN_CAMERAS_JSON` pode declarar `pico_trigger_token` próprio — quando recebido, dispara apenas aquela câmera sem acionar as demais;
 - tokens `GN_PICO_DOCKER_PULL_TOKEN` e `GN_PICO_DOCKER_RESTART_TOKEN` são consumidos antes dos tokens de câmera para criar uma solicitação de manutenção Docker no `runtime_config`;
 - `ACK_GRN_STARTED` recebido do Pico é logado como info e ignorado (não dispara câmera nem Docker);
 - token desconhecido é logado como `warning` e ignorado; o listener não é interrompido.
 
-O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. `PULL_DOCKER` executa pull e recriação por compose; `RESTART_DOCKER` executa recriação por compose sem pull, para reler `env_file` e aplicar mudanças de `.env`. Antes da recriação, o runner do host regenera o `config.json` runtime a partir do `.env`, evitando que uma edição admin fique mascarada por configuração operacional antiga.
+O contrato completo e separado por modelo esta em [`docs/PICO_MODELS.md`](../../../docs/PICO_MODELS.md).
+
+O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. Antes de pull/restart, o runner regenera `config.json` a partir do `.env` e aborta a ação se o conversor falhar. `PULL_DOCKER` faz pull e recreate; `RESTART_DOCKER` faz somente recreate. O edge persiste os campos operacionais recebidos remotamente no `.env` antes de solicitar essa ação, evitando reversão da configuração.
 
 ## WiFi Provisioning (hotspot local)
 

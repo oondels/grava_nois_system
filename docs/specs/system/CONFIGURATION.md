@@ -3,8 +3,9 @@
 ## Seleção fixed/rental
 
 - `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.
-- `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` continua identificando a frota e `GN_VENUE_ID` deve ficar vazio.
-- Em configuração remota rental, `venue_id` permanece presente nos envelopes com valor JSON `null`.
+- `GN_DEVICE_MODE=rental`: `GN_CLIENT_ID` e `GN_VENUE_ID` devem ficar vazios; `DEVICE_ID` e `DEVICE_SECRET` formam a identidade técnica estável.
+- Em configuração remota rental, `client_id` e `venue_id` permanecem presentes nos envelopes com valor JSON `null`.
+- Se `GN_API_BASE`/`API_BASE_URL` estiver definido, `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` são obrigatórios; `GN_CLIENT_ID` é exigido apenas em `fixed` e deve ficar vazio em `rental`.
 
 ## Visão geral
 
@@ -29,7 +30,7 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 
 | Domínio | Campos | Exige restart? |
 |---|---|---|
-| Captura / segmentação | `capture.segmentSeconds`, `capture.preSegments`, `capture.postSegments` | Sim |
+| Captura / segmentação | `capture.segmentSeconds`, `capture.preSegments`, `capture.postSegments`, `capture.bufferSeconds` | Sim |
 | Tuning RTSP | `capture.rtsp.*` (maxRetries, timeout, profile, reencode, gop, preset, crf, fps, useWallclockTimestamps, lowLatencyInput, lowDelayCodecFlags) | Sim |
 | Câmera V4L2 | `capture.v4l2.*` (device, framerate, videoSize) | Sim |
 | Estrutura de câmeras | `cameras[]` (id, name, enabled, sourceType, rtspUrl, picoTriggerToken, pre/postSegments) | Sim |
@@ -60,6 +61,9 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_BUFFER_DIR` | — | Path de volume/container |
 | `GN_LOG_DIR` | — | Path de logs de container |
 | `GN_PICO_PORT` | — | Path de device serial no host |
+| `GN_PICO_DOCKER_ACTIONS_ENABLED` | — | Habilita intents host-only de restart/pull via Pico |
+| `GN_PICO_HOST_SHUTDOWN_ENABLED` | — | Opt-in para poweroff confirmado via Pico; default `0` |
+| `GN_PICO_HOST_SHUTDOWN_TOKEN` | — | Token serial de poweroff; default `SHUTDOWN_HOST` |
 | `DEV` | — | Flag de desenvolvimento |
 | `DEV_VIDEO_MODE` | — | Flag de teste |
 | `GN_HMAC_DRY_RUN` | `HMAC_DRY_RUN` | Flag de auditoria/debug |
@@ -67,15 +71,34 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_AGENT_VERSION` | — | Versão de deploy (imagem/build) |
 | `GN_RUN_CAMERA_INTEGRATION` | — | Teste de integração manual |
 | `GN_CAMERA_INTEGRATION_OUTPUT_DIR` | — | Diretório de artefatos de teste |
+| `GN_CLIENT_WATERMARK_ENABLED` | — | Exibe a logo secundária do cliente; padrão `1` e exige restart |
+
+`GN_MQTT_BROKER_URL` aceita apenas `mqtt://` ou `mqtts://`. No `config.json`,
+`mqtt.broker.host` contém somente o hostname; protocolo e TLS são representados
+separadamente por `mqtt.broker.tls`.
+
+`GN_CLIENT_WATERMARK_ENABLED` não participa de `config.json` nem da configuração remota MQTT. Com `0`, somente a logo do cliente é omitida; a watermark Grava Nóis continua obrigatória. A flag ausente equivale a `1` e a mudança vale após reiniciar o edge.
 
 ---
 
 ## Ownership e identidade operacional
 
 - o `grava_nois_system` continua executando como **um device logico por processo/host provisionado**;
-- `GN_CLIENT_ID` e `GN_VENUE_ID` definem o contexto do cliente e da venue daquele host;
+- em `fixed`, `GN_CLIENT_ID` e `GN_VENUE_ID` definem o contexto permanente daquele host;
+- em `rental`, cliente e local pertencem à locação temporal e ambos permanecem vazios no host;
+- `GN_RENTAL_CLIPS_DIR` define a fila persistente offline (default `/usr/src/app/rental_clips_generated`) e `GN_RENTAL_QUARANTINE_TTL_HOURS` limita itens sem manifesto (default `48`).
 - uma mesma venue pode ter varios devices no backend, entao esses dois valores podem se repetir em hosts diferentes;
 - `DEVICE_ID` e `DEVICE_SECRET` precisam permanecer exclusivos por host/device.
+
+O configurador pode verificar a compatibilidade da imagem sem iniciar o pipeline:
+
+```bash
+python -m src.cli.rental_compat_probe
+```
+
+O comando retorna JSON com `compatible`, `probe_schema_version`,
+`rental_identity_contract=tenantless-v1` e `agent_version` derivado de
+`GN_AGENT_VERSION`. Ele não abre câmera nem conexão MQTT/API.
 
 ---
 
@@ -91,7 +114,12 @@ Duas opções:
    ```
    O loader resolve `env:GN_CAM01_RTSP_URL` → `os.getenv("GN_CAM01_RTSP_URL")`.
 
-2. **Legado via `GN_CAMERAS_JSON`**: se o array `cameras` em `config.json` estiver vazio ou ausente, o sistema continua lendo `GN_CAMERAS_JSON` / `GN_RTSP_URLS` / `GN_RTSP_URL` do env, preservando total compatibilidade.
+2. **Legado via env**: somente quando o campo `cameras` estiver ausente do `config.json`, o sistema lê `GN_CAMERAS_JSON` / `GN_RTSP_URLS` / `GN_RTSP_URL`.
+
+O campo `cameras` é autoritativo quando presente. Um array vazio ou composto apenas
+por entradas `enabled=false` desabilita todas as câmeras e nunca aciona fallback.
+Uma câmera RTSP habilitada com `env:VAR_NAME` ausente causa falha explícita no startup;
+a mensagem contém apenas câmera e nome da variável, nunca seu valor.
 
 ---
 
@@ -118,7 +146,11 @@ O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env`
 
 O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
 
-Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. No fluxo instalado pelo `grava_nois_config`, esse runner regenera `/opt/.grn/config/runtime/config.json` a partir de `/opt/.grn/config/.env` antes do `docker compose up -d --force-recreate --remove-orphans`. Identidade e segredos permanecem somente no `.env` e não são migrados para `config.json`.
+Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. Antes do recreate, o runner executa o conversor persistente e regenera atomicamente `config.json` a partir do `.env`; falha na conversao interrompe a acao. Identidade e segredos permanecem somente no `.env`.
+
+O `config.desired` operacional aceito é convertido para as variáveis equivalentes e gravado atomicamente no `.env` gerenciado antes do report MQTT. A escrita preserva identidade, segredos e campos não gerenciados, cria backup `0600` e faz rollback se a promoção do JSON falhar. Assim, `.env` e JSON permanecem reconciliados durante `restart_container` e `pull_and_recreate`.
+
+Quando `restart_after_apply=true` está presente no envelope HMAC, o edge só agenda `restart_container` depois de persistir o `.env` e publicar o report de sucesso. O campo participa da assinatura; alterá-lo em trânsito invalida o comando.
 
 ---
 
@@ -163,6 +195,10 @@ A separação entre parâmetros que suportarão hot-reload e os que exigem resta
 ### Exigem restart/reload controlado
 - `cameras` — estrutura de câmeras e source RTSP
 - `capture.segmentSeconds` — tamanho do segmento FFmpeg
+- `capture.bufferSeconds` — capacidade do buffer circular. Se omitido, usa
+  `max(40, (preSegments + postSegments + 2) × segmentSeconds)`. O fallback
+  legado é `GN_MAX_BUFFER_SECONDS`; overrides menores que a janela necessária
+  são rejeitados.
 - `capture.rtsp.*` — parâmetros do stream RTSP
 - `triggers.source` — fonte de trigger físico
 - `triggers.gpio.pin` — pino BCM
@@ -184,7 +220,7 @@ Tópicos:
 Contrato de entrada:
 
 - `type`: `config.desired`
-- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
+- `device_id`, `client_id`, `venue_id` (os dois últimos são `null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: inteiro monotônico
 - `desired_hash`: `sha256:<hex>` calculado sobre o JSON canônico do `desired_config` preparado com `version` e `updatedAt`
@@ -203,7 +239,7 @@ v1:CONFIG_DESIRED:{device_id}:{config_version}:{correlation_id}:{issued_at}:{exp
 Contrato de saída:
 
 - `type`: `config.reported`
-- `device_id`, `client_id`, `venue_id` (`null` no modo rental)
+- `device_id`, `client_id`, `venue_id` (os dois últimos são `null` no modo rental)
 - `schema_version`: `1`
 - `config_version`: versão recebida em `config.desired`
 - `status`: `applied`, `pending_restart` ou `rejected`
@@ -287,7 +323,8 @@ O script converte apenas parâmetros operacionais não sensíveis. Segredos, ide
 tokens, credenciais MQTT e URLs RTSP com `user:pass@` permanecem no `.env`; nesses
 casos o `config.json` usa referência `env:VAR_NAME`.
 
-Não é necessário remover as variáveis de ambiente existentes — elas continuam válidas como fallback.
+Não é necessário remover as variáveis de ambiente existentes. As fontes legadas de
+câmera só funcionam como fallback enquanto o campo `cameras` estiver ausente.
 
 ---
 

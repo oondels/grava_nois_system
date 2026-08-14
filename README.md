@@ -4,10 +4,14 @@
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
 >
+> **Rental offline:** falhas de upload ficam em `rental_clips_generated/{rentalId}` e só são reenviadas por solicitação do responsável/admin. Itens sem agenda assinada ficam em quarentena por até 48 horas.
+>
 > **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
 >
-> **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_VENUE_ID`; a API resolve o evento de locação a partir da identidade HMAC e do horário capturado.
-> Configuração remota continua disponível nesse modo e usa `venue_id: null` nos envelopes MQTT.
+> **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_CLIENT_ID` nem `GN_VENUE_ID`; a API resolve cliente e evento a partir da identidade HMAC e do horário capturado.
+> Configuração remota continua disponível nesse modo e usa `client_id: null` e `venue_id: null` nos envelopes MQTT.
+> Com uma API base configurada, o processo exige `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup; `GN_CLIENT_ID` também é obrigatório apenas no modo `fixed`. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
+> Na clean architecture, URLs e headers assinados permanecem somente em memória; o checkpoint durável guarda apenas o ID remoto e o recibo de integridade necessário ao finalize.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 
@@ -115,6 +119,7 @@ GN_RTSP_URL=rtsp://user:pass@192.168.1.100:554/cam/realmonitor?channel=1&subtype
 # API Backend (opcional, mas recomendado)
 GN_API_BASE=https://api.gravanois.com
 GN_API_TOKEN=seu_token_jwt_aqui
+GN_DEVICE_MODE=fixed
 GN_CLIENT_ID=uuid-do-cliente
 GN_VENUE_ID=uuid-do-local
 DEVICE_ID=raspberrypi-001
@@ -150,6 +155,23 @@ GN_AGENT_VERSION=1.0.0-edge
 GN_SEG_TIME=1
 GN_RTSP_PRE_SEGMENTS=6
 GN_RTSP_POST_SEGMENTS=3
+```
+
+Para um device rental, mantenha a identidade técnica e remova o tenant permanente:
+
+```bash
+GN_DEVICE_MODE=rental
+GN_CLIENT_ID=
+GN_VENUE_ID=
+DEVICE_ID=uuid-do-device-rental
+DEVICE_SECRET=troque_por_um_segredo_forte
+```
+
+Uma imagem pode ser verificada sem iniciar câmeras, MQTT, API ou pipeline:
+
+```bash
+python -m src.cli.rental_compat_probe
+# {"agent_version":"...","compatible":true,...,"rental_identity_contract":"tenantless-v1"}
 ```
 
 Observacao operacional:
@@ -229,7 +251,7 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Aplica watermark sempre, com encode de alta qualidade (`GN_HQ_CRF` + `GN_HQ_PRESET`)
+1. Aplica a watermark Grava Nóis sempre e inclui a logo do cliente quando `GN_CLIENT_WATERMARK_ENABLED=1`, com encode de alta qualidade (`GN_HQ_CRF` + `GN_HQ_PRESET`)
 2. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` sem scale forçado
 3. Salva o resultado em `highlights_wm/` e atualiza o sidecar com `meta_wm`, `wm_path` e `wm_encode`
 4. Registra metadados no backend → recebe `upload_url`
@@ -239,7 +261,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 8. Observação: existe helper de thumbnail no código, mas ele não faz parte do pipeline ativo do worker
 
 **Modo Leve (`GN_LIGHT_MODE=1`):**
-1. Continua aplicando watermark local, mas com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
+1. Mantém a mesma regra de branding do modo normal, mas com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
 2. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` sem scale forçado
 3. Usa perfil de captura RTSP `compatible` por inferência quando `GN_RTSP_PROFILE` não estiver explícito
 4. Registra metadados no backend → recebe `upload_url`
@@ -388,6 +410,8 @@ defaults → variáveis de ambiente (fallback legado) → config.json (vence qua
 ```
 
 Instalações existentes sem `config.json` continuam funcionando via env sem alteração.
+Quando `config.json` contém o campo `cameras`, esse array é autoritativo: `[]` ou todas
+as entradas desabilitadas resultam em zero câmeras e não reativam fontes do env legado.
 
 Para criar:
 ```bash
@@ -411,7 +435,7 @@ sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.js
 - Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
 - Para gerenciamento admin de `.env`, monte o diretório que contém o `.env` em `/usr/src/app/host_config:rw` e defina `GN_HOST_ENV_PATH=/usr/src/app/host_config/.env`. Se esse arquivo não existir no container, o edge responderá `env.reported` com `status=rejected`.
 
-**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`.
+**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`. A variável referenciada deve existir; do contrário, o startup falha informando somente o nome da câmera e da variável, sem expor seu conteúdo.
 
 ---
 
@@ -441,6 +465,7 @@ GN_FFMPEG_STARTUP_CHECK_SEC=1.0 # Tempo para validar boot do FFmpeg (padrão: 1s
 GN_SEG_TIME=1                   # Duração de cada segmento (padrão: 1s)
 GN_RTSP_PRE_SEGMENTS=6          # Segmentos antes do clique (padrão: 6)
 GN_RTSP_POST_SEGMENTS=3         # Segmentos depois do clique (padrão: 3)
+GN_MAX_BUFFER_SECONDS=          # Opcional; padrão=max(40, (pre+post+2)*segmento)
 
 # Encoder RTSP
 GN_RTSP_PROFILE=               # vazio=inferido por GN_LIGHT_MODE; "hq" ou "compatible"
@@ -522,11 +547,19 @@ GN_PICO_TRIGGER_TOKEN=BTN_REPLAY  # fallback global (câmeras sem token dedicado
 Comunicação bidirecional com o Pico:
 - **Edge → Pico:** ao abrir a serial, o edge envia `GRN_STARTED` para sinalizar que o runtime está operacional. O envio é repetido até o Pico responder `ACK_GRN_STARTED`; o ACK é a confirmação real de que o Pico recebeu o comando e acendeu o LED.
 - **Pico → Edge:** tokens de botão, Docker e trigger são enviados pelo firmware.
-- Após `PULL_DOCKER`/`RESTART_DOCKER`, o LED apaga e só reacende quando o novo container reenviar `GRN_STARTED` e receber `ACK_GRN_STARTED`.
 
-Lógica de roteamento ao receber um token pela serial:
+Existem dois modelos de firmware, com comportamento visual e gestos diferentes:
+
+| Modelo | Firmware | Escopo |
+|---|---|---|
+| V1 legado | `raspberry_pico/main.py` | Triggers, restart/pull e LED unico de handshake. |
+| V2 operacional | `raspberry_pico/main_operational_v2.py` | Dois LEDs, estados de camera/MQTT/upload, diagnostico, manutencao, watchdog e poweroff confirmado. |
+
+Pinagem, gestos, LEDs, protocolo e compatibilidade estao documentados separadamente em [`docs/PICO_MODELS.md`](docs/PICO_MODELS.md). Nao use a leitura de LED do V1 para diagnosticar um Pico V2.
+
+Lógica comum de roteamento ao receber um token pela serial:
 1. `ACK_GRN_STARTED` → log info, ignorado (confirmação do handshake)
-2. Token de manutenção Docker (`PULL_DOCKER`/`RESTART_DOCKER`) → grava uma solicitação em `runtime_config` para o host executar via systemd
+2. Token de manutenção host (`PULL_DOCKER`/`RESTART_DOCKER` e, no V2 autorizado, `SHUTDOWN_HOST`) → grava uma solicitação em `runtime_config` para o host executar via systemd
 3. Token está no mapa dedicado → dispara só a câmera correspondente
 4. Token é o global (`GN_PICO_TRIGGER_TOKEN`) → fan-out para câmeras sem token dedicado
 5. Token desconhecido → `warning` no log, listener continua sem interrupção
@@ -537,10 +570,14 @@ Tokens de manutenção Docker:
 GN_PICO_DOCKER_ACTIONS_ENABLED=1
 GN_PICO_DOCKER_PULL_TOKEN=PULL_DOCKER
 GN_PICO_DOCKER_RESTART_TOKEN=RESTART_DOCKER
+GN_PICO_HOST_SHUTDOWN_ENABLED=0  # opt-in; requer runner privilegiado no host
+GN_PICO_HOST_SHUTDOWN_TOKEN=SHUTDOWN_HOST
 GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
 ```
 
-O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host para executar `docker compose pull && docker compose up -d --force-recreate --remove-orphans` ou `docker compose up -d --force-recreate --remove-orphans`. Antes de recriar, o runner do host regenera `config.json` a partir do `.env`, preservando identidade e segredos somente no `.env`. O `RESTART_DOCKER` recria o container para reler `env_file` e aplicar alterações no `.env`; não baixa imagem nova. O diretório `runtime_config` precisa ser volume persistente para não perder `config.json`, `config.pending.json`, `config.state.json`, `config.backup.json` e solicitações de ação.
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
+
+Configurações operacionais recebidas por `config.desired` são persistidas no `config.json`/pending e nos campos equivalentes do `.env` gerenciado antes do report de sucesso. Assim, o próximo pull/restart reconstrói o JSON sem perder a alteração. Segredos, identidade e variáveis sem equivalente operacional são preservados.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
@@ -562,6 +599,7 @@ GN_HQ_CRF=18                    # CRF do encode com watermark no modo normal
 GN_HQ_PRESET=medium             # Preset do encode com watermark no modo normal
 GN_LM_CRF=26                    # CRF do encode com watermark no modo leve
 GN_LM_PRESET=veryfast           # Preset do encode com watermark no modo leve
+GN_CLIENT_WATERMARK_ENABLED=1   # 1=inclui logo do cliente; 0=somente marca Grava Nóis (padrão: 1)
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
 GN_WM_OPACITY=0.8               # Opacidade da logo (0.0 a 1.0)
 GN_WM_MARGIN=24                 # Margem vertical da safe zone
@@ -569,6 +607,8 @@ VERTICAL_FORMAT=0               # 1=crop central 9:16 sem upscale forçado
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
+
+`GN_CLIENT_WATERMARK_ENABLED` é lida exclusivamente do `.env`, exige reinício do edge e afeta somente clipes ainda não processados. A ausência da variável preserva o comportamento anterior (`1`).
 
 #### Teste real sem Docker
 
@@ -649,7 +689,8 @@ Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumi
 ### Variáveis principais
 
 - `GN_MQTT_ENABLED`: habilita/desabilita o serviço MQTT
-- `GN_MQTT_BROKER_URL` ou `GN_MQTT_HOST` + `GN_MQTT_PORT`: broker MQTT
+- `GN_MQTT_BROKER_URL`: URL `mqtt://` ou `mqtts://`; WebSocket não é suportado
+- `GN_MQTT_HOST` + `GN_MQTT_PORT`: host/porta legados para transporte MQTT TCP
 - `GN_MQTT_USERNAME` e `GN_MQTT_PASSWORD`: credenciais do broker
 - `GN_MQTT_CLIENT_ID`: identificador MQTT do cliente; default em `DEVICE_ID`
 - `GN_MQTT_KEEPALIVE`: keepalive MQTT
