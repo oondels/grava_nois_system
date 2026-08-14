@@ -69,6 +69,7 @@
 
 ### Changed
 - **MQTT inicia antes das câmeras**: presença e heartbeat publicam status mesmo com falha total de hardware.
+- Configuração remota passa a aplicar payload válido mesmo quando `config_version` é antiga, já aplicada ou menor que a pendente.
 - Startup de câmera não-fatal: falha em `start_ffmpeg()` marca câmera como `UNAVAILABLE` sem abortar o processo.
 - Healthcheck Docker mede liveness do processo Python em vez de FFmpeg.
 - `CameraRuntime.proc` e `.segbuf` agora são opcionais (`None` quando câmera indisponível).

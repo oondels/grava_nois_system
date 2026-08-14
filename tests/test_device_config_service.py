@@ -617,7 +617,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
 
         self.assertIn("expirada", str(ctx.exception))
 
-    def test_rejects_old_version(self) -> None:
+    def test_applies_old_version_when_payload_is_valid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             client = _FakeMQTTClient()
@@ -642,16 +642,18 @@ class DeviceConfigServiceTests(unittest.TestCase):
             )
 
             result = service.process_desired_config(payload)
+            config_data = json.loads((base / "config.json").read_text(encoding="utf-8"))
+            state_data = json.loads((base / "config.state.json").read_text(encoding="utf-8"))
             service.publish_report(result)
 
         report = client.published[-1][1]
-        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.status, "applied")
         self.assertEqual(result.config_version, 2)
+        self.assertEqual(config_data["operationWindow"]["start"], "08:00")
+        self.assertEqual(state_data["lastAppliedVersion"], 2)
         self.assertEqual(result.correlation_id, "corr-01")
-        self.assertEqual(result.last_applied_version, 3)
-        self.assertEqual(report["status"], "rejected")
-        self.assertEqual(report["rejection_reason"], "config_version antiga ou já aplicada")
-        self.assertEqual(report["last_applied_version"], 3)
+        self.assertEqual(report["status"], "applied")
+        self.assertEqual(report["last_applied_version"], 2)
         self.assertIn("reported_config", report)
         self.assertEqual(report["reported_hash"], hash_config(report["reported_config"]))
         self.assertEqual(report["signature_version"], "hmac-sha256-v1")
