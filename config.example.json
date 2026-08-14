@@ -83,7 +83,7 @@
 
   "processing": {
     "_comment": "Processamento de clips. lightMode e maxAttempts exigem restart do worker.",
-    "_modes": "lightMode=false: alta qualidade (hqCrf+hqPreset). lightMode=true: modo leve para hardware fraco (lmCrf+lmPreset). Watermark sempre ativa em ambos os modos.",
+    "_modes": "lightMode=false: alta qualidade (hqCrf+hqPreset). lightMode=true: modo leve para hardware fraco (lmCrf+lmPreset). Marca Grava Nois sempre ativa; logo do cliente controlada por GN_CLIENT_WATERMARK_ENABLED no .env.",
     "lightMode": false,
     "maxAttempts": 3,
     "verticalFormat": false,

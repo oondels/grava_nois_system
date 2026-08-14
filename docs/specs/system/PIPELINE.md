@@ -135,7 +135,7 @@ Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status
 
 ### Normal mode (light_mode=false)
 
-1. aplica watermark com `hqCrf` + `hqPreset` (alta qualidade);
+1. aplica a watermark Grava Nóis e, quando `GN_CLIENT_WATERMARK_ENABLED=1`, a logo do cliente, usando `hqCrf` + `hqPreset` (alta qualidade);
 2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 3. salva resultado em `highlights_wm/`;
 4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
@@ -147,9 +147,9 @@ Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status
 
 ### Light mode (light_mode=true)
 
-Modo para hardware fraco — watermark é sempre aplicada, mas com encode mais leve:
+Modo para hardware fraco — a regra de branding é a mesma do modo normal, mas com encode mais leve:
 
-1. aplica watermark com `lmCrf` + `lmPreset` (menor custo de CPU);
+1. aplica a watermark Grava Nóis e a logo opcional do cliente com `lmCrf` + `lmPreset` (menor custo de CPU);
 2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 3. salva resultado em `highlights_wm/`;
 4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -51,7 +52,12 @@ def _deep_update(target: dict, overrides: dict) -> None:
 
 
 class DeviceConfigServiceTests(unittest.TestCase):
-    def _service(self, base: Path, client: _FakeMQTTClient | None = None) -> DeviceConfigService:
+    def _service(
+        self,
+        base: Path,
+        client: _FakeMQTTClient | None = None,
+        env_path: Path | None = None,
+    ) -> DeviceConfigService:
         return DeviceConfigService(
             client or _FakeMQTTClient(),
             device_id="edge-01",
@@ -62,6 +68,7 @@ class DeviceConfigServiceTests(unittest.TestCase):
             request_topic="grn/devices/edge-01/config/request",
             state_topic="grn/devices/edge-01/config/state",
             config_path=base / "config.json",
+            env_path=env_path,
             device_secret="secret-123",
             agent_version="1.2.3",
         )
@@ -357,6 +364,41 @@ class DeviceConfigServiceTests(unittest.TestCase):
             ),
         )
 
+    def test_persists_remote_config_to_env_and_survives_regeneration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env_path = base / ".env"
+            env_path.write_text(
+                "# identidade preservada\nDEVICE_SECRET=do-not-change\nGN_MQTT_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            current = self._desired_config()
+            (base / "config.json").write_text(json.dumps(current), encoding="utf-8")
+            service = self._service(base, env_path=env_path)
+            payload = self._payload(
+                self._desired_config({"operationWindow": {"start": "08:00", "end": "22:00"}})
+            )
+
+            result = service.process_desired_config(payload)
+            env_content = env_path.read_text(encoding="utf-8")
+            regenerated = base / "regenerated.json"
+            subprocess.run(
+                ["bash", "env_to_config.sh", str(env_path), str(regenerated)],
+                cwd=Path(__file__).resolve().parents[1],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            regenerated_config = json.loads(regenerated.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, "applied")
+        self.assertIn("DEVICE_SECRET=do-not-change", env_content)
+        self.assertIn("GN_MQTT_PASSWORD=secret", env_content)
+        self.assertIn("GN_START_TIME=08:00", env_content)
+        self.assertEqual(regenerated_config["version"], 2)
+        self.assertEqual(regenerated_config["operationWindow"]["start"], "08:00")
+        self.assertEqual(regenerated_config["capture"]["v4l2"]["device"], "/dev/video0")
+
     def test_restart_changes_are_kept_pending_and_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -377,6 +419,28 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(pending_data["capture"]["segmentSeconds"], 2)
         self.assertFalse((base / "config.json").exists())
         self.assertEqual(state_data["pendingVersion"], 2)
+
+    def test_signed_restart_request_is_bound_to_desired_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            service = self._service(base)
+            payload = self._payload(
+                self._desired_config({"capture": {"segmentSeconds": 2}})
+            )
+            payload["restart_after_apply"] = True
+            payload["signature"] = sign_desired_config_payload(
+                payload=payload,
+                device_secret="secret-123",
+            )
+
+            result = service.process_desired_config(payload)
+
+        self.assertTrue(result.restart_after_apply)
+        tampered = dict(payload)
+        tampered["restart_after_apply"] = False
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(Exception, "assinatura"):
+                self._service(Path(tmp)).process_desired_config(tampered)
 
     def test_boot_promotes_pending_config_before_runtime_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

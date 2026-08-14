@@ -71,10 +71,13 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_AGENT_VERSION` | — | Versão de deploy (imagem/build) |
 | `GN_RUN_CAMERA_INTEGRATION` | — | Teste de integração manual |
 | `GN_CAMERA_INTEGRATION_OUTPUT_DIR` | — | Diretório de artefatos de teste |
+| `GN_CLIENT_WATERMARK_ENABLED` | — | Exibe a logo secundária do cliente; padrão `1` e exige restart |
 
 `GN_MQTT_BROKER_URL` aceita apenas `mqtt://` ou `mqtts://`. No `config.json`,
 `mqtt.broker.host` contém somente o hostname; protocolo e TLS são representados
 separadamente por `mqtt.broker.tls`.
+
+`GN_CLIENT_WATERMARK_ENABLED` não participa de `config.json` nem da configuração remota MQTT. Com `0`, somente a logo do cliente é omitida; a watermark Grava Nóis continua obrigatória. A flag ausente equivale a `1` e a mudança vale após reiniciar o edge.
 
 ---
 
@@ -145,7 +148,9 @@ O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES
 
 Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. Antes do recreate, o runner executa o conversor persistente e regenera atomicamente `config.json` a partir do `.env`; falha na conversao interrompe a acao. Identidade e segredos permanecem somente no `.env`.
 
-Esse contrato torna o `.env` autoritativo para campos operacionais durante `restart_container` e `pull_and_recreate`. Configuracao aplicada somente no JSON por MQTT sera substituida pelos valores equivalentes do `.env` nessas acoes.
+O `config.desired` operacional aceito é convertido para as variáveis equivalentes e gravado atomicamente no `.env` gerenciado antes do report MQTT. A escrita preserva identidade, segredos e campos não gerenciados, cria backup `0600` e faz rollback se a promoção do JSON falhar. Assim, `.env` e JSON permanecem reconciliados durante `restart_container` e `pull_and_recreate`.
+
+Quando `restart_after_apply=true` está presente no envelope HMAC, o edge só agenda `restart_container` depois de persistir o `.env` e publicar o report de sucesso. O campo participa da assinatura; alterá-lo em trânsito invalida o comando.
 
 ---
 

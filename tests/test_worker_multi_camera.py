@@ -230,6 +230,37 @@ class WorkerMultiCameraTests(unittest.TestCase):
             "Worker deve repassar a logo secundária do cliente",
         )
 
+    def test_worker_omits_client_watermark_when_path_is_none(
+        self, mock_api_cls, _ffprobe, _wm
+    ):
+        """Logo principal permanece e a logo do cliente pode ser omitida."""
+        mock_api_cls.return_value.is_configured.return_value = False
+
+        queue = self.base / "queue_raw" / "cam-client-wm-disabled"
+        failed = self.base / "failed_clips" / "cam-client-wm-disabled"
+        queue.mkdir(parents=True, exist_ok=True)
+        _place_mp4(queue, "highlight_client_wm_disabled.mp4")
+        worker = _make_worker(queue, failed, client_watermark_path=None)
+
+        wm_calls: list[dict] = []
+
+        def _capture_wm(**kwargs):
+            wm_calls.append(kwargs)
+            Path(kwargs["output_path"]).write_bytes(b"wm")
+
+        with (
+            patch(
+                "src.workers.processing_worker.add_image_watermark",
+                side_effect=_capture_wm,
+            ),
+            patch.dict(os.environ, {"DEV": "", "API_BASE_URL": ""}),
+        ):
+            worker._scan_once()
+
+        self.assertEqual(len(wm_calls), 1)
+        self.assertEqual(wm_calls[0]["watermark_path"], "/dev/null")
+        self.assertIsNone(wm_calls[0]["secondary_watermark_path"])
+
     def test_light_mode_calls_watermark_with_veryfast_preset(self, mock_api_cls, _ffprobe, _wm):
         """Modo leve (light_mode=True) deve aplicar watermark com preset veryfast."""
         mock_api_cls.return_value.is_configured.return_value = False

@@ -3,6 +3,7 @@
 ## 2026-08-13
 
 ### Added
+- `feat(config)`: configuração operacional MQTT passa a persistir atomicamente também no `.env` gerenciado, preservando segredos e permitindo restart remoto assinado após confirmação.
 - `feat(rental)`: fila persistente `rental_clips_generated`, manifesto de agenda assinado e inventário/upload manual via MQTT para clipes gerados offline.
 - `feat(rental)`: probe CLI sem efeitos colaterais expõe versão do agente e confirma suporte ao contrato rental tenantless.
 - `feat(pico)`: firmware operacional V2 opt-in adiciona LEDs de estado, gestos administrativos, diagnóstico local, manutenção temporária e watchdog visual.
@@ -11,6 +12,7 @@
 - `docs(pico)`: guia canônico separa firmware V1 legado e V2 operacional, incluindo pinagem, gestos, LEDs e protocolo.
 
 ### Fixed
+- `fix(config)`: backup do `.env` operacional recebe permissão `0600`; falha de persistência restaura `.env` e estado pendente antes de reportar rejeição.
 - `fix(config)`: `cameras[]` gerenciado passa a ser autoritativo inclusive vazio, e referências `env:` ausentes falham sem expor credenciais.
 - `fix(mqtt)`: URL do broker aceita somente `mqtt://` e `mqtts://`, rejeitando WebSocket e aliases incompatíveis com o transporte TCP/TLS atual.
 - `fix(rental)`: rejeições definitivas identificadas pelo `error.code` também saem do retry e geram feedback visual no Pico V2.
@@ -35,6 +37,9 @@
 - `fix(rental)`: inicialização reforça as invariantes fixed/rental e configuração MQTT preserva `venue_id=null` de ponta a ponta.
 
 ## Unreleased
+
+### Added
+- `feat(edge)`: `GN_CLIENT_WATERMARK_ENABLED` controla a exibição da logo do cliente, mantendo a marca Grava Nóis e compatibilidade com instalações existentes.
 
 ### Fixed
 - `fix(rental)`: worker e retry normalizam o envelope oficial `{ data: { clip } }` do registro, preservando compatibilidade com o formato legado.

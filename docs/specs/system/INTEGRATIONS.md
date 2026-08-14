@@ -249,7 +249,7 @@ Canonical string:
 
 O contrato completo e separado por modelo esta em [`docs/PICO_MODELS.md`](../../../docs/PICO_MODELS.md).
 
-O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. Antes de pull/restart, o runner regenera `config.json` a partir do `.env` e aborta a acao se o conversor falhar. `PULL_DOCKER` faz pull e recreate; `RESTART_DOCKER` faz somente recreate. Assim, alteracoes existentes apenas no JSON remoto podem ser substituidas pelo `.env` nessas acoes.
+O edge não usa Docker socket. A execução real é responsabilidade do host instalado pelo `grava_nois_config` via systemd path/service, lendo `GN_DOCKER_ACTION_REQUEST_PATH`. Antes de pull/restart, o runner regenera `config.json` a partir do `.env` e aborta a ação se o conversor falhar. `PULL_DOCKER` faz pull e recreate; `RESTART_DOCKER` faz somente recreate. O edge persiste os campos operacionais recebidos remotamente no `.env` antes de solicitar essa ação, evitando reversão da configuração.
 
 ## WiFi Provisioning (hotspot local)
 

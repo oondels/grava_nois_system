@@ -465,8 +465,8 @@ if rtsp_profile not in {None, "hq", "compatible"}:
 # Monta config dict
 # ---------------------------------------------------------------------------
 config: dict = {
-    "version":   1,
-    "updatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "version":   _int("GN_CONFIG_VERSION", 1),
+    "updatedAt": _str("GN_CONFIG_UPDATED_AT", "") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "capture": {
         "segmentSeconds": _int("GN_SEG_TIME", 1),
         "preSegments":    _int("GN_RTSP_PRE_SEGMENTS", 6),
@@ -486,7 +486,7 @@ config: dict = {
             "lowDelayCodecFlags":    _bool("GN_RTSP_LOW_DELAY_CODEC_FLAGS", False),
         },
         "v4l2": {
-            "device":    "/dev/video0",
+            "device":    _str("GN_V4L2_DEVICE", "/dev/video0") or "/dev/video0",
             "framerate": _int("GN_INPUT_FRAMERATE", 30),
             "videoSize": _str("GN_VIDEO_SIZE", "1280x720") or "1280x720",
         },

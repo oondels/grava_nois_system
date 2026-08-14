@@ -17,7 +17,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from src.config.config_loader import get_effective_config
-from src.config.settings import CaptureConfig, load_capture_configs, load_mqtt_config
+from src.config.settings import (
+    CaptureConfig,
+    load_capture_configs,
+    load_client_watermark_enabled,
+    load_mqtt_config,
+)
 from src.services.docker_action_request import DockerActionRequestService
 from src.services.mqtt.capture_event_service import CaptureEventService
 from src.services.mqtt.command_dispatcher import CommandDispatcher
@@ -562,6 +567,9 @@ def main() -> int:
                 reported_topic=mqtt_config.topic_for(device_id, "config/reported"),
                 request_topic=mqtt_config.topic_for(device_id, "config/request"),
                 state_topic=mqtt_config.topic_for(device_id, "config/state"),
+                env_path=Path(
+                    os.getenv("GN_HOST_ENV_PATH", "/usr/src/app/host_config/.env")
+                ),
                 device_secret=(
                     os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""
                 ),
@@ -647,13 +655,15 @@ def main() -> int:
     optimized_wm_path = base / "files" / "replay_grava_nois_wm.png"
     watermark_path = optimized_wm_path if optimized_wm_path.exists() else default_wm_path
 
-    default_client_wm_path = base / "files" / "client_logo.png"
-    optimized_client_wm_path = base / "files" / "client_logo_wm.png"
-    client_watermark_path = (
-        optimized_client_wm_path
-        if optimized_client_wm_path.exists()
-        else default_client_wm_path
-    )
+    client_watermark_path: Path | None = None
+    if load_client_watermark_enabled():
+        default_client_wm_path = base / "files" / "client_logo.png"
+        optimized_client_wm_path = base / "files" / "client_logo_wm.png"
+        client_watermark_path = (
+            optimized_client_wm_path
+            if optimized_client_wm_path.exists()
+            else default_client_wm_path
+        )
     wm_margin = op_cfg.processing.watermark.margin
     wm_opacity = op_cfg.processing.watermark.opacity
     wm_rel_width = op_cfg.processing.watermark.relative_width

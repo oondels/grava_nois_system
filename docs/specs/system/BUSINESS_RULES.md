@@ -162,6 +162,8 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - o cálculo de `reported_hash` do snapshot deve normalizar `float` inteiros para manter compatibilidade de hash com o backend;
 - secrets, credenciais MQTT, tokens, `DEVICE_SECRET` e RTSP com `user:pass@` são rejeitados;
 - campos que exigem restart são gravados em `config.pending.json` e reportados como `pending_restart`;
+- antes de reportar `applied` ou `pending_restart`, o edge deve persistir os equivalentes operacionais no `.env` indicado por `GN_HOST_ENV_PATH`; falha restaura o estado anterior e resulta em `rejected`;
+- `restart_after_apply` integra o canonical HMAC e só pode gerar intenção host-side após persistência e report bem-sucedidos;
 - mudanças em domínios hot-reload-safe podem ser promovidas atomicamente para `config.json`;
 - `config_version` antiga, já aplicada ou menor que a pendente não bloqueia aplicação; payload válido sobrescreve a configuração desejada local;
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.

@@ -112,6 +112,11 @@ def _env_str(name: str, default: str = "") -> str:
     return str(value).strip()
 
 
+def load_client_watermark_enabled() -> bool:
+    """Return whether the client logo should be included in new clips."""
+    return _env_bool("GN_CLIENT_WATERMARK_ENABLED", True)
+
+
 def load_mqtt_config() -> MQTTConfig:
     """Carrega configuração MQTT a partir do loader central + segredos de env.
 

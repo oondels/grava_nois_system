@@ -251,7 +251,7 @@ O vídeo é movido para `queue_raw/` junto com um arquivo JSON contendo metadado
 O `ProcessingWorker` varre a fila periodicamente:
 
 **Modo Normal:**
-1. Aplica watermark sempre, com encode de alta qualidade (`GN_HQ_CRF` + `GN_HQ_PRESET`)
+1. Aplica a watermark Grava Nóis sempre e inclui a logo do cliente quando `GN_CLIENT_WATERMARK_ENABLED=1`, com encode de alta qualidade (`GN_HQ_CRF` + `GN_HQ_PRESET`)
 2. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` sem scale forçado
 3. Salva o resultado em `highlights_wm/` e atualiza o sidecar com `meta_wm`, `wm_path` e `wm_encode`
 4. Registra metadados no backend → recebe `upload_url`
@@ -261,7 +261,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 8. Observação: existe helper de thumbnail no código, mas ele não faz parte do pipeline ativo do worker
 
 **Modo Leve (`GN_LIGHT_MODE=1`):**
-1. Continua aplicando watermark local, mas com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
+1. Mantém a mesma regra de branding do modo normal, mas com encode mais leve (`GN_LM_CRF` + `GN_LM_PRESET`)
 2. Se `VERTICAL_FORMAT=1`, recorta o clipe para `9:16` sem scale forçado
 3. Usa perfil de captura RTSP `compatible` por inferência quando `GN_RTSP_PROFILE` não estiver explícito
 4. Registra metadados no backend → recebe `upload_url`
@@ -577,7 +577,7 @@ GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.
 
 O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
 
-Como o JSON e reconstruido, campos operacionais aplicados somente em `config.json` por configuracao remota serao substituidos pelos valores do `.env` no proximo pull/restart.
+Configurações operacionais recebidas por `config.desired` são persistidas no `config.json`/pending e nos campos equivalentes do `.env` gerenciado antes do report de sucesso. Assim, o próximo pull/restart reconstrói o JSON sem perder a alteração. Segredos, identidade e variáveis sem equivalente operacional são preservados.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
@@ -599,6 +599,7 @@ GN_HQ_CRF=18                    # CRF do encode com watermark no modo normal
 GN_HQ_PRESET=medium             # Preset do encode com watermark no modo normal
 GN_LM_CRF=26                    # CRF do encode com watermark no modo leve
 GN_LM_PRESET=veryfast           # Preset do encode com watermark no modo leve
+GN_CLIENT_WATERMARK_ENABLED=1   # 1=inclui logo do cliente; 0=somente marca Grava Nóis (padrão: 1)
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
 GN_WM_OPACITY=0.8               # Opacidade da logo (0.0 a 1.0)
 GN_WM_MARGIN=24                 # Margem vertical da safe zone
@@ -606,6 +607,8 @@ VERTICAL_FORMAT=0               # 1=crop central 9:16 sem upscale forçado
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
+
+`GN_CLIENT_WATERMARK_ENABLED` é lida exclusivamente do `.env`, exige reinício do edge e afeta somente clipes ainda não processados. A ausência da variável preserva o comportamento anterior (`1`).
 
 #### Teste real sem Docker
 
