@@ -58,6 +58,7 @@ Testes visíveis:
 - `test_dual_watermark_command.py`
 - `test_mobile_format.py`
 - `test_camera_watermark_integration.py`
+- `test_client_watermark_config.py`
 - `test_legacy_compatibility.py`
 - `test_multi_camera_settings.py`
 - `test_no_file_collisions.py`

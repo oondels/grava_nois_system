@@ -41,6 +41,9 @@
 ### Added
 - `feat(edge)`: `GN_CLIENT_WATERMARK_ENABLED` controla a exibição da logo do cliente, mantendo a marca Grava Nóis e compatibilidade com instalações existentes.
 
+### Changed
+- `docs(edge)`: documentação do worker, arquitetura, testes e fluxo funcional passa a distinguir a marca Grava Nóis obrigatória da logo opcional do cliente nos modos HQ e light.
+
 ### Fixed
 - `fix(rental)`: worker e retry normalizam o envelope oficial `{ data: { clip } }` do registro, preservando compatibilidade com o formato legado.
 - `fix(edge)`: inicialização com API configurada falha cedo sem client/device/segredo HMAC, e erros definitivos de finalize rental saem do loop de retry.

@@ -151,13 +151,13 @@ Ponto de integração:
 
 ### Normal mode (light_mode=false)
 
-- aplica watermark sempre, com encode de alta qualidade (`hqCrf` + `hqPreset`, padrão CRF 18 + medium);
+- aplica a marca Grava Nóis sempre e a logo secundária do cliente somente quando `GN_CLIENT_WATERMARK_ENABLED=1`, com encode de alta qualidade (`hqCrf` + `hqPreset`, padrão CRF 18 + medium);
 - crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 - register/upload/finalize.
 
 ### Light mode (light_mode=true)
 
-- aplica watermark sempre, com encode leve para hardware fraco (`lmCrf` + `lmPreset`, padrão CRF 26 + veryfast);
+- aplica a marca Grava Nóis sempre e a logo secundária opcional do cliente com encode leve para hardware fraco (`lmCrf` + `lmPreset`, padrão CRF 26 + veryfast);
 - crop 9:16 quando `VERTICAL_FORMAT=1` (mesmo reframe do modo normal);
 - register/upload/finalize (idêntico ao modo normal após o encode).
 
