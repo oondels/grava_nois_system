@@ -136,8 +136,10 @@ Camada opcional e isolada do pipeline principal:
 - assinatura de `config/desired` em serviço dedicado para configuração operacional remota segura;
 - publicação de `config/reported` com resultado `applied`, `pending_restart` ou `rejected`;
 - logger dedicado em `mqtt.log`;
-- estrutura de `commands/in` e `commands/out` preparada para a fase futura;
-- política explícita que bloqueia execução remota na fase 1.
+- `CommandDispatcher` recebe operações administrativas HMAC em `commands/in` e publica aceite/resultado em `commands/out`;
+- `CommandPolicy` mantém a feature opt-in, valida allowlist e expiração;
+- ledger persistente limita redelivery QoS 1 a uma única execução por `request_id`;
+- `CommandExecutor` grava somente uma intent host-only; o container não acessa Docker, systemd, Netplan ou reboot diretamente.
 
 Ponto de integração:
 

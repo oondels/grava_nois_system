@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-20
+
+### Added
+- feat(device): comandos admin HMAC opt-in com expiracao, ledger idempotente, intents host-only e reports de conclusao.
+
 ## 2026-08-13
 
 ### Added

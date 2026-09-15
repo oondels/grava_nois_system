@@ -126,3 +126,16 @@ Antes de alterar fluxos centrais do edge, valide:
 6. a spec especializada correspondente foi atualizada.
 7. `README.md`, `.env.example` e `AGENTS.md` foram atualizados quando houve mudança de contrato operacional;
 8. qualquer doc impactada pelo change foi atualizada no mesmo patch.
+## Comandos host-only
+
+O edge nunca recebe o socket Docker. Ele grava uma intent atômica e o watcher systemd instalado por `grava_nois_config` executa a allowlist no host. Segredos de Wi-Fi usam volume tmpfs separado; resultados sanitizados retornam por `commands/out`.
+
+Para habilitar em homologação:
+
+1. atualize o runner host-only e a imagem edge;
+2. confirme que o runtime persistente contém o ledger e os arquivos de resultado do runner;
+3. configure `GN_REMOTE_DEVICE_COMMANDS_ENABLED=1` e recrie o container;
+4. valide `restart_container`, `pull_and_recreate`, `reboot_host` e `change_wifi`, nesta ordem;
+5. na troca de Wi-Fi, confirme associação à rede nova, acesso ao broker e rollback para a rede anterior em caso de falha.
+
+Para interromper novas operações, volte a flag para `0` e recrie o container. Intents já aceitas podem concluir no host; consulte o histórico da API antes de repetir manualmente.

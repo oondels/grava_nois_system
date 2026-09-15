@@ -6,7 +6,7 @@
 >
 > **Rental offline:** falhas de upload ficam em `rental_clips_generated/{rentalId}` e só são reenviadas por solicitação do responsável/admin. Itens sem agenda assinada ficam em quarentena por até 48 horas.
 >
-> **Presença operacional:** MQTT pode ser habilitado para publicar `online/offline`, heartbeat e estado resumido do device sem ativar comandos remotos nesta fase.
+> **Presença operacional:** MQTT publica `online/offline`, heartbeat e estado resumido independentemente dos comandos remotos. Operações administrativas permanecem desabilitadas por padrão e exigem `GN_REMOTE_DEVICE_COMMANDS_ENABLED=1`.
 >
 > **Modo de locação:** com `GN_DEVICE_MODE=rental`, o device não usa `GN_CLIENT_ID` nem `GN_VENUE_ID`; a API resolve cliente e evento a partir da identidade HMAC e do horário capturado.
 > Configuração remota continua disponível nesse modo e usa `client_id: null` e `venue_id: null` nos envelopes MQTT.
@@ -298,7 +298,7 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 6. registra `last will` para marcar `offline` em queda abrupta;
 7. consome `config/desired` e `config/request` para configuração operacional remota segura;
 8. publica `config/reported` com resultado de aplicação/rejeição e `config/state` com snapshot da configuração efetiva;
-9. mantém `commands/in` e `commands/out` reservados para a fase futura.
+9. quando habilitado, recebe operações administrativas assinadas em `commands/in` e publica aceite/resultado em `commands/out`.
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
@@ -568,6 +568,8 @@ Tokens de manutenção Docker:
 
 ```bash
 GN_PICO_DOCKER_ACTIONS_ENABLED=1
+GN_REMOTE_DEVICE_COMMANDS_ENABLED=0
+GN_HOST_ACTION_SECRET_DIR=/usr/src/app/host_actions
 GN_PICO_DOCKER_PULL_TOKEN=PULL_DOCKER
 GN_PICO_DOCKER_RESTART_TOKEN=RESTART_DOCKER
 GN_PICO_HOST_SHUTDOWN_ENABLED=0  # opt-in; requer runner privilegiado no host
@@ -1084,14 +1086,23 @@ grn/devices/edge-test-01/commands/in
 Exemplo de mensagem recebida:
 ```json
 {
-  "command": "restart_service",
-  "request_id": "cmd-001",
-  "issued_by": "admin-user"
+  "type": "device.operation.request",
+  "device_id": "edge-test-01",
+  "request_id": "2646bd5c-d7e0-48a1-a4cc-96ee3fd9dad0",
+  "command": "restart_container",
+  "issued_at": "2026-09-15T14:00:00Z",
+  "expires_at": "2026-09-15T14:02:00Z",
+  "parameters": {},
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
 }
 ```
 
 Observação:
-- a fase 1 não executa comandos remotos; qualquer mensagem recebida aqui é rejeitada.
+- a execução exige `GN_REMOTE_DEVICE_COMMANDS_ENABLED=1`, HMAC válido, `device_id` correspondente, validade futura e `request_id` ainda não executado;
+- a allowlist contém somente `restart_container`, `reboot_host`, `pull_and_recreate` e `change_wifi`;
+- redelivery QoS 1 consulta o ledger persistente e não repete a ação;
+- `change_wifi` recebe a senha cifrada com AES-256-GCM e entrega o segredo ao host por arquivo transitório, nunca pelo arquivo de intent persistente.
 
 #### `grn/devices/{device_id}/commands/out`
 
@@ -1100,16 +1111,20 @@ Exemplo de tópico:
 grn/devices/edge-test-01/commands/out
 ```
 
-Exemplo de resposta publicada na fase 1:
+Exemplo de resposta publicada:
 ```json
 {
   "device_id": "edge-test-01",
-  "command": "restart_service",
-  "status": "rejected",
-  "reason": "remote commands are not enabled in phase 1",
-  "source_topic": "grn/devices/edge-test-01/commands/in"
+  "request_id": "2646bd5c-d7e0-48a1-a4cc-96ee3fd9dad0",
+  "command": "restart_container",
+  "status": "accepted",
+  "error_code": null,
+  "signature_version": "hmac-sha256-v1",
+  "signature": "base64-hmac"
 }
 ```
+
+Após o runner terminar, o edge publica outro report assinado com `status=succeeded|failed` e resultado sanitizado. Comando expirado usa `status=expired`; feature desabilitada, assinatura inválida e comando fora da allowlist não resultam em execução.
 
 ### Payload mínimo publicado
 
@@ -1131,14 +1146,16 @@ Exemplo de resposta publicada na fase 1:
 - `cameras[].last_error`
 - `cameras[].restart_attempts`
 
-### Garantias desta fase
+### Garantias do canal de operações
 
 - MQTT é opcional e isolado do fluxo de replay
 - MQTT inicia antes das câmeras para permitir status degradado mesmo com hardware indisponível
 - `presence` usa retained message e `last will`
 - heartbeats não executam comandos
-- qualquer comando recebido em `commands/in` é rejeitado explicitamente
-- configuração remota usa `config/desired`, `config/request`, `config/reported` e `config/state`, nunca `commands/in`
+- comandos administrativos ficam desabilitados por padrão e exigem flag explícita
+- somente a allowlist fixa pode gerar intent host-only; imagem, shell e path arbitrários não são aceitos
+- requests e reports usam HMAC por device, expiração e idempotência persistente
+- configuração operacional comum continua usando `config/desired`, `config/request`, `config/reported` e `config/state`; `commands/in` é exclusivo para operações invasivas
 - `config.json` é atualizado por escrita atômica e mantém `config.backup.json` quando promovido
 - `config.json`, `config.pending.json`, `config.state.json` e `config.backup.json` precisam ficar no mesmo diretorio persistente e gravavel quando o edge roda em Docker
 

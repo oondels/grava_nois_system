@@ -62,6 +62,8 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_LOG_DIR` | — | Path de logs de container |
 | `GN_PICO_PORT` | — | Path de device serial no host |
 | `GN_PICO_DOCKER_ACTIONS_ENABLED` | — | Habilita intents host-only de restart/pull via Pico |
+| `GN_REMOTE_DEVICE_COMMANDS_ENABLED` | `0` | Aceita comandos administrativos HMAC em commands/in |
+| `GN_HOST_ACTION_SECRET_DIR` | `/usr/src/app/host_actions` | Volume tmpfs para segredo transitorio de Wi-Fi |
 | `GN_PICO_HOST_SHUTDOWN_ENABLED` | — | Opt-in para poweroff confirmado via Pico; default `0` |
 | `GN_PICO_HOST_SHUTDOWN_TOKEN` | — | Token serial de poweroff; default `SHUTDOWN_HOST` |
 | `DEV` | — | Flag de desenvolvimento |

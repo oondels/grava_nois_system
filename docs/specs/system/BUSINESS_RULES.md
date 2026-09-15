@@ -169,3 +169,11 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.
 - `cameras` presente na configuração gerenciada é autoritativo inclusive como array vazio ou com todas as câmeras desabilitadas;
 - referência `env:` ausente em câmera habilitada rejeita o startup sem incluir credenciais no erro.
+## Operações administrativas
+
+O edge aceita apenas `restart_container`, `reboot_host`, `pull_and_recreate` e `change_wifi` com feature flag, HMAC válido, device correspondente e validade futura. O ledger persistente, limitado aos 200 registros mais recentes e gravado com permissão `0600`, impede reexecução por redelivery QoS 1.
+
+- comandos desabilitados, expirados, com assinatura inválida ou fora da allowlist nunca chegam ao executor;
+- o container não aceita imagem, tag, shell ou path arbitrário e não recebe o socket Docker;
+- a senha Wi-Fi é decifrada somente após validação do envelope e segue ao runner em arquivo transitório `0600`; a intent contém apenas SSID e referência segura;
+- o resultado do runner é observado após restart/reboot e publicado com HMAC, sem campos sensíveis.

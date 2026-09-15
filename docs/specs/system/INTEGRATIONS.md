@@ -144,16 +144,14 @@ Publicações da fase 1:
 - `grn/devices/{device_id}/config/reported`
 - `grn/devices/{device_id}/config/state`
 
-Tópicos reservados para evolução futura:
+Tópicos de eventos ainda reservados:
 
 - `grn/devices/{device_id}/events`
 - `grn/devices/{device_id}/alerts`
-- `grn/devices/{device_id}/commands/in`
-- `grn/devices/{device_id}/commands/out`
 
-Inscrições da fase 1:
+Inscrições MQTT:
 
-- `grn/devices/{device_id}/commands/in` — recebe e rejeita comandos remotos;
+- `grn/devices/{device_id}/commands/in` — recebe operações administrativas assinadas quando a feature está habilitada;
 - `grn/devices/{device_id}/config/desired` — recebe configuração operacional remota assinada.
 - `grn/devices/{device_id}/config/request` — recebe solicitação assinada de snapshot atual da configuração efetiva.
 
@@ -165,7 +163,7 @@ Observações:
 - TLS usa validacao obrigatoria da cadeia (`ssl.CERT_REQUIRED`); falhas de certificado do broker nao devem ser contornadas com modo inseguro, e o cliente continua tentando reconectar ate o servidor ser corrigido;
 - mensagens recebidas são despachadas para uma thread dedicada de handlers, evitando I/O síncrono no loop Paho;
 - heartbeat e state são protegidos contra exceções no snapshot provider;
-- a fase 1 não executa comandos remotos mesmo que receba mensagens em `commands/in`.
+- operações administrativas permanecem desabilitadas por padrão; quando habilitadas, exigem HMAC, expiração, identidade correspondente e allowlist fixa.
 - o `device_id` usado no namespace `grn/devices/{device_id}/...` deve ser um único nível de tópico; valores com `/`, `+`, `#` ou byte nulo são rejeitados na montagem do tópico e fazem apenas a presença MQTT ser ignorada.
 
 Exemplos rápidos por tópico:
@@ -194,9 +192,11 @@ Exemplos rápidos por tópico:
 - `alerts`
   - tópico reservado para alertas futuros; fase 1 não publica nele
 - `commands/in`
-  - aceita mensagens de comando para evolução futura, mas a fase 1 não executa nada
+  - recebe `device.operation.request` para `restart_container`, `reboot_host`, `pull_and_recreate` ou `change_wifi`
+  - usa QoS 1, `request_id` idempotente, validade curta e HMAC-SHA256/base64 com `DEVICE_SECRET`
 - `commands/out`
-  - publica resposta de rejeição: `status=rejected`, `reason=remote commands are not enabled in phase 1`
+  - publica reports assinados de aceite e conclusão: `accepted`, `succeeded`, `failed` ou `expired`
+  - resultado é sanitizado e não contém senha, token, assinatura recebida, path local ou conteúdo da intent
 - `config/desired`
   - recebe envelope `config.desired` com `desired_config` completo, hash, expiração e assinatura HMAC
 - `config/reported`
