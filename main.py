@@ -557,6 +557,7 @@ def main() -> int:
                 device_id=device_id,
                 command_in_topic=mqtt_config.topic_for(device_id, "commands/in"),
                 command_out_topic=mqtt_config.topic_for(device_id, "commands/out"),
+                device_secret=(os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or ""),
             )
             mqtt_config_service = DeviceConfigService(
                 mqtt_client,

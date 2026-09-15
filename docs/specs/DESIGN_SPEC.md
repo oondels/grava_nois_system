@@ -8,6 +8,7 @@ Registro inicial e retry compartilham a mesma normalização do envelope de clip
 A identidade da clean architecture aplica as mesmas invariantes: `fixed` exige venue e `rental` exige venue ausente. Checkpoints de delivery nunca persistem credenciais temporárias da URL assinada.
 O probe `python -m src.cli.rental_compat_probe` confirma, sem iniciar o pipeline, o contrato rental tenantless e a versão declarada em `GN_AGENT_VERSION`.
 Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclusive vazio; fontes legadas só participam quando o campo está ausente.
+Comandos administrativos invasivos permanecem opt-in, validam HMAC, expiração, identidade e idempotência, e só escrevem intents para o runner do host. A allowlist cobre restart/recreate do container, pull da imagem configurada, reboot e troca segura de Wi-Fi.
 O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
 No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
 

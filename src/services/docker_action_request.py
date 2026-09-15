@@ -74,8 +74,10 @@ class DockerActionRequestService:
         source: str,
         token: str | None = None,
         fallback_on_failure: bool = False,
+        request_id: str | None = None,
+        parameters: dict[str, Any] | None = None,
     ) -> bool:
-        if action not in {"pull_and_recreate", "restart_container", "shutdown_host"}:
+        if action not in {"pull_and_recreate", "restart_container", "shutdown_host", "reboot_host", "change_wifi"}:
             self._log("warning", "Acao Docker invalida ignorada: %s", action)
             return False
 
@@ -96,9 +98,10 @@ class DockerActionRequestService:
             return True
 
         try:
-            payload = {
+            secret_path: Path | None = None
+            payload: dict[str, Any] = {
                 "schema_version": 1,
-                "request_id": str(uuid.uuid4()),
+                "request_id": request_id or str(uuid.uuid4()),
                 "requested_at": datetime.now(timezone.utc).isoformat(),
                 "source": source,
                 "action": action,
@@ -106,9 +109,22 @@ class DockerActionRequestService:
             }
             if token:
                 payload["token"] = token
+            if action == "change_wifi":
+                values = parameters or {}
+                ssid = values.get("ssid")
+                password = values.get("wifi_password")
+                if not isinstance(ssid, str) or not isinstance(password, str):
+                    raise ValueError("Credenciais Wi-Fi invalidas")
+                secret_dir = Path(os.getenv("GN_HOST_ACTION_SECRET_DIR", "/usr/src/app/host_actions"))
+                secret_dir.mkdir(parents=True, exist_ok=True)
+                secret_path = secret_dir / f"{payload['request_id']}.wifi.json"
+                secret_path.write_text(json.dumps({"ssid": ssid, "password": password}, ensure_ascii=False))
+                os.chmod(secret_path, 0o600)
+                payload["parameters"] = {"ssid": ssid, "secret_ref": secret_path.name}
             self.request_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self.request_path.with_name(f".{self.request_path.name}.tmp")
             tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            os.chmod(tmp_path, 0o600)
             tmp_path.replace(self.request_path)
             self._log(
                 "warning",
@@ -118,6 +134,8 @@ class DockerActionRequestService:
                 payload["request_id"],
             )
         except Exception as exc:
+            if "secret_path" in locals() and secret_path is not None:
+                secret_path.unlink(missing_ok=True)
             self._log(
                 "error",
                 "Falha ao registrar acao Docker em %s: %s",
