@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
+from typing import Any
 
 from src.application.delivery.retry_policy import RetryPolicy
 from src.application.dto import ClipJobSnapshot, RemoteClipRegistration, UploadReceipt
@@ -44,12 +45,17 @@ class ProcessClipJob:
                 raise NotFoundError(f"clip job not found: {job_id}")
 
             if job.state is ClipJobState.FINALIZED:
-                self.artifacts.cleanup(job, self._artifact(job))
+                try:
+                    self.artifacts.cleanup(job, self._artifact(job))
+                except Exception:
+                    if job.schema_version != 3:
+                        raise
+                    return self._handle_failure(job, retryable=True)
                 return self._snapshot(job)
             if job.state in _TERMINAL_STATES:
                 return self._snapshot(job)
             if job.state is ClipJobState.FAILED:
-                return self._discard(job)
+                return self._snapshot(job) if job.schema_version == 3 else self._discard(job)
             if job.state is ClipJobState.RETRY_PENDING:
                 if not self.retry_policy.is_due(job, now=self.clock.now()):
                     return self._snapshot(job)
@@ -59,7 +65,7 @@ class ProcessClipJob:
             try:
                 return self._advance(job)
             except DeliveryStepError as error:
-                return self._handle_failure(job, retryable=error.retryable)
+                return self._handle_failure(job, retryable=error.retryable, error=error)
             except Exception:
                 return self._handle_failure(job, retryable=True)
 
@@ -123,8 +129,69 @@ class ProcessClipJob:
 
         return self._snapshot(job)
 
-    def _handle_failure(self, job: ClipJob, *, retryable: bool) -> ClipJobSnapshot:
+    def _handle_failure(
+        self, job: ClipJob, *, retryable: bool, error: Any = None
+    ) -> ClipJobSnapshot:
         current = self.jobs.get(job.job_id) or job
+        if current.schema_version == 3:
+            if current.state is ClipJobState.FINALIZED:
+                # Storage confirmation is irreversible. Cleanup cannot turn it
+                # into a failed upload or repeat remote effects.
+                current = replace(
+                    current,
+                    next_attempt_at=self.clock.now() + timedelta(seconds=120),
+                    details={
+                        **current.details,
+                        "last_error": {
+                            "stage": "cleanup",
+                            "code": "cleanup_pending",
+                            "occurred_at": self.clock.now().isoformat(),
+                        },
+                    },
+                )
+                self.jobs.save(current)
+                return self._snapshot(current)
+            stage = {
+                ClipJobState.WATERMARKED: "registration",
+                ClipJobState.REGISTERED: "upload",
+                ClipJobState.UPLOADED: "finalize",
+            }.get(current.state, "processing")
+            attempts = dict(current.details.get("attempts_by_stage", {}))
+            code = getattr(error, "code", "delivery_failed")
+            blocked = getattr(error, "blocked", False)
+            if not blocked:
+                attempts[stage] = attempts.get(stage, 0) + 1
+            terminal = not blocked and (
+                not retryable or attempts[stage] >= self.retry_policy.max_attempts
+            )
+            state = (
+                ClipJobState.BLOCKED
+                if blocked
+                else (ClipJobState.FAILED if terminal else ClipJobState.RETRY_PENDING)
+            )
+            failed = replace(
+                current,
+                state=state,
+                attempts=current.attempts + (0 if blocked else 1),
+                retry_from=current.state,
+                next_attempt_at=None
+                if terminal
+                else self.clock.now()
+                + timedelta(
+                    seconds=900 if blocked else min(900, 120 * 2 ** min(attempts[stage] - 1, 3))
+                ),
+                details={
+                    **current.details,
+                    "attempts_by_stage": attempts,
+                    "last_error": {
+                        "stage": stage,
+                        "code": code,
+                        "occurred_at": self.clock.now().isoformat(),
+                    },
+                },
+            )
+            self.jobs.save(failed)
+            return self._snapshot(failed)
         failed = self.retry_policy.record_failure(
             current,
             now=self.clock.now(),

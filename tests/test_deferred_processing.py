@@ -1,9 +1,11 @@
 """Isolated deferred edge contracts: no cameras, broker, API or credentials."""
 
+import json
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from src.application.replay.preserve_replay import PreserveReplay
@@ -23,6 +25,8 @@ from src.infrastructure.filesystem.deferred_repository import (
     exclusive_file,
     safe_child,
 )
+from src.services.mqtt.operational_event_service import OperationalEventService, sign_operational
+from src.services.storage_monitor import StorageBlocked, StorageMonitor
 from src.video.buffer import SegmentBuffer
 
 UTC = UTC
@@ -236,6 +240,82 @@ class PreservationTests(unittest.TestCase):
                 [segment, {"start_offset": 3, "end_offset": 5, "session_id": "a"}], 4
             )
         )
+
+
+class StorageTests(unittest.TestCase):
+    def test_decimal_threshold_hysteresis_and_reservations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            free = [4_000_000_000]
+            events = Mock()
+            monitor = StorageMonitor(
+                [tmp, tmp], events, lambda _: SimpleNamespace(free=free[0], total=10_000_000_000)
+            )
+            self.assertFalse(monitor.poll()[0]["low_space"])
+            free[0] -= 1
+            self.assertTrue(monitor.poll()[0]["low_space"])
+            monitor.poll()
+            self.assertEqual(1, events.emit.call_count)
+            monitor.check(Path(tmp), 1024)  # warning alone does not block
+            free[0] = 4_500_000_000
+            self.assertTrue(monitor.poll()[0]["low_space"])
+            self.assertFalse(monitor.poll()[0]["low_space"])
+            monitor.reserve("a", Path(tmp), 4_000_000_000)
+            with self.assertRaises(StorageBlocked):
+                monitor.reserve("b", Path(tmp), 1_000_000_000)
+
+
+class OutboxTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.client = Mock()
+        self.client.publish_json.return_value = True
+        self.service = OperationalEventService(
+            Path(self.tmp.name),
+            self.client,
+            lambda suffix: "grn/devices/test/" + suffix,
+            IDENTITY,
+            "test-only-secret",
+        )
+
+    def ack(self, payload, status="persisted"):
+        ack = {
+            **IDENTITY,
+            "event_id": payload["event_id"],
+            "ack_hash": payload["content_hash"],
+            "status": status,
+        }
+        ack["signature"] = sign_operational(ack, "test-only-secret")
+        self.service._ack("grn/devices/test/capture/events/ack", json.dumps(ack).encode())
+
+    def test_publish_success_is_not_backend_confirmation(self):
+        self.service.emit("processing.failed", code="test_error")
+        self.service.flush_once()
+        path = next(self.service.outbox.glob("*.json"))
+        payload = json.loads(path.read_text())
+        self.ack(payload, "rejected")
+        self.assertTrue(path.exists())
+        self.ack(payload)
+        self.assertFalse(path.exists())
+        self.assertEqual(1, len(list(self.service.history.glob("*.json"))))
+
+    def test_restart_keeps_identity_and_failed_network_pending(self):
+        self.service.emit("processing.failed", code="test_error")
+        path = next(self.service.outbox.glob("*.json"))
+        original = json.loads(path.read_text())
+        other = OperationalEventService(
+            Path(self.tmp.name), self.client, self.service.topic_for, IDENTITY, "test-only-secret"
+        )
+        self.client.publish_json.return_value = False
+        other.flush_once()
+        self.assertEqual(original, json.loads(path.read_text()))
+
+    def test_saturation_is_persisted_and_no_fake_success(self):
+        self.service.OUTBOX_LIMIT = 10
+        self.service.CRITICAL_RESERVE = 0
+        self.service.emit("processing.failed", code="test_error")
+        self.assertTrue(json.loads(self.service.status_path.read_text())["saturated"])
+        self.assertEqual([], list(self.service.outbox.glob("*.json")))
 
 
 if __name__ == "__main__":

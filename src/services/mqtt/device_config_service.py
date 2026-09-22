@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.config.config_loader import get_config_path, get_effective_config, reset_config_cache
+from src.config.config_loader import configuration_transaction, get_config_path, get_effective_config, reset_config_cache
 from src.config.config_schema import validate_config_dict
 from src.config.operational_env import persist_operational_config, restore_env_content
 from src.security.hmac import hmac_sha256_base64
@@ -76,6 +76,8 @@ _ALLOWED_KEYS_BY_PATH: dict[tuple[str, ...], set[str]] = {
     ("triggers", "pico"): {"globalToken"},
     ("triggers", "gpio"): {"pin", "debounceMs", "cooldownSeconds"},
     ("processing",): {
+        "deferredEnabled",
+        "additionalWindows",
         "lightMode",
         "maxAttempts",
         "verticalFormat",
@@ -85,6 +87,7 @@ _ALLOWED_KEYS_BY_PATH: dict[tuple[str, ...], set[str]] = {
         "lmPreset",
         "watermark",
     },
+    ("processing", "additionalWindows", "*"): {"weekdays", "start", "end"},
     ("processing", "watermark"): {"relativeWidth", "opacity", "margin"},
     ("operationWindow",): {"timeZone", "start", "end"},
     ("mqtt",): {
@@ -123,6 +126,7 @@ _RESTART_PATHS = {
     ("triggers", "maxWorkers"),
     ("triggers", "pico", "globalToken"),
     ("triggers", "gpio", "pin"),
+    ("processing", "deferredEnabled"),
     ("processing", "lightMode"),
     ("processing", "maxAttempts"),
     ("processing", "verticalFormat"),
@@ -189,6 +193,7 @@ class DeviceConfigService:
         self.agent_version = agent_version
         self._connect_listener_registered = False
         self._pending_startup_report: _ReportResult | None = None
+        self._apply_lock = threading.RLock()
 
     def start(self) -> bool:
         if not self.mqtt_client.is_enabled:
@@ -258,7 +263,7 @@ class DeviceConfigService:
             result = _ReportResult(
                 status="rejected",
                 config_version=_safe_int_from_payload(raw_payload),
-                correlation_id=None,
+                correlation_id=payload.get("correlation_id") if isinstance(locals().get("payload"), dict) else None,
                 requires_restart=False,
                 reported_hash=None,
                 reported_config=None,
@@ -267,6 +272,10 @@ class DeviceConfigService:
             self.publish_report(result)
 
     def process_desired_config(self, payload: dict[str, Any]) -> "_ReportResult":
+        with self._apply_lock, configuration_transaction:
+            return self._process_desired_config(payload)
+
+    def _process_desired_config(self, payload: dict[str, Any]) -> "_ReportResult":
         config_version = _required_int(payload, "config_version")
         correlation_id = _required_str(payload, "correlation_id")
         schema_version = _required_int(payload, "schema_version")
@@ -299,6 +308,26 @@ class DeviceConfigService:
 
         state = self._load_state()
         current_config = self._load_current_config()
+        known = max(int(state.get("lastAppliedVersion") or 0), int(state.get("pendingVersion") or 0), int(current_config.get("version") or 0))
+        if config_version < known:
+            raise RemoteConfigError("stale_config_version")
+        if config_version == known:
+            pending = state.get("pendingVersion") == known and self.pending_path.exists()
+            actual = json.loads(self.pending_path.read_text()) if pending else current_config
+            if hash_config(actual) != desired_hash:
+                raise RemoteConfigError("config_version_hash_conflict")
+            return _ReportResult(status="pending_restart" if pending else "applied",
+                config_version=known, correlation_id=correlation_id, requires_restart=pending,
+                reported_hash=desired_hash, reported_config=None if pending else actual,
+                rejection_reason=None, last_applied_version=state.get("lastAppliedVersion"),
+                pending_version=known if pending else None)
+        desired_processing = desired_config.get("processing", {})
+        if desired_processing.get("deferredEnabled") and self.venue_id is None:
+            raise RemoteConfigError("deferred_processing_requires_fixed_device")
+        current_processing = current_config.get("processing", {})
+        for field in ("deferredEnabled", "additionalWindows"):
+            if current_processing.get(field) and field not in desired_processing:
+                raise RemoteConfigError("deferred_fields_missing_from_desired")
         requires_restart = payload.get("requires_restart")
         if requires_restart is None:
             requires_restart = _requires_restart(current_config, desired_config)
@@ -310,6 +339,11 @@ class DeviceConfigService:
         if restart_after_apply and not requires_restart:
             raise RemoteConfigError("restart_after_apply sem configuração pendente de restart")
 
+        previous_config = self.config_path.read_bytes() if self.config_path.exists() else None
+        previous_state = self.state_path.read_bytes() if self.state_path.exists() else None
+        journal = self.config_path.with_name("config.transaction.json")
+        _atomic_write_json(journal, {"desired": desired_config, "config_version": config_version,
+            "desired_hash": desired_hash, "correlation_id": correlation_id})
         previous_env: str | None = None
         previous_pending = self.pending_path.read_bytes() if self.pending_path.exists() else None
         try:
@@ -342,6 +376,7 @@ class DeviceConfigService:
                         "lastUpdatedAt": _now_iso(),
                     }
                 )
+                journal.unlink(missing_ok=True)
                 return _ReportResult(
                     status="pending_restart",
                     config_version=config_version,
@@ -369,13 +404,21 @@ class DeviceConfigService:
                 }
             )
         except Exception:
+            for path, previous in ((self.config_path, previous_config), (self.state_path, previous_state)):
+                if previous is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _atomic_write_json(path, json.loads(previous))
+            reset_config_cache()
             if self.env_path is not None and previous_env is not None:
                 restore_env_content(self.env_path, previous_env)
             if previous_pending is None:
                 self.pending_path.unlink(missing_ok=True)
             else:
-                self.pending_path.write_bytes(previous_pending)
+                _atomic_write_json(self.pending_path, json.loads(previous_pending))
+            journal.unlink(missing_ok=True)
             raise
+        journal.unlink(missing_ok=True)
         _audit_log(
             "config_applied_immediately",
             deviceId=self.device_id,
@@ -645,6 +688,7 @@ class _ReportResult:
 
 def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:
     effective_config_path = config_path or get_config_path()
+    _recover_config_transaction(effective_config_path)
     pending_path = effective_config_path.with_name("config.pending.json")
     state_path = effective_config_path.with_name("config.state.json")
     backup_path = effective_config_path.with_name("config.backup.json")
@@ -671,6 +715,8 @@ def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportR
         if not isinstance(applied_version, int) or applied_version <= 0:
             raise RemoteConfigError("pendingVersion ausente para promover config pendente")
 
+        if applied_version < max(int(state.get("lastAppliedVersion") or 0), 0):
+            raise RemoteConfigError("stale_pending_config_version")
         computed_hash = hash_config(pending_data)
         pending_hash = state.get("pendingHash")
         if pending_hash is not None and pending_hash != computed_hash:
@@ -1022,6 +1068,8 @@ def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, A
             },
         },
         "processing": {
+            "deferredEnabled": config.processing.deferred_enabled,
+            "additionalWindows": config.processing.additional_windows,
             "lightMode": config.processing.light_mode,
             "maxAttempts": config.processing.max_attempts,
             "verticalFormat": config.processing.vertical_format,
@@ -1080,13 +1128,34 @@ def _normalize_snapshot_value(value: Any) -> Any:
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.tmp")
-    tmp_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(tmp_path, path)
+    from src.infrastructure.filesystem.deferred_repository import atomic_json
+    atomic_json(path, data)
+
+
+def _recover_config_transaction(path: Path) -> None:
+    journal = path.with_name("config.transaction.json")
+    if not journal.exists():
+        return
+    data = json.loads(journal.read_text())
+    desired = data["desired"]
+    _validate_remote_config(desired)
+    _validate_hash(desired, data["desired_hash"])
+    state_path = path.with_name("config.state.json")
+    state = json.loads(state_path.read_text()) if state_path.exists() else {}
+    current = json.loads(path.read_text()) if path.exists() else {}
+    known = max(int(state.get("lastAppliedVersion") or 0), int(state.get("pendingVersion") or 0), int(current.get("version") or 0))
+    if data["config_version"] < known:
+        journal.unlink()
+        return
+    if data["config_version"] == current.get("version") and hash_config(current) != data["desired_hash"]:
+        raise RemoteConfigError("config_transaction_hash_conflict")
+    env_path = os.getenv("GN_HOST_ENV_PATH")
+    if env_path:
+        persist_operational_config(Path(env_path), desired)
+    _atomic_write_json(path.with_name("config.pending.json"), desired)
+    _atomic_write_json(state_path, {**state, "pendingVersion": data["config_version"],
+        "pendingHash": data["desired_hash"], "pendingCorrelationId": data["correlation_id"]})
+    journal.unlink()
 
 
 def _required_str(payload: dict[str, Any], key: str) -> str:

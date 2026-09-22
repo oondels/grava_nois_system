@@ -220,6 +220,8 @@ class ProcessingConfig:
     vertical_format é apenas reframe 9:16 (crop), sem scale forçado.
     """
 
+    deferred_enabled: bool = False
+    additional_windows: list[dict] = field(default_factory=list)
     light_mode: bool = False
     max_attempts: int = 3
     vertical_format: bool = False
@@ -481,6 +483,8 @@ def _build_from_env() -> OperationalConfig:
             ),
         ),
         processing=ProcessingConfig(
+            deferred_enabled=_env_bool("GN_DEFERRED_PROCESSING_ENABLED", False),
+            additional_windows=_processing_windows_env(),
             light_mode=_env_bool("GN_LIGHT_MODE", False),
             max_attempts=max(1, _env_int("GN_MAX_ATTEMPTS", 3)),
             vertical_format=_env_bool("VERTICAL_FORMAT", False),
@@ -643,6 +647,8 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
     wm_d = proc_d.get("watermark") or {}
 
     processing = ProcessingConfig(
+        deferred_enabled=_get(proc_d, "deferredEnabled", base.processing.deferred_enabled),
+        additional_windows=_get(proc_d, "additionalWindows", base.processing.additional_windows),
         light_mode=_get(proc_d, "lightMode", base.processing.light_mode),
         max_attempts=max(1, _get(proc_d, "maxAttempts", base.processing.max_attempts)),
         vertical_format=_get(proc_d, "verticalFormat", base.processing.vertical_format),
@@ -767,7 +773,8 @@ def _load_effective_config(config_path: Optional[Path] = None) -> OperationalCon
 # ---------------------------------------------------------------------------
 
 _config_cache: Optional[OperationalConfig] = None
-_config_lock = threading.Lock()
+_config_lock = threading.RLock()
+configuration_transaction = _config_lock
 
 
 def get_effective_config(config_path: Optional[Path] = None) -> OperationalConfig:
@@ -782,7 +789,7 @@ def get_effective_config(config_path: Optional[Path] = None) -> OperationalConfi
     with _config_lock:
         if _config_cache is None:
             _config_cache = _load_effective_config(config_path)
-    return _config_cache
+        return _config_cache
 
 
 def reset_config_cache() -> None:
@@ -793,3 +800,11 @@ def reset_config_cache() -> None:
     global _config_cache
     with _config_lock:
         _config_cache = None
+
+
+def _processing_windows_env() -> list[dict]:
+    from src.domain.replay.processing_schedule import validate_windows
+    windows = json.loads(os.getenv("GN_PROCESSING_WINDOWS_JSON", "[]"))
+    if validate_windows(windows):
+        raise ValueError("GN_PROCESSING_WINDOWS_JSON inválido")
+    return windows

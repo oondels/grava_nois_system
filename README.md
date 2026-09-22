@@ -1,5 +1,10 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+## Contratos diferidos de configuracao e entrega
+
+`processing.deferredEnabled=false` (`GN_DEFERRED_PROCESSING_ENABLED`, restart) e `processing.additionalWindows=[]` (`GN_PROCESSING_WINDOWS_JSON`, hot reload) estendem a configuracao MQTT existente. Fuso: `operationWindow.timeZone`. Versoes antigas e conflitos de hash sao rejeitados; duplicatas nao reaplicam a configuracao. Os componentes de outbox operacional, alerta decimal abaixo de 4 GB e retomada de upload/finalizacao estao implementados, ainda aguardando conexao ao bootstrap. Nao liberar sem backend/frontend adaptados.
+
+
 ## Preparação do processamento diferido
 
 O edge agora possui módulos de política temporal, manifesto v3 persistente, proteção de segmentos fechados e mídia com execução limitada. São componentes de preparação: o bootstrap ainda usa o pipeline legado; a integração ao runtime virá em etapa seguinte. Testes isolados: `tests.test_deferred_processing` e `tests.test_deferred_media_integration`.

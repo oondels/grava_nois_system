@@ -1,5 +1,10 @@
 # DESIGN_SPEC - Grava Nois System
 
+## Integracoes diferidas em preparacao
+
+Configuracao MQTT agora valida a agenda adicional e persiste transacoes recuperaveis. `DeferredVideoGateway`, `OperationalEventService` e `StorageMonitor` fornecem os adaptadores concretos para entrega com checkpoints, ACK aplicativo e reserva de armazenamento. A ligacao destes adaptadores ao runtime sera feita na proxima etapa; RabbitMQ nao e ativado.
+
+
 ## Componentes de processamento diferido em preparação
 
 `DeviceActivity`, `PreserveReplay`, `DeferredJobRepository` e `DeferredMedia` adicionam política temporal, preservação com pin e checkpoints de mídia. Ainda não estão conectados ao bootstrap ativo. A mídia usa fsync/rename, caminhos relativos e exclusão por flock; testes sintéticos não validam desempenho em hardware.

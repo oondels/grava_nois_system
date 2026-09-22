@@ -1,5 +1,10 @@
 # Edge Business Rules
 
+## Contratos v3 em preparacao
+
+Para trabalhos v3, rejeicao de horario gera BLOCKED sem descarte; erro de autenticacao e terminal com arquivos preservados. O pipeline legado ativo ainda conserva sua politica propria. Configuracao MQTT rejeita revisoes antigas e hash divergente na mesma revisao; a aplicacao so e reportada depois da persistencia e promocao, com journal para recuperacao. Janelas adicionais de cliente exigem RBAC e schema no backend antes de qualquer liberacao.
+
+
 ## Captura rental
 
 - `fixed` exige `GN_CLIENT_ID` e `GN_VENUE_ID`; `rental` exige ambos vazios.
@@ -165,7 +170,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - antes de reportar `applied` ou `pending_restart`, o edge deve persistir os equivalentes operacionais no `.env` indicado por `GN_HOST_ENV_PATH`; falha restaura o estado anterior e resulta em `rejected`;
 - `restart_after_apply` integra o canonical HMAC e só pode gerar intenção host-side após persistência e report bem-sucedidos;
 - mudanças em domínios hot-reload-safe podem ser promovidas atomicamente para `config.json`;
-- `config_version` antiga, já aplicada ou menor que a pendente não bloqueia aplicação; payload válido sobrescreve a configuração desejada local;
+- `config_version` menor que aplicada/pendente é rejeitada; versão igual com hash igual responde sem reaplicar; hash diferente na mesma versão é conflito;
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.
 - `cameras` presente na configuração gerenciada é autoritativo inclusive como array vazio ou com todas as câmeras desabilitadas;
 - referência `env:` ausente em câmera habilitada rejeita o startup sem incluir credenciais no erro.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-22 — integracoes do edge diferido
+
+- `feat(edge)`: prepare agenda MQTT, outbox com ACK aplicativo, alerta decimal de disco e entrega HTTP/S3 retomavel por etapa.
+- `fix(config)`: rejeite versoes antigas/conflitantes e recupere persistencia interrompida de configuracao.
+- `fix(edge)`: preserve v3 bloqueado por horario e evite expor excecoes com URLs de upload em logs.
+- Os novos consumidores ainda aguardam bootstrap; extensoes de backend/frontend impedem liberacao.
+
+
 ## 2026-09-22 — preparação do edge diferido
 
 - `feat(edge)`: adicione política temporal, manifesto v3, proteção de segmentos fechados e mídia atômica com timeout.

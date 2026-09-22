@@ -1,5 +1,12 @@
 # CONFIGURATION.md — Modelo de configuração do grava_nois_system
 
+## Campos do processamento diferido
+
+Novos campos: `processing.deferredEnabled=false` (`GN_DEFERRED_PROCESSING_ENABLED`, exige restart, somente fixed) e `processing.additionalWindows=[]` (`GN_PROCESSING_WINDOWS_JSON`, hot reload). Cada intervalo usa `weekdays` ISO 1..7 e `start`/`end` HH:MM; aceita sobreposicao e passagem pela meia-noite. Lista vazia remove apenas adicionais; madrugada 00:00-05:00 nao e configuravel. Reutiliza `operationWindow.timeZone`.
+
+O contrato MQTT continua snapshot completo: backend deve preservar demais campos. Versao menor e rejeitada; mesma versao/hash retorna resultado efetivo; hash conflitante nao e aplicado. `config.transaction.json` recupera interrupcoes de persistencia antes de reportar aplicacao. A ativacao do processamento ainda depende da ligacao do bootstrap na proxima etapa e da integracao de backend/frontend.
+
+
 ## Seleção fixed/rental
 
 - `GN_DEVICE_MODE=fixed` (padrão): `GN_CLIENT_ID` e `GN_VENUE_ID` obrigatórios.

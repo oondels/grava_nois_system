@@ -505,6 +505,8 @@ config: dict = {
         },
     },
     "processing": {
+        "deferredEnabled": _bool("GN_DEFERRED_PROCESSING_ENABLED", False),
+        "additionalWindows": json.loads(_str("GN_PROCESSING_WINDOWS_JSON", "[]") or "[]"),
         "lightMode":      _bool("GN_LIGHT_MODE", False),
         "maxAttempts":    max(1, _int("GN_MAX_ATTEMPTS", 3)),
         "verticalFormat": _bool("VERTICAL_FORMAT", False),

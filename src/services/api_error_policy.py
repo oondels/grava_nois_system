@@ -88,6 +88,8 @@ def parse_api_error_from_response(response: Any) -> APIErrorInfo | None:
     message = _coerce_text(payload.get("message") or payload.get("detail"))
     error_code = ""
     error_obj = payload.get("error")
+    if isinstance(error_obj, str):
+        error_code = error_obj.strip()
     if isinstance(error_obj, dict):
         error_code = _coerce_text(error_obj.get("code"))
         if not message:

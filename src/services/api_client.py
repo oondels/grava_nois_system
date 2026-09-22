@@ -344,13 +344,13 @@ class GravaNoisAPIClient:
 
         except requests.exceptions.RequestException as e:
             safe_url = redact_url_for_log(upload_url)
-            error_msg = f"Erro de rede durante upload para {safe_url}: {e}"
+            error_msg = f"Erro de rede durante upload para {safe_url}: {type(e).__name__}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
         except Exception as e:
-            error_msg = f"Erro inesperado durante upload: {e}"
-            logger.exception(error_msg)
+            error_msg = f"Erro inesperado durante upload: {type(e).__name__}"
+            logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
     def finalize_clip_uploaded(

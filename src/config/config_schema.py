@@ -303,6 +303,20 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
     if end_t is not None and (not isinstance(end_t, str) or not _is_valid_hhmm(end_t)):
         errors.append(f"operationWindow.end inválido: {end_t!r} (esperado HH:MM)")
 
+    from src.domain.replay.processing_schedule import validate_windows
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    processing = data.get("processing") or {}
+    if isinstance(processing, dict):
+        if "deferredEnabled" in processing and type(processing["deferredEnabled"]) is not bool:
+            errors.append("processing.deferredEnabled deve ser booleano")
+        if "additionalWindows" in processing:
+            errors.extend(validate_windows(processing["additionalWindows"]))
+    if isinstance(tz, str):
+        try:
+            ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            errors.append("operationWindow.timeZone inválido")
+
     # --- mqtt ---
     mqtt = data.get("mqtt") or {}
     if not isinstance(mqtt, dict):
