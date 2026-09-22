@@ -21,7 +21,7 @@ load_dotenv()
 CAMERA_STALE_AFTER_SEC = 10.0
 
 
-def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]:
+def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer, *, runner=None) -> Optional[Path]:
     logger.info("Botão apertado! Aguardando pós-buffer...")
 
     # Pasta para arquivos com erro de build
@@ -109,8 +109,7 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
         # - ignore_err: tolerar eventuais resíduos de corrupção sem abortar
         # - avoid_negative_ts: normalizar base temporal para MP4
         # - faststart: moov atom no início para streaming progressivo
-        subprocess.run(
-            [
+        command = [
                 "ffmpeg",
                 "-nostdin",
                 "-fflags",
@@ -130,9 +129,11 @@ def build_highlight(cfg: CaptureConfig, segbuf: SegmentBuffer) -> Optional[Path]
                 "-avoid_negative_ts",
                 "make_zero",
                 str(out_tmp_mp4),
-            ],
-            check=True,
-        )
+            ]
+        if runner is None:
+            subprocess.run(command, check=True)
+        else:
+            runner(command)
 
         out_tmp_mp4.replace(out_mp4)
 
@@ -188,7 +189,7 @@ def ffprobe_metadata(path: Path) -> Dict[str, Any]:
         "json",
         str(path),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
     info = json.loads(r.stdout)
     stream = info.get("streams", [{}])[0]
     fmt = info.get("format", {})
@@ -264,6 +265,8 @@ def add_image_watermark(
     preset: str = "medium",
     vertical_format: bool = False,
     top_watermark_path: Optional[str] = None,
+    runner=None,
+    threads: int | None = None,
 ) -> None:
     """
     Aplica marca d'água de imagem usando ffmpeg.
@@ -408,8 +411,14 @@ def add_image_watermark(
         str(output_path),
         ]
     )
+    if threads is not None:
+        cmd[1:1] = ["-threads", str(threads), "-filter_threads", str(threads), "-filter_complex_threads", str(threads)]
+        cmd[-1:-1] = ["-threads", str(threads)]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        if runner is None:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        else:
+            runner(cmd)
     except subprocess.CalledProcessError as e:
         logger.error(
             f"Erro crítico no FFmpeg (Watermark):\nComando: {' '.join(cmd)}\nDetalhes:\n{e.stderr}"

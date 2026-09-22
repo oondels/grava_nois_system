@@ -1,5 +1,10 @@
 # DESIGN_SPEC - Grava Nois System
 
+## Componentes de processamento diferido em preparação
+
+`DeviceActivity`, `PreserveReplay`, `DeferredJobRepository` e `DeferredMedia` adicionam política temporal, preservação com pin e checkpoints de mídia. Ainda não estão conectados ao bootstrap ativo. A mídia usa fsync/rename, caminhos relativos e exclusão por flock; testes sintéticos não validam desempenho em hardware.
+
+
 ## Modo rental
 
 O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a dependência de venue e usa o endpoint de metadata específico; veja `system/CONFIGURATION.md`, `PIPELINE.md` e `BUSINESS_RULES.md`.

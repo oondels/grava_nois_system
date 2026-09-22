@@ -31,6 +31,9 @@ class CaptureConfig:
     pre_segments: Optional[int] = None
     post_segments: Optional[int] = None
     pico_trigger_token: Optional[str] = None
+    track_segments: bool = False
+    segment_list_path: Optional[Path] = None
+    capture_session_id: str = ""
 
     @property
     def max_segments(self) -> int:

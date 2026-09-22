@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-22 — preparação do edge diferido
+
+- `feat(edge)`: adicione política temporal, manifesto v3, proteção de segmentos fechados e mídia atômica com timeout.
+- `test(edge)`: cubra agenda, preservação sobreposta, recuperação de manifesto e FFmpeg com mídia sintética.
+- Os novos componentes ainda não estão conectados ao bootstrap; o pipeline legado permanece ativo.
+
+
 ## 2026-08-20
 
 ### Added

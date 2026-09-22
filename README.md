@@ -1,5 +1,10 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+## Preparação do processamento diferido
+
+O edge agora possui módulos de política temporal, manifesto v3 persistente, proteção de segmentos fechados e mídia com execução limitada. São componentes de preparação: o bootstrap ainda usa o pipeline legado; a integração ao runtime virá em etapa seguinte. Testes isolados: `tests.test_deferred_processing` e `tests.test_deferred_media_integration`.
+
+
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.

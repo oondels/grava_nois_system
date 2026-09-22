@@ -1,14 +1,18 @@
 """Business vocabulary for durable clip delivery."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from src.domain.capture import CameraId
 from src.domain.exceptions import InvalidStateTransition, InvariantViolation
 
 
 class ClipJobState(str, Enum):
+    PREPARING = "PREPARING"
+    ASSEMBLED = "ASSEMBLED"
+    BLOCKED = "BLOCKED"
     QUEUED = "QUEUED"
     PROCESSING = "PROCESSING"
     WATERMARKED = "WATERMARKED"
@@ -70,6 +74,9 @@ class ClipJob:
     upload_size_bytes: int | None = None
     upload_sha256: str | None = None
     upload_etag: str | None = None
+
+    schema_version: int = 2
+    details: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.job_id.strip():
@@ -185,6 +192,4 @@ class RetryDecision:
 
 
 def _is_sha256(value: str) -> bool:
-    return len(value) == 64 and all(
-        character in "0123456789abcdefABCDEF" for character in value
-    )
+    return len(value) == 64 and all(character in "0123456789abcdefABCDEF" for character in value)
