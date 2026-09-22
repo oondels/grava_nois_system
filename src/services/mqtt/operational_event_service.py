@@ -127,6 +127,13 @@ class OperationalEventService:
                         captured_at=job.details.get("captured_at"),
                         attempt=job.details.get("attempts_by_stage", {}).get(stage, 0),
                     )
+                if event_type in {"capture.preserved", "capture.not_preserved"}:
+                    log = logger.info if event_type == "capture.preserved" else logger.warning
+                    log(
+                        "Preservação: evento=%s camera=%s trabalho=%s gatilho=%s codigo=%s",
+                        event_type, payload.get("camera_id"), payload.get("job_id"),
+                        payload.get("trigger_id"), code,
+                    )
                 if self._store(payload, critical=severity == "error" or situation == "resolved"):
                     self._recent[fingerprint] = self.clock()
                     if len(self._recent) > 1024:

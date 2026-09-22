@@ -197,6 +197,8 @@ python3 main.py
 
 **Gerar highlight:** Pressione `ENTER` no terminal, o botão físico conectado ao GPIO ou o botão Pico serial.
 
+No terminal, a quebra de linha ao pressionar ENTER é normal. O listener registra `ENTER recebido` antes de encaminhar o gatilho; isso não confirma preservação. No modo diferido, o console distingue `Preservação iniciada`, câmera/buffer indisponível e os eventos `capture.preserved`/`capture.not_preserved`. O vídeo final continua sujeito à agenda. Entrada padrão encerrada (EOF, por exemplo execução sem stdin interativo) gera aviso de ENTER indisponível; GPIO/Pico continuam independentes. Testes: `tests.test_terminal_trigger`, incluindo ENTER em pseudo-terminal sem câmera ou serviços.
+
 ---
 
 ## 🔄 Fluxo de Funcionamento

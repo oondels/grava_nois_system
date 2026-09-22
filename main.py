@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -74,6 +74,27 @@ CAMERA_STALE_RESTART_AFTER_SEC = 30.0
 CAMERA_STALE_RESTART_CYCLES = 3
 CAMERA_STALE_RESTART_STATUSES = {"STALE", "MISSING", "UNKNOWN"}
 CAMERA_SUPERVISOR_INTERVAL_SEC = 5.0
+
+
+def _listen_for_enter(
+    trigger_q: queue.Queue[tuple[str, str, float]], stop_evt: threading.Event
+) -> None:
+    """Read terminal lines without claiming that a replay is already preserved."""
+    try:
+        while not stop_evt.is_set():
+            try:
+                input()
+            except EOFError:
+                logger.warning("Entrada padrão encerrada; gatilho ENTER indisponível neste processo")
+                return
+            except KeyboardInterrupt:
+                stop_evt.set()
+                return
+            signal = ("enter", datetime.now(UTC).isoformat(), time.monotonic())
+            logger.info("ENTER recebido; encaminhando gatilho para validação e preservação")
+            trigger_q.put(signal)
+    except Exception:
+        logger.exception("Erro no listener de ENTER")
 
 
 def _send_pico_command(
@@ -161,6 +182,12 @@ def _trigger_fan_out(
 
     captured_at = captured_at or datetime.now(timezone.utc).isoformat()
     triggered_mono = time.monotonic() if triggered_mono is None else triggered_mono
+    if not runtimes:
+        logger.warning(
+            "[%s] Gatilho %s sem câmera ativa; lance não preservado",
+            trigger_id, trigger_source,
+        )
+        return
     deferred = next((rt.deferred for rt in runtimes if rt.deferred is not None), None)
     if deferred is not None:
         deferred.record_activity(triggered_mono)
@@ -168,10 +195,18 @@ def _trigger_fan_out(
         for rt in runtimes:
             try:
                 if not _camera_readiness(rt)["ready"]:
+                    logger.warning(
+                        "[%s][%s] Gatilho recebido, mas câmera/buffer indisponível; lance não preservado",
+                        rt.cfg.camera_id, trigger_id,
+                    )
                     deferred.events.emit("capture.not_preserved", stage="preservation", code="camera_not_ready", severity="error",
                         context={"trigger_id": trigger_id, "camera_id": rt.cfg.camera_id, "captured_at": captured_at})
                     continue
-                deferred.admit(rt.cfg, rt.segbuf, trigger_id, captured_at, triggered_mono)
+                job_id = deferred.admit(rt.cfg, rt.segbuf, trigger_id, captured_at, triggered_mono)
+                logger.info(
+                    "[%s][%s] Preservação iniciada: trabalho=%s; aguardando segmentos completos",
+                    rt.cfg.camera_id, trigger_id, job_id,
+                )
             except Exception:
                 logger.error("[%s] Replay preservation admission failed", rt.cfg.camera_id)
         return
@@ -712,7 +747,7 @@ def main() -> int:
     primary_cfg = camera_cfgs[0] if camera_cfgs else None
 
     # --- Disparo por ENTER/GPIO/Pico: inicia antes das câmeras para sinalizar runtime básico ---
-    trigger_q: queue.Queue[str] = queue.Queue()
+    trigger_q: queue.Queue[tuple[str, str, float]] = queue.Queue()
 
     # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
     gpio_cooldown_sec = op_cfg.triggers.gpio.cooldown_seconds
@@ -851,21 +886,9 @@ def main() -> int:
                 return _handler
             token_map[_token.strip().upper()] = _make_handler(_rt)
 
-    def _stdin_listener():
-        try:
-            while not stop_evt.is_set():
-                try:
-                    input()
-                except EOFError:
-                    break
-                except KeyboardInterrupt:
-                    stop_evt.set()
-                    break
-                trigger_q.put(("enter", datetime.now(timezone.utc).isoformat(), time.monotonic()))
-        except Exception as e:
-            logger.exception(f"Erro no listener de stdin: {e}")
-
-    stdin_t = threading.Thread(target=_stdin_listener, daemon=True)
+    stdin_t = threading.Thread(
+        target=_listen_for_enter, args=(trigger_q, stop_evt), daemon=True, name="trigger-enter"
+    )
     stdin_t.start()
 
     # habilita GPIO se o modo selecionado permitir.

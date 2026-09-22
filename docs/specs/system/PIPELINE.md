@@ -64,6 +64,8 @@ Origens suportadas:
 - GPIO
 - Pico serial (global ou por câmera)
 
+O listener `main._listen_for_enter` registra a recepção antes de enfileirar o horário original e o instante monotônico; EOF avisa que ENTER está indisponível, sem desligar os demais gatilhos. A quebra de linha do terminal não significa rejeição. No fluxo diferido, admissão apenas inicia `PREPARING`; logs separam câmera/buffer indisponível, início e resultado `capture.preserved`/`capture.not_preserved`. O resultado da preservação não é confirmação de upload/ACK MQTT. Cobertura com pseudo-terminal em `tests.test_terminal_trigger`.
+
 Resolução de origem:
 
 - `auto`
