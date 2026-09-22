@@ -323,6 +323,20 @@ Alternativa para devices legados com `.env` já preenchido:
 ./env_to_config.sh .env config.json
 ```
 
+O primeiro argumento posicional é sempre a fonte e o segundo é o destino, inclusive quando escritos literalmente como `.env` e `config.json`. `--dry-run` é aceito antes, entre ou depois deles e não grava arquivos nem backups. Mais de dois paths são erro. Sem paths, usa `.env` e `config.json` locais; somente nesse modo, se o `.env` local estiver ausente, considera o caminho legado `/opt/.grn/config/.env`. Paths explícitos nunca são redirecionados para a instalação legada.
+
+Na execução local, `bash env_to_config.sh .env runtime_config/config.json` deve exibir `.env` em **Fonte** e `runtime_config/config.json` em **Saída**. Se o destino existir, preserva seu conteúdo anterior no backup `.json.bak`; outros arquivos de configuração não são alterados. Configure `GN_CONFIG_PATH` para o mesmo destino antes de iniciar o edge.
+
+Uma webcam precisa estar declarada como câmera gerenciada para sobreviver à conversão:
+
+```dotenv
+GN_CAMERAS_JSON=[{"id":"notebook","name":"Webcam notebook","enabled":true,"sourceType":"v4l2"}]
+GN_INPUT_FRAMERATE=30
+GN_VIDEO_SIZE=640x480
+```
+
+O dispositivo V4L2 padrão do conversor é `/dev/video0` (`GN_V4L2_DEVICE` permite escolher outro durante a conversão). Sem fontes configuradas, `cameras: []` desativa captura; o aviso do conversor não promete fallback. `tests.test_env_to_config_cli` valida argumentos, webcam, destino, backup, paths com espaços e dry-run com arquivos sintéticos, sem câmera ou serviços.
+
 Em hosts provisionados pelo `grava_nois_config`, informe os paths explicitamente:
 
 ```bash

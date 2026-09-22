@@ -437,6 +437,10 @@ Para converter um `.env` legado em `config.json` operacional:
 ./env_to_config.sh .env config.json --dry-run
 ```
 
+Os argumentos são posicionais: primeiro a fonte `.env`, depois o destino JSON; `--dry-run` pode aparecer antes ou depois dos paths. Por exemplo, `bash env_to_config.sh .env runtime_config/config.json` grava somente nesse destino e mantém o `config.json` da raiz intacto. Argumentos posicionais extras são rejeitados antes de qualquer gravação. O fallback automático para `/opt/.grn/config/.env` existe apenas quando nenhum path é informado.
+
+Para a webcam do notebook, declare `GN_CAMERAS_JSON=[{"id":"notebook","name":"Webcam notebook","enabled":true,"sourceType":"v4l2"}]` antes da conversão. Sem fontes configuradas, o conversor gera `cameras: []`, que desativa a captura; não existe fallback V4L2 quando essa lista está presente. Testes isolados do conversor: `python -m unittest tests.test_env_to_config_cli` (somente arquivos sintéticos em diretório temporário).
+
 Em devices provisionados pelo `grava_nois_config`, use explicitamente os paths do host:
 ```bash
 sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.json
