@@ -310,6 +310,8 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
+O registro de inscrições/listeners MQTT é sincronizado e a reconexão percorre uma cópia estável. Assim, serviços que adicionam tópicos de ACK durante o bootstrap não interrompem a thread Paho. Chamadas de rede e callbacks ficam fora do lock de registro; listeners adicionados durante callbacks valem para o próximo ciclo. Testes de concorrência sem broker: `tests.test_mqtt_client`.
+
 Observação de tópico:
 - `DEVICE_ID`/`GN_DEVICE_ID` usado no namespace MQTT deve ser um único nível de tópico. Valores com `/`, `+`, `#` ou byte nulo são rejeitados ao montar os tópicos para evitar wildcard/hierarquia inesperada; nesse caso a presença MQTT é ignorada sem derrubar captura/worker.
 - configuração remota exige `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura HMAC; sem esse segredo, mensagens `config/desired` são rejeitadas.

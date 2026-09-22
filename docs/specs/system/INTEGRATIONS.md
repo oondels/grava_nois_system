@@ -168,6 +168,7 @@ Observações:
 - o cliente MQTT usa reconexão explícita com backoff do Paho (`reconnect_delay_set(min_delay=1, max_delay=120)`);
 - TLS usa validacao obrigatoria da cadeia (`ssl.CERT_REQUIRED`); falhas de certificado do broker nao devem ser contornadas com modo inseguro, e o cliente continua tentando reconectar ate o servidor ser corrigido;
 - mensagens recebidas são despachadas para uma thread dedicada de handlers, evitando I/O síncrono no loop Paho;
+- inscrições e listeners compartilham um lock curto de registro, separado do lock de lifecycle. A reconexão percorre snapshots estáveis; inscrições adicionadas nesse intervalo usam a conexão ativa, sem invalidar o percurso. Chamadas ao Paho e callbacks ocorrem fora do lock; listeners registrados durante um callback participam do próximo ciclo. Regressão concorrente em `tests/test_mqtt_client.py`, sem broker;
 - heartbeat e state são protegidos contra exceções no snapshot provider;
 - operações administrativas permanecem desabilitadas por padrão; quando habilitadas, exigem HMAC, expiração, identidade correspondente e allowlist fixa.
 - o `device_id` usado no namespace `grn/devices/{device_id}/...` deve ser um único nível de tópico; valores com `/`, `+`, `#` ou byte nulo são rejeitados na montagem do tópico e fazem apenas a presença MQTT ser ignorada.
