@@ -350,7 +350,9 @@ grava_nois_system/
 │   ├── replay_grava_nois.png    # Logo principal (original)
 │   ├── client_logo.png          # Logo secundária do cliente (original)
 │   ├── replay_grava_nois_wm.png # Logo principal otimizada (fallback automático)
-│   └── client_logo_wm.png       # Logo secundária otimizada (fallback automático)
+│   ├── client_logo_wm.png       # Logo do canto inferior esquerdo (otimizada)
+│   ├── client_logo_top.png      # Logo do canto superior esquerdo (original opcional)
+│   └── client_logo_top_wm.png   # Logo do canto superior esquerdo (otimizada)
 │
 ├── logs/
 │   ├── app.log                  # Logs da aplicação (DEBUG)
@@ -601,16 +603,18 @@ GN_HQ_CRF=18                    # CRF do encode com watermark no modo normal
 GN_HQ_PRESET=medium             # Preset do encode com watermark no modo normal
 GN_LM_CRF=26                    # CRF do encode com watermark no modo leve
 GN_LM_PRESET=veryfast           # Preset do encode com watermark no modo leve
-GN_CLIENT_WATERMARK_ENABLED=1   # 1=inclui logo do cliente; 0=somente marca Grava Nóis (padrão: 1)
+GN_CLIENT_WATERMARK_ENABLED=1   # 1=inclui ambas as logos do cliente; 0=somente Grava Nóis
 GN_WM_REL_WIDTH=0.19            # Aumenta/reduz a largura da logo; 0.18 = 18% da largura do vídeo
 GN_WM_OPACITY=0.8               # Opacidade da logo (0.0 a 1.0)
-GN_WM_MARGIN=24                 # Margem vertical da safe zone
+GN_WM_MARGIN=5                 # Margem das quinas e safe zone da marca principal
 VERTICAL_FORMAT=0               # 1=crop central 9:16 sem upscale forçado
 GN_RUN_CAMERA_INTEGRATION=1     # Habilita teste real com camera sem Docker
 GN_CAMERA_INTEGRATION_OUTPUT_DIR=./artifacts/camera_watermark_test  # Pasta persistente dos mp4s gerados pelo teste
 ```
 
-`GN_CLIENT_WATERMARK_ENABLED` é lida exclusivamente do `.env`, exige reinício do edge e afeta somente clipes ainda não processados. A ausência da variável preserva o comportamento anterior (`1`).
+`GN_CLIENT_WATERMARK_ENABLED` é lida exclusivamente do `.env`, exige reinício do edge e afeta somente clipes ainda não processados. A ausência da variável equivale a `1`. Com `0`, ambas as logos do cliente são omitidas.
+
+Em vídeos horizontais e verticais, `files/client_logo_top_wm.png` fica no canto superior esquerdo e `files/client_logo_wm.png` no canto inferior esquerdo, com a margem configurada em `processing.watermark.margin` (`GN_WM_MARGIN` no legado). A largura relativa configurada é a base: a logo superior usa 70% dessa largura e a inferior usa 105%, mantendo a proporção. Com base de 20%, ocupam 14% e 21% da largura final do vídeo, respectivamente. Ambas usam a opacidade configurada. A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical, dentro da safe zone. As versões `_wm.png` têm prioridade sobre os originais; a logo superior usa `client_logo_top.png` como alternativa e é omitida se nenhum dos dois arquivos existir.
 
 #### Teste real sem Docker
 
@@ -641,6 +645,14 @@ Por padrão ele gera:
 - `files/client_logo_wm.png`
 
 O `main.py` prioriza automaticamente esses arquivos `_wm.png` quando presentes.
+
+Para atualizar a logo do canto superior esquerdo:
+
+```bash
+python3 optimze_image.py --input files/client_logo_top.png --output files/client_logo_top_wm.png
+```
+
+O teste opcional `tests.test_camera_watermark_integration` também inclui a logo superior quando presente.
 
 #### Modo Desenvolvimento
 

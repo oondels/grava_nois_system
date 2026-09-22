@@ -73,13 +73,15 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_AGENT_VERSION` | — | Versão de deploy (imagem/build) |
 | `GN_RUN_CAMERA_INTEGRATION` | — | Teste de integração manual |
 | `GN_CAMERA_INTEGRATION_OUTPUT_DIR` | — | Diretório de artefatos de teste |
-| `GN_CLIENT_WATERMARK_ENABLED` | — | Exibe a logo secundária do cliente; padrão `1` e exige restart |
+| `GN_CLIENT_WATERMARK_ENABLED` | — | Exibe as logos superior e inferior do cliente; padrão `1` e exige restart |
 
 `GN_MQTT_BROKER_URL` aceita apenas `mqtt://` ou `mqtts://`. No `config.json`,
 `mqtt.broker.host` contém somente o hostname; protocolo e TLS são representados
 separadamente por `mqtt.broker.tls`.
 
-`GN_CLIENT_WATERMARK_ENABLED` não participa de `config.json` nem da configuração remota MQTT. Com `0`, somente a logo do cliente é omitida; a watermark Grava Nóis continua obrigatória. A flag ausente equivale a `1` e a mudança vale após reiniciar o edge.
+`GN_CLIENT_WATERMARK_ENABLED` não participa de `config.json` nem da configuração remota MQTT. Com `0`, ambas as logos do cliente são omitidas; a watermark Grava Nóis continua obrigatória. A flag ausente equivale a `1` e a mudança vale após reiniciar o edge, para novos processamentos.
+
+Em ambos os formatos, a logo `files/client_logo_wm.png` (alternativa: `client_logo.png`) fica no canto inferior esquerdo. A logo `files/client_logo_top_wm.png` (alternativa: `client_logo_top.png`) fica no canto superior esquerdo e é omitida quando ambos os arquivos estão ausentes. A largura base vem de `processing.watermark.relativeWidth`: a logo superior usa fator 0.70 e a inferior 1.05, preservando a proporção (base de 20% resulta em 14% e 21% da largura final). Ambas seguem `opacity` e `margin`; não há novas variáveis de configuração. Para afastamento de 5 px das quinas, use `processing.watermark.margin=5` (ou `GN_WM_MARGIN=5` quando o JSON não definir essa margem). A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical dentro da safe zone.
 
 ---
 

@@ -657,6 +657,7 @@ def main() -> int:
     watermark_path = optimized_wm_path if optimized_wm_path.exists() else default_wm_path
 
     client_watermark_path: Path | None = None
+    client_top_watermark_path: Path | None = None
     if load_client_watermark_enabled():
         default_client_wm_path = base / "files" / "client_logo.png"
         optimized_client_wm_path = base / "files" / "client_logo_wm.png"
@@ -664,6 +665,13 @@ def main() -> int:
             optimized_client_wm_path
             if optimized_client_wm_path.exists()
             else default_client_wm_path
+        )
+        client_top_watermark_path = next(
+            (path for path in (
+                base / "files" / "client_logo_top_wm.png",
+                base / "files" / "client_logo_top.png",
+            ) if path.exists()),
+            None,
         )
     wm_margin = op_cfg.processing.watermark.margin
     wm_opacity = op_cfg.processing.watermark.opacity
@@ -737,6 +745,7 @@ def main() -> int:
             failed_dir_highlight=cfg.failed_dir_highlight,
             watermark_path=watermark_path,
             client_watermark_path=client_watermark_path,
+            client_top_watermark_path=client_top_watermark_path,
             scan_interval=1,
             max_attempts=worker_max_attempts,
             wm_margin=wm_margin,

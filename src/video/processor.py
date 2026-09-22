@@ -263,17 +263,20 @@ def add_image_watermark(
     crf: int = 18,
     preset: str = "medium",
     vertical_format: bool = False,
+    top_watermark_path: Optional[str] = None,
 ) -> None:
     """
     Aplica marca d'água de imagem usando ffmpeg.
 
-    - Dimensiona a(s) marca(s) d'água para `rel_width * largura_do_vídeo`.
+    - A largura base é `rel_width * largura_do_vídeo`; as logos do cliente
+      usam fatores 0.70 (superior) e 1.05 (inferior), mantendo a proporção.
     - Aplica opacidade (canal alpha) e sobrepõe com margens.
     - Se `vertical_format=True`: recorta o centro do vídeo para 9:16 (crop apenas,
       sem scale forçado). A resolução final é a do crop — sem upscale artificial.
     - Em `vertical_format`, a marca d'água é posicionada no topo central dentro da safe zone.
-    - Em modo horizontal com watermark secundária, o client_logo é posicionado no canto superior
-      esquerdo com `margin` de distância da quina; o logo principal permanece centralizado no rodapé.
+    - A logo secundária fica no canto inferior esquerdo e a logo superior opcional
+      no canto superior esquerdo, em ambos os formatos, com `margin` da quina.
+    - No horizontal, a logo principal permanece centralizada no rodapé.
     - Requer ffmpeg no PATH.
     """
     logger.info(
@@ -283,6 +286,7 @@ def add_image_watermark(
     in_p = Path(input_path)
     wm_p = Path(watermark_path)
     secondary_wm_p = Path(secondary_watermark_path) if secondary_watermark_path else None
+    top_wm_p = Path(top_watermark_path) if top_watermark_path else None
     if not in_p.exists():
         raise FileNotFoundError(f"Vídeo inexistente: {input_path}")
     if not wm_p.exists():
@@ -291,6 +295,8 @@ def add_image_watermark(
         raise FileNotFoundError(
             f"Watermark secundária inexistente: {secondary_watermark_path}"
         )
+    if top_wm_p is not None and not top_wm_p.exists():
+        raise FileNotFoundError(f"Watermark superior inexistente: {top_watermark_path}")
 
     meta = ffprobe_metadata(in_p)
     vw = int(meta.get("width") or 0)
@@ -320,7 +326,8 @@ def add_image_watermark(
     secondary_rel = float(secondary_base_rel)
     alpha = float(opacity)
     wm_w = max(1, int(vw_final * primary_rel_width))
-    wm2_w = max(1, int(vw_final * secondary_rel))
+    wm2_w = max(1, int(vw_final * secondary_rel * 1.05))
+    wm_top_w = max(1, int(vw_final * secondary_rel * 0.70))
     overlay_y = (
         str(max(int(margin), int(vh_final * 0.08)))
         if vertical_format
@@ -335,50 +342,30 @@ def add_image_watermark(
         f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm1]"
     )
 
-    # Se houver watermark secundária (client_logo):
-    #   - modo vertical: logos lado a lado no centro (comportamento original)
-    #   - modo horizontal: client_logo no canto superior esquerdo
+    # Principal centralizada; logos do cliente nas duas quinas esquerdas.
     final_video_label = "[v]"
+    primary_output = "[v1]" if secondary_wm_p is not None or top_wm_p is not None else "[v]"
+    filt_parts.append(
+        f"{input_video_label}[wm1]overlay="
+        f"x=(main_w-overlay_w)/2:y={overlay_y}{primary_output}"
+    )
     if secondary_wm_p is not None:
-        pair_gap = max(8, int(margin) // 2)
-        pair_total_w = int(wm_w) + int(wm2_w) + int(pair_gap)
         filt_parts.append(
             f"[2:v]scale={wm2_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm2]"
         )
-        if vertical_format:
-            filt_parts.append(
-                (
-                    f"{input_video_label}[wm1]overlay="
-                    f"x=(main_w-{pair_total_w})/2:"
-                    f"y={overlay_y}[v1]"
-                )
-            )
-            filt_parts.append(
-                (
-                    f"[v1][wm2]overlay="
-                    f"x=(main_w-{pair_total_w})/2+{int(wm_w) + int(pair_gap)}:"
-                    f"y={overlay_y}[v]"
-                )
-            )
-        else:
-            filt_parts.append(
-                (
-                    f"{input_video_label}[wm1]overlay="
-                    f"x=(main_w-overlay_w)/2:"
-                    f"y={overlay_y}[v1]"
-                )
-            )
-            filt_parts.append(
-                (
-                    f"[v1][wm2]overlay="
-                    f"x={int(margin)}:"
-                    f"y={int(margin)}[v]"
-                )
-            )
-    else:
+        secondary_output = "[v2]" if top_wm_p is not None else "[v]"
         filt_parts.append(
-            f"{input_video_label}[wm1]overlay="
-            f"x=(main_w-overlay_w)/2:y={overlay_y}[v]"
+            f"[v1][wm2]overlay=x={int(margin)}:"
+            f"y=main_h-overlay_h-{int(margin)}{secondary_output}"
+        )
+    if top_wm_p is not None:
+        top_index = 3 if secondary_wm_p is not None else 2
+        top_input = "[v2]" if secondary_wm_p is not None else "[v1]"
+        filt_parts.append(
+            f"[{top_index}:v]scale={wm_top_w}:-1,format=rgba,colorchannelmixer=aa={alpha:.3f}[wm_top]"
+        )
+        filt_parts.append(
+            f"{top_input}[wm_top]overlay=x={int(margin)}:y={int(margin)}[v]"
         )
 
     filt = ";".join(filt_parts)
@@ -394,6 +381,8 @@ def add_image_watermark(
     ]
     if secondary_wm_p is not None:
         cmd.extend(["-i", str(secondary_wm_p)])
+    if top_wm_p is not None:
+        cmd.extend(["-i", str(top_wm_p)])
     cmd.extend(
         [
         "-filter_complex",

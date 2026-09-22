@@ -133,9 +133,11 @@ Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status
 
 ## 7. Worker processing path
 
+Nos dois modos e formatos, a logo horizontal do cliente fica no canto inferior esquerdo (`client_logo_wm.png`, alternativa `client_logo.png`) e a logo circular fica no canto superior esquerdo (`client_logo_top_wm.png`, alternativa `client_logo_top.png`). A logo superior é opcional: sua ausência não bloqueia processamento. Ambas usam margem e opacidade de `processing.watermark.*`; sobre a largura relativa base, a superior aplica fator 0.70 e a inferior 1.05, preservando a proporção, e são omitidas com `GN_CLIENT_WATERMARK_ENABLED=0`. A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical, dentro da safe zone. A seleção dos arquivos ocorre na inicialização; clipes já processados não são recompostos durante reenvios.
+
 ### Normal mode (light_mode=false)
 
-1. aplica a watermark Grava Nóis e, quando `GN_CLIENT_WATERMARK_ENABLED=1`, a logo do cliente, usando `hqCrf` + `hqPreset` (alta qualidade);
+1. aplica a watermark Grava Nóis e, quando `GN_CLIENT_WATERMARK_ENABLED=1`, as logos do cliente, usando `hqCrf` + `hqPreset` (alta qualidade);
 2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 3. salva resultado em `highlights_wm/`;
 4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;
@@ -149,7 +151,7 @@ Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status
 
 Modo para hardware fraco — a regra de branding é a mesma do modo normal, mas com encode mais leve:
 
-1. aplica a watermark Grava Nóis e a logo opcional do cliente com `lmCrf` + `lmPreset` (menor custo de CPU);
+1. aplica a watermark Grava Nóis e as logos opcionais do cliente com `lmCrf` + `lmPreset` (menor custo de CPU);
 2. aplica crop 9:16 quando `VERTICAL_FORMAT=1` (reframe sem scale forçado);
 3. salva resultado em `highlights_wm/`;
 4. atualiza sidecar com `meta_wm`, `wm_path` e `wm_encode`;

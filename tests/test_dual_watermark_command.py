@@ -50,6 +50,34 @@ class DualWatermarkCommandTests(unittest.TestCase):
             filt = cmd[cmd.index("-filter_complex") + 1]
             self.assertIn("[0:v][wm1]overlay=", filt)
             self.assertIn("[v1][wm2]overlay=", filt)
+            self.assertIn("[v1][wm2]overlay=x=24:y=main_h-overlay_h-24[v]", filt)
+
+    def test_top_logo_without_secondary_uses_correct_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            inp, primary, top = (base / name for name in ("in.mp4", "main.png", "top.png"))
+            for path in (inp, primary, top):
+                path.write_bytes(b"dummy")
+            with patch("src.video.processor.ffprobe_metadata", return_value={"width": 1280}), patch(
+                "src.video.processor.subprocess.run"
+            ) as run:
+                add_image_watermark(str(inp), str(primary), str(base / "out.mp4"), top_watermark_path=str(top))
+            cmd = run.call_args.args[0]
+            inputs = [cmd[i + 1] for i, token in enumerate(cmd) if token == "-i"]
+            self.assertEqual(inputs, [str(inp), str(primary), str(top)])
+            filt = cmd[cmd.index("-filter_complex") + 1]
+            self.assertIn("[2:v]scale=161:-1", filt)
+            self.assertIn("[v1][wm_top]overlay=x=24:y=24[v]", filt)
+
+    def test_missing_top_logo_fails_before_encoding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            inp, primary = base / "in.mp4", base / "main.png"
+            inp.touch()
+            primary.touch()
+            with self.assertRaises(FileNotFoundError), patch("src.video.processor.subprocess.run") as run:
+                add_image_watermark(str(inp), str(primary), str(base / "out.mp4"), top_watermark_path=str(base / "missing.png"))
+            run.assert_not_called()
 
     def test_add_image_watermark_fails_when_secondary_logo_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

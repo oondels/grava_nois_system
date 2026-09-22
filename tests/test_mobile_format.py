@@ -26,6 +26,14 @@ class VerticalFormatTests(unittest.TestCase):
             output = base / "output.mp4"
             self._create_dummy_file(input_video)
             self._create_dummy_file(watermark)
+            if kwargs.pop("client_logos", False):
+                for name, argument in (
+                    ("client.png", "secondary_watermark_path"),
+                    ("top.png", "top_watermark_path"),
+                ):
+                    logo = base / name
+                    self._create_dummy_file(logo)
+                    kwargs[argument] = str(logo)
 
             with patch("src.video.processor.ffprobe_metadata", return_value=kwargs.pop("meta")), \
                  patch("src.video.processor.subprocess.run") as mock_run:
@@ -63,6 +71,26 @@ class VerticalFormatTests(unittest.TestCase):
         sig = inspect.signature(add_image_watermark)
         self.assertNotIn("mobile_format", sig.parameters)
 
+    def test_client_logos_stay_in_left_corners_in_both_formats(self) -> None:
+        for vertical in (False, True):
+            with self.subTest(vertical=vertical):
+                cmd = self._run_watermark(
+                    vertical_format=vertical,
+                    client_logos=True,
+                    margin=24,
+                    rel_width=0.20,
+                    meta={"width": 1280, "height": 720},
+                )
+                self.assertIn("[v1][wm2]overlay=x=24:y=main_h-overlay_h-24[v2]", cmd)
+                self.assertIn("[v2][wm_top]overlay=x=24:y=24[v]", cmd)
+                primary_width = 81 if vertical else 256
+                top_width = 56 if vertical else 179
+                bottom_width = 85 if vertical else 268
+                self.assertIn(f"[1:v]scale={primary_width}:-1", cmd)
+                self.assertIn(f"[2:v]scale={bottom_width}:-1", cmd)
+                self.assertIn(f"[3:v]scale={top_width}:-1", cmd)
+                self.assertIn("x=(main_w-overlay_w)/2:y=" + ("57" if vertical else "main_h-overlay_h-24"), cmd)
+
 
 class WatermarkAlwaysPresentTests(unittest.TestCase):
     """Watermark deve ser aplicada em ambos os modos (light e HQ)."""
@@ -79,6 +107,8 @@ class WatermarkAlwaysPresentTests(unittest.TestCase):
             out_wm_dir=base / "highlights_wm",
             failed_dir_highlight=base / "failed_clips",
             watermark_path=Path("/dev/null"),
+            client_watermark_path=base / "client.png",
+            client_top_watermark_path=base / "top.png",
             scan_interval=0,
             light_mode=light_mode,
             retry_failed=False,
@@ -116,6 +146,8 @@ class WatermarkAlwaysPresentTests(unittest.TestCase):
                 worker._scan_once()
 
         self.assertTrue(mock_wm.called, "Watermark deve ser aplicada em modo HQ")
+        self.assertEqual(mock_wm.call_args.kwargs["secondary_watermark_path"], str(base / "client.png"))
+        self.assertEqual(mock_wm.call_args.kwargs["top_watermark_path"], str(base / "top.png"))
 
     @patch("src.workers.processing_worker.GravaNoisAPIClient")
     @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 10.0})
@@ -133,6 +165,7 @@ class WatermarkAlwaysPresentTests(unittest.TestCase):
                 worker._scan_once()
 
         self.assertTrue(mock_wm.called, "Watermark deve ser aplicada em modo leve")
+        self.assertEqual(mock_wm.call_args.kwargs["top_watermark_path"], str(base / "top.png"))
 
 
 class WatermarkQualityModeTests(unittest.TestCase):

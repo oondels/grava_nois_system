@@ -96,7 +96,7 @@
       "_comment": "Parâmetros de watermark/branding. Suportarão hot-reload no futuro.",
       "relativeWidth": 0.18,
       "opacity": 0.8,
-      "margin": 24
+      "margin": 5
     }
   },
 

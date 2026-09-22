@@ -43,12 +43,14 @@ class ProcessingWorker:
         retry_backoff_base_sec: float = 30.0,
         operational_event_callback: Callable[[str], None] | None = None,
         pending_destination: Callable[[dict], tuple[Path, dict]] | None = None,
+        client_top_watermark_path: Path | None = None,
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
         self.failed_dir_highlight = failed_dir_highlight
         self.watermark_path = watermark_path
         self.client_watermark_path = client_watermark_path
+        self.client_top_watermark_path = client_top_watermark_path
         self.scan_interval = scan_interval
         self.max_attempts = max_attempts
         self.wm_margin = wm_margin
@@ -355,6 +357,11 @@ class ProcessingWorker:
             add_image_watermark(
                 input_path=str(mp4),
                 watermark_path=str(self.watermark_path),
+                top_watermark_path=(
+                    str(self.client_top_watermark_path)
+                    if self.client_top_watermark_path is not None
+                    else None
+                ),
                 output_path=str(tmp_out),
                 secondary_watermark_path=(
                     str(self.client_watermark_path)

@@ -51,7 +51,7 @@ class CameraWatermarkIntegrationTests(unittest.TestCase):
             f"Timeout aguardando segmentos suficientes para {cfg.camera_id} em {cfg.buffer_dir}"
         )
 
-    def _repo_logo_paths(self, repo_base: Path) -> tuple[Path, Path | None]:
+    def _repo_logo_paths(self, repo_base: Path) -> tuple[Path, Path | None, Path | None]:
         primary = repo_base / "files" / "replay_grava_nois_wm.png"
         if not primary.exists():
             primary = repo_base / "files" / "replay_grava_nois.png"
@@ -61,7 +61,10 @@ class CameraWatermarkIntegrationTests(unittest.TestCase):
             secondary = repo_base / "files" / "client_logo.png"
         if not secondary.exists():
             secondary = None
-        return primary, secondary
+        top = repo_base / "files" / "client_logo_top_wm.png"
+        if not top.exists():
+            top = repo_base / "files" / "client_logo_top.png"
+        return primary, secondary, top if top.exists() else None
 
     def test_generates_final_mp4_with_real_camera_input(self) -> None:
         if os.getenv("GN_RUN_CAMERA_INTEGRATION", "").strip().lower() not in {
@@ -74,7 +77,7 @@ class CameraWatermarkIntegrationTests(unittest.TestCase):
             self.skipTest("Defina GN_RUN_CAMERA_INTEGRATION=1 para rodar com camera real")
 
         repo_base = Path(__file__).resolve().parents[1]
-        primary_logo, secondary_logo = self._repo_logo_paths(repo_base)
+        primary_logo, secondary_logo, top_logo = self._repo_logo_paths(repo_base)
         self.assertTrue(primary_logo.exists(), "Logo principal nao encontrada em files/")
         run_base = self._run_base_dir(repo_base)
         buffer_root = run_base / "buffer"
@@ -134,6 +137,7 @@ class CameraWatermarkIntegrationTests(unittest.TestCase):
                         failed_dir_highlight=cfg.failed_dir_highlight,
                         watermark_path=primary_logo,
                         client_watermark_path=secondary_logo,
+                        client_top_watermark_path=top_logo,
                         scan_interval=0,
                         max_attempts=1,
                         wm_margin=24,
