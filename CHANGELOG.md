@@ -1,19 +1,18 @@
 # Changelog
 
-## 2026-09-22 — integracoes do edge diferido
+## 2026-09-22
 
-- `feat(edge)`: prepare agenda MQTT, outbox com ACK aplicativo, alerta decimal de disco e entrega HTTP/S3 retomavel por etapa.
-- `fix(config)`: rejeite versoes antigas/conflitantes e recupere persistencia interrompida de configuracao.
-- `fix(edge)`: preserve v3 bloqueado por horario e evite expor excecoes com URLs de upload em logs.
-- Os novos consumidores ainda aguardam bootstrap; extensoes de backend/frontend impedem liberacao.
+### Added
+- `feat(edge)`: processamento diferido opt-in em fixed, staging/manifesto v3 persistente, segmentos fechados protegidos, política madrugada/janelas/inatividade e exclusão global de mídia.
+- `feat(edge)`: checkpoints independentes de mídia/upload/finalize, importação não destrutiva v1/v2, alerta decimal abaixo de 4 GB e outbox operacional MQTT com ACK aplicativo.
+- `test(edge)`: contratos simulados de agenda, persistência, migração, envio e telemetria; mídia sintética com FFmpeg real.
 
+### Fixed
+- `fix(config)`: rejeita versões antigas e conflito de hash, responde duplicatas sem reaplicar e recupera transação interrompida de configuração.
+- `fix(edge)`: v3 preserva rejeição específica de horário; não converte falha de autenticação em retry nem apaga pendências.
 
-## 2026-09-22 — preparação do edge diferido
-
-- `feat(edge)`: adicione política temporal, manifesto v3, proteção de segmentos fechados e mídia atômica com timeout.
-- `test(edge)`: cubra agenda, preservação sobreposta, recuperação de manifesto e FFmpeg com mídia sintética.
-- Os novos componentes ainda não estão conectados ao bootstrap; o pipeline legado permanece ativo.
-
+### Deployment
+- Desabilitado por padrão; exige backend/frontend adaptados, validação integrada e em hardware. Rental mantém comportamento atual. Ver `docs/specs/system/DEFERRED_PROCESSING.md`.
 
 ## 2026-08-20
 

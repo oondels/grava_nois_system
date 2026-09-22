@@ -1,18 +1,8 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
-## Contratos diferidos de configuracao e entrega
-
-`processing.deferredEnabled=false` (`GN_DEFERRED_PROCESSING_ENABLED`, restart) e `processing.additionalWindows=[]` (`GN_PROCESSING_WINDOWS_JSON`, hot reload) estendem a configuracao MQTT existente. Fuso: `operationWindow.timeZone`. Versoes antigas e conflitos de hash sao rejeitados; duplicatas nao reaplicam a configuracao. Os componentes de outbox operacional, alerta decimal abaixo de 4 GB e retomada de upload/finalizacao estao implementados, ainda aguardando conexao ao bootstrap. Nao liberar sem backend/frontend adaptados.
-
-
-## Preparação do processamento diferido
-
-O edge agora possui módulos de política temporal, manifesto v3 persistente, proteção de segmentos fechados e mídia com execução limitada. São componentes de preparação: o bootstrap ainda usa o pipeline legado; a integração ao runtime virá em etapa seguinte. Testes isolados: `tests.test_deferred_processing` e `tests.test_deferred_media_integration`.
-
-
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
-> **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
+> **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e, no pipeline legado, descarta clipes rejeitados pela API por restrição de horário. O pipeline diferido v3 preserva essas pendências em `BLOCKED`.
 >
 > **Rental offline:** falhas de upload ficam em `rental_clips_generated/{rentalId}` e só são reenviadas por solicitação do responsável/admin. Itens sem agenda assinada ficam em quarentena por até 48 horas.
 >
@@ -22,6 +12,14 @@ O edge agora possui módulos de política temporal, manifesto v3 persistente, pr
 > Configuração remota continua disponível nesse modo e usa `client_id: null` e `venue_id: null` nos envelopes MQTT.
 > Com uma API base configurada, o processo exige `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup; `GN_CLIENT_ID` também é obrigatório apenas no modo `fixed`. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
 > Na clean architecture, URLs e headers assinados permanecem somente em memória; o checkpoint durável guarda apenas o ID remoto e o recibo de integridade necessário ao finalize.
+
+## Processamento diferido (etapa edge, desabilitado)
+
+`processing.deferredEnabled` (`GN_DEFERRED_PROCESSING_ENABLED=0`) habilita, apenas em dispositivos fixos, preservação persistente dos segmentos no clique e processamento posterior global. Autorização: madrugada obrigatória 00:00–05:00, janelas `processing.additionalWindows` (`GN_PROCESSING_WINDOWS_JSON=[]`) ou 30 minutos monotônicos sem cliques válidos. Usa o fuso existente; captura mantém sua janela operacional.
+
+A fila v3 vive em `queue_raw/.deferred`, recupera checkpoints e importa clipes antigos sem perder originais. Upload/finalização são independentes da agenda; alerta de armazenamento abre abaixo de **4.000.000.000 bytes**. MQTT de configuração é estendido; eventos/estado usam outbox e aguardam ACK de persistência do backend. A funcionalidade **não está liberada em produção**: faltam adaptações API/app, validação integrada e no hardware mínimo. `DEV=true` continua sem upload e não é controle de ativação. Rental não é alterado.
+
+Contrato, estados, migração, limites, testes e rollback: [processamento diferido](docs/specs/system/DEFERRED_PROCESSING.md). Desligar a flag nesta versão mantém recuperação de v3; versão antiga não entende esses manifestos.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 

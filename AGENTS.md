@@ -40,3 +40,12 @@ Before opening or merging a change, verify:
 
 ## Security & Configuration Tips
 Never commit `.env` or camera credentials. Treat `.env.example` as the public contract for new settings. Be careful with changes that touch upload, HMAC, or deletion/retry paths; those flows are operationally sensitive.
+
+## Deferred processing maintenance contract
+
+- Fixed-only deferred processing is disabled by default; see `docs/specs/system/DEFERRED_PROCESSING.md`. Backend/frontend and hardware qualification are release gates.
+- Preserve both v1/v2 queue compatibility and v3 checkpoints. Never hand v3 jobs to an older worker or delete pending artifacts during rollback.
+- For v3, the approved product decision supersedes legacy HR-009: an ingest-window rejection blocks delivery and preserves the replay. Authentication rejection remains terminal without deleting recovery artifacts.
+- The approved extension to HR-011 permits client-owned additional processing windows via backend RBAC; activation and mandatory midnight window are not client-editable. This edge change does not implement backend RBAC.
+- MQTT publish success is not an application ACK. Test with a simulated backend and retain pending events until a signed persistence receipt.
+- Validate deferred contracts with `tests.test_deferred_processing`, `tests.test_deferred_recovery` and `tests.test_deferred_media_integration`; keep real-camera tests opt-in.

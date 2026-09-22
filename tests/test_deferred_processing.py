@@ -3,12 +3,16 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+from src.application.delivery.deferred_coordinator import DeferredCoordinator
 from src.application.replay.preserve_replay import PreserveReplay
+from src.bootstrap.deferred_runtime import DeferredArtifacts
+from src.config.config_loader import OperationalConfig
 from src.config.settings import CaptureConfig
 from src.domain.capture import CameraId
 from src.domain.delivery import ClipJob
@@ -20,18 +24,18 @@ from src.domain.replay.processing_schedule import (
 )
 from src.infrastructure.filesystem.deferred_repository import (
     DeferredJobRepository,
+    DeferredLeases,
     LockBusy,
     durable_copy,
     exclusive_file,
     safe_child,
 )
+from src.infrastructure.http.deferred_gateway import DeferredVideoGateway
 from src.services.mqtt.operational_event_service import OperationalEventService, sign_operational
 from src.services.storage_monitor import StorageBlocked, StorageMonitor
 from src.video.buffer import SegmentBuffer
 
 UTC = UTC
-
-
 IDENTITY = {"device_id": "test-device", "client_id": "test-client", "venue_id": "test-venue"}
 
 
@@ -316,6 +320,167 @@ class OutboxTests(unittest.TestCase):
         self.service.emit("processing.failed", code="test_error")
         self.assertTrue(json.loads(self.service.status_path.read_text())["saturated"])
         self.assertEqual([], list(self.service.outbox.glob("*.json")))
+
+
+class DeliveryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.repo = DeferredJobRepository(self.root / "jobs")
+        self.job = ClipJob(
+            "job",
+            CameraId("cam"),
+            "artifacts/assembled.mp4",
+            datetime.now(UTC),
+            state=State.WATERMARKED,
+            artifact_location="artifacts/final.mp4",
+            schema_version=3,
+            details={
+                **IDENTITY,
+                "captured_at": "2026-09-21T12:00:00+00:00",
+                "thumbnail_complete": True,
+                "policy": {"max_attempts": 3},
+                "source_kind": "segments",
+                "segments": [],
+            },
+        )
+        self.repo.save(self.job)
+        artifact = self.repo.artifact(self.job, self.job.artifact_location)
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"final-video")
+        self.client = Mock(**IDENTITY)
+        for key, value in IDENTITY.items():
+            setattr(self.client, key, value)
+        self.client.is_configured.return_value = True
+        self.client.register_clip_metadados.return_value = {
+            "data": {"clip": {"clip_id": "remote", "upload_url": "https://test.invalid/upload"}}
+        }
+        from src.services.api_client import GravaNoisAPIClient
+
+        self.client.extract_clip_registration.side_effect = (
+            GravaNoisAPIClient.extract_clip_registration
+        )
+        self.client.upload_file_to_signed_url.return_value = (200, "OK", {"etag": "receipt"})
+        self.client.finalize_clip_uploaded.return_value = {
+            "data": {"clip_id": "remote", "status": "uploaded"}
+        }
+        self.events = Mock()
+        self.media = Mock()
+        self.config = OperationalConfig()
+        self.coordinator = DeferredCoordinator(
+            self.repo,
+            self.media,
+            DeferredVideoGateway(self.repo, self.client),
+            DeferredArtifacts(self.repo, []),
+            DeferredLeases(self.repo),
+            lambda: exclusive_file(self.root / "heavy.lock"),
+            DeviceActivity(),
+            Mock(),
+            self.events,
+            lambda: self.config,
+            SimpleNamespace(pending={}),
+        )
+
+    def deliver(self):
+        with patch(
+            "src.video.processor.ffprobe_metadata", return_value={"duration_sec": 10, "width": 100}
+        ):
+            self.coordinator.deliver_once()
+
+    def due(self):
+        job = self.repo.get("job")
+        self.repo.save(replace(job, next_attempt_at=datetime.now(UTC) - timedelta(seconds=1)))
+
+    def test_upload_retry_reuses_final_without_media(self):
+        self.client.upload_file_to_signed_url.return_value = (503, "unavailable", {})
+        self.deliver()
+        self.assertEqual(State.RETRY_PENDING, self.repo.get("job").state)
+        self.assertTrue(self.repo.artifact(self.job, self.job.artifact_location).exists())
+        self.due()
+        self.client.upload_file_to_signed_url.return_value = (200, "OK", {})
+        self.deliver()
+        self.assertEqual(State.FINALIZED, self.repo.get("job").state)
+        self.media.watermark.assert_not_called()
+        self.assertEqual(2, self.client.register_clip_metadados.call_count)
+
+    def test_finalize_retry_does_not_repeat_upload_or_registration(self):
+        self.client.finalize_clip_uploaded.side_effect = TimeoutError()
+        self.deliver()
+        job = self.repo.get("job")
+        self.assertEqual(State.UPLOADED, job.retry_from)
+        self.assertEqual("remote", job.remote_clip_id)
+        self.due()
+        self.client.finalize_clip_uploaded.side_effect = None
+        self.deliver()
+        self.assertEqual(1, self.client.upload_file_to_signed_url.call_count)
+        self.assertEqual(1, self.client.register_clip_metadados.call_count)
+        self.assertEqual(State.FINALIZED, self.repo.get("job").state)
+
+    def test_cleanup_failure_preserves_finalization_and_does_not_repeat_upload(self):
+        actual = self.coordinator.artifacts.cleanup
+        self.coordinator.artifacts.cleanup = Mock(side_effect=OSError("disk busy"))
+        self.deliver()
+        self.assertEqual(State.FINALIZED, self.repo.get("job").state)
+        self.assertEqual("cleanup_pending", self.repo.get("job").details["last_error"]["code"])
+        self.due()
+        self.coordinator.artifacts.cleanup = actual
+        self.deliver()
+        self.assertTrue(self.repo.get("job").details["cleaned"])
+        self.assertEqual(1, self.client.finalize_clip_uploaded.call_count)
+        self.assertEqual(1, self.client.upload_file_to_signed_url.call_count)
+
+    def test_expired_signed_url_refreshes_registration_with_same_identity(self):
+        self.client.upload_file_to_signed_url.return_value = (403, "ExpiredToken", {})
+        self.deliver()
+        job = self.repo.get("job")
+        self.assertEqual(State.REGISTERED, job.retry_from)
+        self.assertEqual("remote", job.remote_clip_id)
+        self.due()
+        self.client.upload_file_to_signed_url.return_value = (200, "OK", {})
+        self.deliver()
+        self.assertEqual(State.FINALIZED, self.repo.get("job").state)
+        self.assertEqual(2, self.client.register_clip_metadados.call_count)
+
+    def test_dev_preserves_without_remote_calls(self):
+        self.repo.save(
+            replace(
+                self.job, details={**self.job.details, "policy": {"max_attempts": 3, "dev": True}}
+            )
+        )
+        self.deliver()
+        self.assertEqual(State.DEV_PRESERVED, self.repo.get("job").state)
+        self.client.register_clip_metadados.assert_not_called()
+        self.assertTrue(self.repo.artifact(self.job, self.job.artifact_location).exists())
+
+    def test_schedule_never_blocks_ready_upload(self):
+        self.config.operation_window.time_zone = "UTC"
+        self.deliver()
+        self.assertEqual(State.FINALIZED, self.repo.get("job").state)
+
+    def test_ingest_time_error_blocks_without_deleting_or_using_attempts(self):
+        import requests
+
+        response = requests.Response()
+        response.status_code = 403
+        response._content = b'{"error":"request_outside_allowed_time_window","message":"outside"}'
+        self.client.register_clip_metadados.side_effect = requests.HTTPError(response=response)
+        self.deliver()
+        job = self.repo.get("job")
+        self.assertEqual(State.BLOCKED, job.state)
+        self.assertEqual(0, job.attempts)
+        self.assertTrue(self.repo.artifact(job, job.artifact_location).exists())
+
+    def test_authentication_error_is_terminal_and_preserves_artifact(self):
+        import requests
+
+        response = requests.Response()
+        response.status_code = 401
+        response._content = b'{"error":"signature_mismatch"}'
+        self.client.register_clip_metadados.side_effect = requests.HTTPError(response=response)
+        self.deliver()
+        self.assertEqual(State.FAILED, self.repo.get("job").state)
+        self.assertTrue(self.repo.artifact(self.job, self.job.artifact_location).exists())
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> Came
     cfg = MagicMock(spec=CaptureConfig)
     cfg.camera_id = camera_id
     cfg.pico_trigger_token = pico_trigger_token
+    cfg.track_segments = False
     segbuf = MagicMock()
     segbuf.diagnostics.return_value = SimpleNamespace(
         buffer_status="FRESH",
@@ -33,6 +34,37 @@ def _make_runtime(camera_id: str, pico_trigger_token: str | None = None) -> Came
     proc = MagicMock()
     proc.poll.return_value = None
     return CameraRuntime(cfg=cfg, proc=proc, segbuf=segbuf, camera_status="OK")
+
+
+class DeferredTriggerTests(unittest.TestCase):
+    def test_valid_trigger_records_activity_even_when_preservation_fails(self) -> None:
+        runtimes = [_make_runtime("cam01"), _make_runtime("cam02")]
+        deferred = MagicMock()
+        deferred.admit.side_effect = [OSError("full"), "saved"]
+        for runtime in runtimes:
+            runtime.deferred = deferred
+        executor = MagicMock()
+        config = SimpleNamespace(processing=SimpleNamespace(deferred_enabled=True))
+        with patch("main.get_effective_config", return_value=config):
+            _trigger_fan_out(runtimes, Path("unused"), executor, "trigger",
+                captured_at="2026-09-22T12:00:00+00:00", triggered_mono=100.0)
+        deferred.record_activity.assert_called_once_with(100.0)
+        self.assertEqual(2, deferred.admit.call_count)
+        executor.submit.assert_not_called()
+
+    def test_not_ready_camera_still_counts_activity_and_reports_original_trigger(self) -> None:
+        runtime = _make_runtime("cam01")
+        runtime.proc.poll.return_value = 1
+        runtime.deferred = MagicMock()
+        config = SimpleNamespace(processing=SimpleNamespace(deferred_enabled=True))
+        with patch("main.get_effective_config", return_value=config):
+            _trigger_fan_out([runtime], Path("unused"), MagicMock(), "trigger",
+                captured_at="2026-09-22T12:00:00+00:00", triggered_mono=100.0)
+        runtime.deferred.record_activity.assert_called_once_with(100.0)
+        runtime.deferred.admit.assert_not_called()
+        context = runtime.deferred.events.emit.call_args.kwargs["context"]
+        self.assertEqual("trigger", context["trigger_id"])
+        self.assertEqual("2026-09-22T12:00:00+00:00", context["captured_at"])
 
 
 class CameraSupervisorTests(unittest.TestCase):

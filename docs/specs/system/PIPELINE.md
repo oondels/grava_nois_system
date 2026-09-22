@@ -1,11 +1,10 @@
 # Edge Pipeline
 
-## Preparação de preservação e mídia diferida
+## Contrato diferido v3 (opt-in)
 
-`CaptureConfig.track_segments` é interno e permanece false no bootstrap atual. Quando habilitado pelo próximo bootstrap, `start_ffmpeg` gera CSV de segmentos fechados com nomes por sessão; `SegmentBuffer` protege pré/pós-buffer sem manter lock durante cópias. `PreserveReplay` publica trabalhos v3 em staging persistente. `DeferredMedia` reutiliza watermark, concatena e produz thumbnail com timeout e lock herdado pelo subprocesso. `PREPARING`, `ASSEMBLED` e `BLOCKED` ampliam o vocabulário de estados; v2 permanece compatível.
+Com `processing.deferredEnabled=true` em fixed, o clique protege e copia segmentos fechados, publica manifesto v3 e retorna sem pós-buffer bloqueante. Concatenação, watermark e thumbnail passam pelo consumidor global. A descrição de `build_highlight`/`ProcessingWorker` abaixo continua aplicável ao caminho legado. Rental permanece nesse contrato próprio.
 
-A política prepara a união entre madrugada obrigatória [00:00,05:00), janelas adicionais e 1800 segundos monotônicos sem cliques. A conexão dessa política com gatilhos e consumidores será feita em etapa posterior.
-
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
 
 ## Registro no modo rental
 

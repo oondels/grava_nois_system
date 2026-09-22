@@ -1,5 +1,11 @@
 # Edge Operations
 
+## Contrato diferido v3 (opt-in)
+
+Ativação apenas fixed, desligada por padrão. São necessários volumes persistentes de queue_raw e runtime_config; staging tmpfs/ramfs é rejeitado. Use rollback da flag nesta versão mantendo leitor v3, sem downgrade binário com pendências. Testes isolados: `python -m unittest tests.test_deferred_processing tests.test_deferred_recovery tests.test_deferred_media_integration`. FFmpeg sintético não qualifica hardware real.
+
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
+
 O repositório usa `unittest` como framework de teste.
 
 ## Startup behavior

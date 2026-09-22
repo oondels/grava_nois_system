@@ -1,9 +1,10 @@
 # Edge Business Rules
 
-## Contratos v3 em preparacao
+## Contrato diferido v3 (opt-in)
 
-Para trabalhos v3, rejeicao de horario gera BLOCKED sem descarte; erro de autenticacao e terminal com arquivos preservados. O pipeline legado ativo ainda conserva sua politica propria. Configuracao MQTT rejeita revisoes antigas e hash divergente na mesma revisao; a aplicacao so e reportada depois da persistencia e promocao, com journal para recuperacao. Janelas adicionais de cliente exigem RBAC e schema no backend antes de qualquer liberacao.
+Para trabalhos v3 de fixed, rejeição específica de horário preserva o lance em BLOCKED; falha terminal também conserva arquivos. Isso substitui o descarte legado somente nesse caminho. Cliente poderá configurar janelas adicionais pelo app/backend autorizado; madrugada obrigatória e credenciais não são alteráveis. O edge ainda exige adaptação do RBAC/schema no backend antes de produção.
 
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
 
 ## Captura rental
 

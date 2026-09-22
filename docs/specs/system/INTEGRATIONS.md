@@ -1,11 +1,10 @@
 # Edge Integrations
 
-## Adaptadores operacionais diferidos (ainda sem bootstrap)
+## Contrato diferido v3 (opt-in)
 
-`DeferredVideoGateway` conserva metadados → PUT S3 → uploaded. V3 guarda ID remoto e recibo, nunca URL assinada; rejeicao especifica de horario aguarda em BLOCKED, autenticacao e terminal e preserva artefatos. `ProcessClipJob` retoma upload/finalize sem reconstruir midia pronta.
+A configuração usa os mesmos quatro canais MQTT existentes. Telemetria v2 acrescenta ACK aplicativo em `capture/events/ack` e `state/ack`: PUBACK não confirma persistência. O backend ainda precisa implementar essas extensões e discriminar snapshot operacional de presença no canal state. Ingestão oficial metadados → S3 → uploaded permanece. Não habilitar a funcionalidade sem integração API/app.
 
-`OperationalEventService` publica v2 em capture/events e state, com outbox persistente. Extensoes propostas a API: capture/events/ack e state/ack, assinadas por device com hash do payload e status persisted/duplicate apos commit. Publicacao MQTT nao remove pendencias. Limites: 64 MiB outbox (8 MiB reservados), 32 MiB/sete dias de historico; saturacao e explicita. `StorageMonitor` alerta em menos de 4.000.000.000 bytes, reserva 256 MiB e recupera apos dois polls >=4,5 GB. O bootstrap ainda nao ativa esses consumidores.
-
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
 
 ## Integração rental
 

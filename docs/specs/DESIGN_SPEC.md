@@ -1,15 +1,5 @@
 # DESIGN_SPEC - Grava Nois System
 
-## Integracoes diferidas em preparacao
-
-Configuracao MQTT agora valida a agenda adicional e persiste transacoes recuperaveis. `DeferredVideoGateway`, `OperationalEventService` e `StorageMonitor` fornecem os adaptadores concretos para entrega com checkpoints, ACK aplicativo e reserva de armazenamento. A ligacao destes adaptadores ao runtime sera feita na proxima etapa; RabbitMQ nao e ativado.
-
-
-## Componentes de processamento diferido em preparação
-
-`DeviceActivity`, `PreserveReplay`, `DeferredJobRepository` e `DeferredMedia` adicionam política temporal, preservação com pin e checkpoints de mídia. Ainda não estão conectados ao bootstrap ativo. A mídia usa fsync/rename, caminhos relativos e exclusão por flock; testes sintéticos não validam desempenho em hardware.
-
-
 ## Modo rental
 
 O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a dependência de venue e usa o endpoint de metadata específico; veja `system/CONFIGURATION.md`, `PIPELINE.md` e `BUSINESS_RULES.md`.
@@ -21,6 +11,10 @@ Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclu
 Comandos administrativos invasivos permanecem opt-in, validam HMAC, expiração, identidade e idempotência, e só escrevem intents para o runner do host. A allowlist cobre restart/recreate do container, pull da imagem configurada, reboot e troca segura de Wi-Fi.
 O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
 No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
+
+## Processamento diferido em fixed
+
+O edge inclui pipeline v3 opt-in, separado do legado: preservação no clique, mídia agendada, upload/finalização com checkpoints e telemetria com ACK aplicativo. Desligado por padrão, não liberado sem API/app e validação em hardware. Contrato em [system/DEFERRED_PROCESSING.md](./system/DEFERRED_PROCESSING.md). Rental não participa desta ativação.
 
 ## 1. Overview
 
