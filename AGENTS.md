@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Core runtime code lives in `src/`: `src/video/` handles capture, buffering, highlight generation, and local media transforms; `src/workers/` processes queued clips; `src/config/` resolves operational config from `config.json`, legacy env, and remote MQTT config flows; `src/security/` contains signing logic; and `src/services/mqtt/` covers presence, remote config, and phase-1 command rejection. Tests live in `tests/` and follow the runtime split with focused files such as `test_mobile_format.py`, `test_trigger_fanout.py`, and `test_device_config_service.py`. Static assets and watermark images are stored in `files/`. Operational docs and system specs are under `docs/` and `docs/specs/system/`, including `docs/specs/system/CONFIGURATION.md`. Runtime artifact directories such as `queue_raw/`, `recorded_clips/`, `highlights_wm/`, and `failed_clips/` are local working folders, not source modules.
+Core runtime code lives in `src/`: `src/video/` handles capture, buffering, highlight generation, and local media transforms; `src/workers/` processes queued clips; `src/config/` resolves operational config from `config.json`, legacy env, and remote MQTT config flows; `src/security/` contains signing logic; and `src/services/mqtt/` covers presence, remote config, authenticated administrative commands, and durable result delivery. Tests live in `tests/` and follow the runtime split with focused files such as `test_mobile_format.py`, `test_trigger_fanout.py`, and `test_device_config_service.py`. Static assets and watermark images are stored in `files/`. Operational docs and system specs are under `docs/` and `docs/specs/system/`, including `docs/specs/system/CONFIGURATION.md`. Runtime artifact directories such as `queue_raw/`, `recorded_clips/`, `highlights_wm/`, and `failed_clips/` are local working folders, not source modules.
 
 ## Build, Test, and Development Commands
 Set up the local environment with:
@@ -32,6 +32,8 @@ Documentation is part of the project contract and must stay synchronized with th
 ## Testing Guidelines
 This repository uses `unittest`. Add tests in `tests/` with filenames starting `test_` and methods named `test_*`. Prefer focused regression tests around FFmpeg command generation, queue behavior, retry policy, and environment-flag combinations. If a change affects vertical/mobile output, update `tests/test_mobile_format.py`; if it affects real-device capture, document any opt-in integration coverage.
 
+Use `.venv/bin/python scripts/test_isolated.py --coverage` for the full code suite, or pass individual test paths without `--coverage` for focused checks. This runner clears inherited settings, disables dotenv and Python outbound network connections, and uses temporary runtime state. It exports `coverage.xml` and enforces 90% branch coverage in domain/application. Camera and complex integration harnesses are separate opt-ins, never required by the default suite. These guards are test isolation, not an OS sandbox for subprocesses.
+
 ## Commit & Pull Request Guidelines
 Recent history favors short imperative subjects, often with Conventional Commit style such as `feat(system): ...` or `fix(system): ...`, but plain imperative messages are also present. Keep commits scoped to one behavior change. Pull requests should explain the runtime impact, list any new env vars, mention updated docs/specs, and include the exact test commands run.
 
@@ -51,3 +53,10 @@ Never commit `.env` or camera credentials. Treat `.env.example` as the public co
 - The approved extension to HR-011 permits client-owned additional processing windows via backend RBAC; activation and mandatory midnight window are not client-editable. This edge change does not implement backend RBAC.
 - MQTT publish success is not an application ACK. Test with a simulated backend and retain pending events until a signed persistence receipt.
 - Validate deferred contracts with `tests.test_deferred_processing`, `tests.test_deferred_recovery` and `tests.test_deferred_media_integration`; keep real-camera tests opt-in.
+
+## Administrative control maintenance contract
+
+- Env control requires authenticated v2 requests/reports and inner envelope v2; never restore the insecure v1 write fallback. Keep committed Python/TypeScript fixtures synchronized with the API.
+- Host actions use durable IPC v2 per request. Token consumption is not action admission, MQTT publish is not an application persistence receipt, and queued restart is not service readiness.
+- Preserve command results until authenticated `commands/ack`; unknown host outcomes require reconciliation, never automatic replay of invasive effects.
+- Validate with `tests.test_device_env_service`, `tests.test_env_envelope_cross`, `tests.test_mqtt_commands`, `tests.test_docker_action_request`, and terminal shutdown tests. See `docs/specs/system/DEVICE_RELIABILITY.md` for rollout and compatibility.

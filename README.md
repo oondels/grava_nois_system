@@ -17,9 +17,11 @@
 
 `processing.deferredEnabled` (`GN_DEFERRED_PROCESSING_ENABLED=0`) habilita, apenas em dispositivos fixos, preservação persistente dos segmentos no clique e processamento posterior global. Autorização: madrugada obrigatória 00:00–05:00, janelas `processing.additionalWindows` (`GN_PROCESSING_WINDOWS_JSON=[]`) ou 30 minutos monotônicos sem cliques válidos. Usa o fuso existente; captura mantém sua janela operacional.
 
-A fila v3 vive em `queue_raw/.deferred`, recupera checkpoints e importa clipes antigos sem perder originais. Upload/finalização são independentes da agenda; alerta de armazenamento abre abaixo de **4.000.000.000 bytes**. MQTT de configuração é estendido; eventos/estado usam outbox e aguardam ACK de persistência do backend. A funcionalidade **não está liberada em produção**: faltam adaptações API/app, validação integrada e no hardware mínimo. `DEV=true` continua sem upload e não é controle de ativação. Rental não é alterado.
+A fila v3 vive em `queue_raw/.deferred`, recupera checkpoints e importa clipes antigos sem perder originais. Upload/finalização são independentes da agenda; alerta de armazenamento abre abaixo de **4.000.000.000 bytes**. MQTT de configuração é estendido; eventos/estado usam outbox e aguardam ACK de persistência do backend. A funcionalidade **não está liberada em produção**: API/app já implementam os contratos; faltam concluir a homologação integrada e a qualificação no hardware mínimo. `DEV=true` continua sem upload e não é controle de ativação. Rental não é alterado.
 
 Contrato, estados, migração, limites, testes e rollback: [processamento diferido](docs/specs/system/DEFERRED_PROCESSING.md). Desligar a flag nesta versão mantém recuperação de v3; versão antiga não entende esses manifestos.
+
+Controle administrativo v2, compatibilidade, ACK de comandos, recuperação e testes: [contrato de confiabilidade](docs/specs/system/DEVICE_RELIABILITY.md). O Compose local usa `host_config/.env` dedicado e a saúde do loop real (`python -m src.cli.healthcheck`, `--ready` inclui câmeras). O `.env` remoto exige sync autenticado v2; comandos exigem o runner com IPC v2. Aceite de uma solicitação não confirma reinício do serviço.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 
@@ -56,7 +58,7 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 - **`src/workers/processing_worker.py`**: Worker de processamento, watermark, upload e retry
 - **`src/utils/logger.py`**: Sistema de logging centralizado
 - **`src/services/api_client.py`**: Cliente HTTP para comunicação com backend
-- **`src/services/mqtt/`**: Cliente MQTT, presença do device, configuração remota e bloqueio explícito de command/control
+- **`src/services/mqtt/`**: Cliente MQTT, presença do device, configuração remota e comandos administrativos autenticados opt-in
 
 ### Dependências
 
@@ -354,9 +356,9 @@ grava_nois_system/
 │           ├── mqtt_client.py            # Cliente MQTT e lifecycle
 │           ├── device_presence_service.py# Presença, heartbeat e estado
 │           ├── device_config_service.py  # Configuração remota assinada
-│           ├── command_dispatcher.py     # Estrutura futura de command/control
-│           ├── command_executor.py       # Placeholder sem execução real
-│           └── command_policy.py         # Política que bloqueia comandos na fase 1
+│           ├── command_dispatcher.py     # Autenticação, ledger e outbox com ACK
+│           ├── command_executor.py       # Admissão de intent no runner host
+│           └── command_policy.py         # Allowlist e expiração dos comandos opt-in
 │
 ├── files/
 │   ├── replay_grava_nois.png    # Logo principal (original)
@@ -595,7 +597,7 @@ GN_PICO_HOST_SHUTDOWN_TOKEN=SHUTDOWN_HOST
 GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
 ```
 
-O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele grava intents duráveis por UUID em `device-actions/requests/`, ao lado do caminho legado configurado acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
 
 Configurações operacionais recebidas por `config.desired` são persistidas no `config.json`/pending e nos campos equivalentes do `.env` gerenciado antes do report de sucesso. Assim, o próximo pull/restart reconstrói o JSON sem perder a alteração. Segredos, identidade e variáveis sem equivalente operacional são preservados.
 
@@ -746,7 +748,13 @@ Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumi
 Observação:
 - O `device_id` dos tópicos vem de `DEVICE_ID`/`GN_DEVICE_ID` no serviço de presença e precisa ser um único nível de tópico MQTT. O sistema rejeita `/`, `+`, `#` e byte nulo para evitar wildcard ou hierarquia inesperada; se o valor for inválido, somente MQTT é ignorado.
 
-### Tópicos da fase 1
+### Tópicos da fase 1 (referência histórica)
+
+A lista e os exemplos abaixo registram a base histórica. Para os contratos atuais
+de `env/*` e `commands/*`, incluindo ACK, consulte
+[DEVICE_RELIABILITY.md](docs/specs/system/DEVICE_RELIABILITY.md); para telemetria
+e ACK de processamento diferido, consulte
+[DEFERRED_PROCESSING.md](docs/specs/system/DEFERRED_PROCESSING.md).
 
 - `grn/devices/{device_id}/presence`
 - `grn/devices/{device_id}/heartbeat`
@@ -1800,6 +1808,13 @@ Para contribuir com o projeto:
 3. Siga as convenções de logging estabelecidas
 4. Atualize toda documentação impactada no mesmo change (`README.md`, `.env.example`, specs e `AGENTS.md` quando aplicável)
 
+Suíte de código isolada: `.venv/bin/python scripts/test_isolated.py --coverage`
+(dependências em `requirements-dev.txt`). Não carrega `.env`, usa estado temporário e
+bloqueia conexões Python de saída; gera `coverage.xml` e exige 90% de cobertura de
+branches nas camadas domain/application. Integrações com câmera e serviços ficam
+opt-in. Veja o [relatório de correções](docs/reports/device-reliability-2026-09-29.md)
+e o [roteiro de integração manual](docs/reports/e2e-local-validation.md).
+
 ---
 
 ## 📞 Suporte
@@ -1812,5 +1827,5 @@ Em caso de problemas:
 
 ---
 
-**Última atualização:** 2026-03-31
+**Última atualização:** 2026-09-29
 **Versão:** 2.4.0 (multi-botão Pico por câmera + cooldown por câmera)

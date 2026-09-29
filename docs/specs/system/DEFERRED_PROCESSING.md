@@ -1,6 +1,6 @@
 # Processamento diferido — etapa edge
 
-Ambiente Linux/Python 3.11+ (Dockerfile existente). Implementado no edge, desligado por padrão e restrito a `fixed`. Não liberar em produção antes das adaptações de API/aplicativo, testes de contrato ponta a ponta e validação no equipamento mais fraco. Rental conserva seu pipeline e suas regras de upload manual. Agendamento distribui o trabalho; não reduz necessariamente seu custo total nem garante prazo de conclusão.
+Ambiente Linux/Python 3.11+ (Dockerfile existente). Implementado no edge, desligado por padrão e restrito a `fixed`. Não liberar em produção antes de concluir os testes de contrato ponta a ponta e a validação no equipamento mais fraco. API/aplicativo já implementam os contratos diferidos nesta linha de trabalho. Rental conserva seu pipeline e suas regras de upload manual. Agendamento distribui o trabalho; não reduz necessariamente seu custo total nem garante prazo de conclusão.
 
 ## Ativação e configuração
 
@@ -71,9 +71,9 @@ Mantidos `config/desired`, `config/reported`, `config/request`, `config/state`, 
 
 Versão menor que aplicada/pendente é rejeitada; mesma versão/hash devolve resultado efetivo sem reaplicar; mesma versão com hash diferente é conflito. Campos de agenda passam pela allowlist e validação. `deferredEnabled` requer restart e é rejeitado para rental. Janela adicional é hot reload; nenhuma configuração pode remover a madrugada ou alterar identidade/credenciais.
 
-`config.transaction.json` recupera interrupção entre persistência do env, pending, config e state. A promoção e a leitura da configuração compartilham lock. `applied` só após gravação e promoção efetiva; `pending_restart` não significa aplicada. Reconexão/requisição de estado reconcilia resposta perdida. Reenvio da mesma versão conserva `issued_at`/hash, pois `updatedAt` integra o hash existente; após expiração, reconciliar por `config/request` ou emitir nova versão, sem reutilizar a versão com outro hash. Backend deve manter essa distinção ao correlacionar reports: hash de configuração pendente não comprova aplicação. O backend/aplicativo ainda precisam aceitar os novos campos e autorizar client apenas para `additionalWindows`, no seu escopo; ativação continua controle administrativo de liberação.
+`config.transaction.json` recupera interrupção entre persistência do env, pending, config e state. A promoção e a leitura da configuração compartilham lock. `applied` só após gravação e promoção efetiva; `pending_restart` não significa aplicada. Reconexão/requisição de estado reconcilia resposta perdida. Reenvio da mesma versão conserva `issued_at`/hash, pois `updatedAt` integra o hash existente; após expiração, reconciliar por `config/request` ou emitir nova versão, sem reutilizar a versão com outro hash. Backend deve manter essa distinção ao correlacionar reports: hash de configuração pendente não comprova aplicação. Backend/aplicativo aceitam os novos campos e autorizam client apenas para `additionalWindows`, no seu escopo; ativação continua controle administrativo de liberação.
 
-## Eventos e estado: extensão de contrato a implementar na API
+## Eventos e estado: contrato implementado, sujeito à homologação integrada
 
 O edge implementa transporte MQTT real sobre o cliente existente; não ativa RabbitMQ. Configuração permanece no protocolo acima. Telemetria usa namespace resolvido pelo `topic_for` existente, com extensões explicitamente novas:
 
@@ -110,7 +110,7 @@ Na versão de backend auditada, `requestTimeWindow` já avalia `captured_at`, co
 
 Deduplicação atual da API: venue + SHA-256 + clipMode. Timeout ambíguo de registro reutiliza hash/ID; conflito de identidade/409 fica bloqueado para reconciliação, sem inventar endpoint. Backend precisa cobrir reenvio após finalização cuja resposta se perdeu, renovação de URL sem duplicata e commit/deduplicação/ACK de eventos. Não registrar novamente deliberadamente um clipe já concluído.
 
-Sequência restante: (1) backend: schemas/RBAC/revisões e aplicação MQTT, ACK e persistência de eventos/estado, reconciliação de ingestão; (2) frontend: janelas por equipamento, progresso desired/pending/applied/rejected via fluxo existente/SSE, alertas e estado; (3) contrato integrado em ambiente isolado, interrupções/reconexões/rollback; (4) equipamento mais fraco com captura ativa; (5) ativação administrativa controlada. Não usar DEV como feature flag.
+Backend e frontend implementam schemas/RBAC, configuração, eventos/estado com ACK, reconciliação de ingestão, agenda e UI. Sequência restante: contrato integrado em ambiente isolado com interrupções/reconexões/rollback; equipamento mais fraco com captura ativa; ativação administrativa controlada. Não usar DEV como feature flag.
 
 ## Validação
 

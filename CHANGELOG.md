@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-29
+
+### Fixed
+- `fix(security)`: controle admin .env v2 assinado integralmente, expiracao, correlacao, ledger privado e recuperacao sem reexecucao. Fixtures Python/TypeScript versionadas.
+- `fix(device)`: admissao host com resultado explicito, IPC v2 por request, outbox de reports e ACK aplicativo; falhas nao viram falso aceite.
+- `fix(runtime)`: probe de saúde verifica heartbeat do loop/PID e readiness das câmeras; Compose local usa diretório dedicado para `.env`.
+- `fix(runtime)`: ENTER interrompivel e shutdown aguardado; adapter de comandos ainda nao migrado permanece inerte.
+- `docs(system)`: API/frontend diferidos ja implementados; homologacao integrada e hardware minimo continuam gates de liberacao.
+
+### Compatibility
+- Atualizar API, runner e edge juntos com operacoes desabilitadas; sync .env v2 obrigatorio. Sem fallback de escrita v1 e sem downgrade destrutivo de filas v3.
+
+
 ## 2026-09-22
 
 ### Added

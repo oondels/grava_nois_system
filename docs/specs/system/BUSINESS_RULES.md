@@ -1,5 +1,8 @@
 # Edge Business Rules
 
+Contrato administrativo vigente: [DEVICE_RELIABILITY.md](./DEVICE_RELIABILITY.md). `.env` usa controle v2 integralmente assinado, sem fallback v1; comandos usam IPC durável v2 e ACK aplicativo assinado. Registros históricos de fase 1 não descrevem o dispatcher ativo.
+
+
 ## Contrato diferido v3 (opt-in)
 
 Para trabalhos v3 de fixed, rejeição específica de horário preserva o lance em BLOCKED; falha terminal também conserva arquivos. Isso substitui o descarte legado somente nesse caminho. Cliente poderá configurar janelas adicionais pelo app/backend autorizado; madrugada obrigatória e credenciais não são alteráveis. O edge ainda exige adaptação do RBAC/schema no backend antes de produção.
@@ -152,7 +155,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - `mqtt.log` deve ser separado do `app.log`;
 - credenciais MQTT e `DEVICE_SECRET` nunca podem aparecer em logs;
 - `device_id` usado em tópicos MQTT deve rejeitar separadores de nível e wildcards (`/`, `+`, `#`);
-- `commands/in` e `commands/out` podem existir, mas nenhum comando remoto pode ser executado na fase 1.
+- `commands/in` e `commands/out` executam somente a allowlist administrativa autenticada e opt-in; `commands/ack` confirma persistência do resultado na API.
 
 ## Remote config rules
 
@@ -177,7 +180,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - referência `env:` ausente em câmera habilitada rejeita o startup sem incluir credenciais no erro.
 ## Operações administrativas
 
-O edge aceita apenas `restart_container`, `reboot_host`, `pull_and_recreate` e `change_wifi` com feature flag, HMAC válido, device correspondente e validade futura. O ledger persistente, limitado aos 200 registros mais recentes e gravado com permissão `0600`, impede reexecução por redelivery QoS 1.
+O edge aceita apenas `restart_container`, `reboot_host`, `pull_and_recreate` e `change_wifi` com feature flag, HMAC válido, device correspondente e validade futura. O ledger persistente por request, gravado com permissão `0600`, impede reexecução por redelivery QoS 1; resultados aguardam ACK aplicativo e não são truncados por quantidade.
 
 - comandos desabilitados, expirados, com assinatura inválida ou fora da allowlist nunca chegam ao executor;
 - o container não aceita imagem, tag, shell ou path arbitrário e não recebe o socket Docker;

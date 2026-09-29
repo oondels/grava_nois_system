@@ -14,7 +14,9 @@ No modo rental, falhas de envio preservam o artefato processado em `rental_clips
 
 ## Processamento diferido em fixed
 
-O edge inclui pipeline v3 opt-in, separado do legado: preservação no clique, mídia agendada, upload/finalização com checkpoints e telemetria com ACK aplicativo. Desligado por padrão, não liberado sem API/app e validação em hardware. Contrato em [system/DEFERRED_PROCESSING.md](./system/DEFERRED_PROCESSING.md). Rental não participa desta ativação.
+O edge inclui pipeline v3 opt-in, separado do legado: preservação no clique, mídia agendada, upload/finalização com checkpoints e telemetria com ACK aplicativo. Desligado por padrão; API/app implementados, liberação condicionada à homologação integrada e hardware. Contrato em [system/DEFERRED_PROCESSING.md](./system/DEFERRED_PROCESSING.md). Rental não participa desta ativação.
+
+Controle administrativo v2, assinaturas, idempotência, ACK e migração do runner: [system/DEVICE_RELIABILITY.md](./system/DEVICE_RELIABILITY.md).
 
 ## 1. Overview
 

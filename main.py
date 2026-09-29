@@ -33,6 +33,7 @@ from src.services.mqtt.device_config_service import (
 )
 from src.services.mqtt.device_diagnostic_service import DeviceDiagnosticEventService
 from src.services.mqtt.device_env_service import DeviceEnvService
+from src.services.runtime_health import RuntimeHealth
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
@@ -79,22 +80,30 @@ CAMERA_SUPERVISOR_INTERVAL_SEC = 5.0
 def _listen_for_enter(
     trigger_q: queue.Queue[tuple[str, str, float]], stop_evt: threading.Event
 ) -> None:
-    """Read terminal lines without claiming that a replay is already preserved."""
+    """Read lines without holding Python's buffered stdin lock during shutdown."""
+    import select
+    import sys
+
     try:
+        fd = sys.stdin.fileno()
         while not stop_evt.is_set():
-            try:
-                input()
-            except EOFError:
+            ready, _, _ = select.select([fd], [], [], 0.2)
+            if not ready:
+                continue
+            data = os.read(fd, 4096)
+            if not data:
                 logger.warning("Entrada padrão encerrada; gatilho ENTER indisponível neste processo")
                 return
-            except KeyboardInterrupt:
-                stop_evt.set()
-                return
-            signal = ("enter", datetime.now(UTC).isoformat(), time.monotonic())
-            logger.info("ENTER recebido; encaminhando gatilho para validação e preservação")
-            trigger_q.put(signal)
-    except Exception:
-        logger.exception("Erro no listener de ENTER")
+            for _ in range(data.count(b"\n")):
+                if stop_evt.is_set():
+                    return
+                signal = ("enter", datetime.now(UTC).isoformat(), time.monotonic())
+                logger.info("ENTER recebido; encaminhando gatilho para validação e preservação")
+                trigger_q.put(signal)
+    except KeyboardInterrupt:
+        stop_evt.set()
+    except (OSError, ValueError):
+        logger.warning("Entrada padrão indisponível; gatilho ENTER desativado")
 
 
 def _send_pico_command(
@@ -1106,9 +1115,14 @@ def main() -> int:
         + f" para capturar {capture_desc} (Ctrl+C sai)"
     ) if runtimes else "Serviço ativo sem câmeras; gatilhos não geram clipes (Ctrl+C sai)"
     logger.info(prompt)
+    runtime_health = RuntimeHealth(base, boot_id, CAMERA_STALE_AFTER_SEC)
 
     try:
         while not stop_evt.is_set():
+            try:
+                runtime_health.tick(runtimes)
+            except OSError:
+                logger.warning("Não foi possível atualizar a saúde local do runtime")
             try:
                 signal = trigger_q.get(timeout=0.3)
                 trig, captured_at, triggered_mono = signal if isinstance(signal, tuple) else (signal, datetime.now(timezone.utc).isoformat(), time.monotonic())
@@ -1172,6 +1186,11 @@ def main() -> int:
         logger.info("Encerrando...")
     finally:
         stop_evt.set()
+        try:
+            runtime_health.tick(runtimes, stopped=True)
+        except OSError:
+            pass
+        stdin_t.join(timeout=1)
         if pico_monitor is not None:
             pico_monitor.stop()
         if pico_controller is not None:
@@ -1185,6 +1204,8 @@ def main() -> int:
                 mqtt_dispatcher.stop()
             except Exception:
                 pass
+        if mqtt_env_service is not None:
+            mqtt_env_service.stop()
         if mqtt_config_service is not None:
             try:
                 mqtt_config_service.stop()

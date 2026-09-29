@@ -1,0 +1,75 @@
+{
+  "secret": "contract-test-env-secret-python-v2",
+  "plaintext": "KEY=fixture-only\nLABEL=Câmera São Paulo\n",
+  "now": "2026-09-29T12:00:00.000Z",
+  "envelope": {
+    "version": "v2",
+    "request_id": "22222222-2222-4222-8222-222222222222",
+    "device_id": "python-contract-device",
+    "issued_at": "2026-09-29T12:00:00.000Z",
+    "iv": "D1ymYoUst/ZI4S7H",
+    "ciphertext": "y9FeqXj1fG6WQFEFz2jWwjcJJcuan5owAF0KDemd4qUjN5qkIDHFPDqg",
+    "auth_tag": "+QDE+4qAvjyIAvgusyc8Kg==",
+    "content_hash": "RGEppSri2+L2RgyLavVNVRaFS5iSHUXBXgTmCJNq9/c=",
+    "signature": "W0sSs6A685WTU2D6cHDmvrsEHOdByOQX1cWnSh4Tucc="
+  },
+  "request": {
+    "device_id": "python-contract-device",
+    "request_id": "22222222-2222-4222-8222-222222222222",
+    "issued_at": "2026-09-29T12:00:00.000Z",
+    "expires_at": "2026-09-29T12:02:00.000Z",
+    "type": "env.request",
+    "signature_version": "hmac-sha256-v2",
+    "signature": "67fICiUUfPLrH1UQ2P4sOG3lya7JJuALrVFYFAIUcTY="
+  },
+  "desired": {
+    "device_id": "python-contract-device",
+    "request_id": "22222222-2222-4222-8222-222222222222",
+    "issued_at": "2026-09-29T12:00:00.000Z",
+    "expires_at": "2026-09-29T12:02:00.000Z",
+    "type": "env.desired",
+    "restart_after_apply": true,
+    "envelope": {
+      "version": "v2",
+      "request_id": "22222222-2222-4222-8222-222222222222",
+      "device_id": "python-contract-device",
+      "issued_at": "2026-09-29T12:00:00.000Z",
+      "iv": "D1ymYoUst/ZI4S7H",
+      "ciphertext": "y9FeqXj1fG6WQFEFz2jWwjcJJcuan5owAF0KDemd4qUjN5qkIDHFPDqg",
+      "auth_tag": "+QDE+4qAvjyIAvgusyc8Kg==",
+      "content_hash": "RGEppSri2+L2RgyLavVNVRaFS5iSHUXBXgTmCJNq9/c=",
+      "signature": "W0sSs6A685WTU2D6cHDmvrsEHOdByOQX1cWnSh4Tucc="
+    },
+    "signature_version": "hmac-sha256-v2",
+    "signature": "ARTSX5HNCNmveWTM/YpaOmtoPxP06D3MJS8BUgvFymk="
+  },
+  "reported": {
+    "device_id": "python-contract-device",
+    "request_id": "22222222-2222-4222-8222-222222222222",
+    "issued_at": "2026-09-29T12:00:00.000Z",
+    "expires_at": "2026-09-29T12:02:00.000Z",
+    "type": "env.reported",
+    "status": "snapshot",
+    "reported_at": "2026-09-29T12:00:00.000Z",
+    "client_id": null,
+    "venue_id": null,
+    "envelope": {
+      "version": "v2",
+      "request_id": "22222222-2222-4222-8222-222222222222",
+      "device_id": "python-contract-device",
+      "issued_at": "2026-09-29T12:00:00.000Z",
+      "iv": "D1ymYoUst/ZI4S7H",
+      "ciphertext": "y9FeqXj1fG6WQFEFz2jWwjcJJcuan5owAF0KDemd4qUjN5qkIDHFPDqg",
+      "auth_tag": "+QDE+4qAvjyIAvgusyc8Kg==",
+      "content_hash": "RGEppSri2+L2RgyLavVNVRaFS5iSHUXBXgTmCJNq9/c=",
+      "signature": "W0sSs6A685WTU2D6cHDmvrsEHOdByOQX1cWnSh4Tucc="
+    },
+    "env_hash": "RGEppSri2+L2RgyLavVNVRaFS5iSHUXBXgTmCJNq9/c=",
+    "env_keys": [
+      "KEY",
+      "LABEL"
+    ],
+    "signature_version": "hmac-sha256-v2",
+    "signature": "U1M9YM7LnIToc64dGdxHyCgef2unX9tkQW1pVc5k0Sg="
+  }
+}

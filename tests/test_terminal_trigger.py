@@ -23,7 +23,7 @@ class TerminalTriggerTests(unittest.TestCase):
         signals = queue.Queue()
         stop = threading.Event()
         before = time.monotonic()
-        with patch("builtins.input", side_effect=["", EOFError]), patch("main.logger") as log:
+        with patch("sys.stdin.fileno", return_value=0), patch("select.select", return_value=([0], [], [])), patch("os.read", side_effect=[b"\n", b""]), patch("main.logger") as log:
             _listen_for_enter(signals, stop)
         source, captured_at, triggered_mono = signals.get_nowait()
         self.assertEqual(source, "enter")
@@ -38,7 +38,7 @@ class TerminalTriggerTests(unittest.TestCase):
     def test_keyboard_interrupt_stops_without_enqueuing_trigger(self):
         signals = queue.Queue()
         stop = threading.Event()
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
+        with patch("sys.stdin.fileno", return_value=0), patch("select.select", side_effect=KeyboardInterrupt):
             _listen_for_enter(signals, stop)
         self.assertTrue(stop.is_set())
         self.assertTrue(signals.empty())
@@ -60,9 +60,12 @@ logging.disable(logging.CRITICAL)
 from main import _listen_for_enter
 signals = queue.Queue()
 stop = threading.Event()
-threading.Thread(target=_listen_for_enter, args=(signals, stop), daemon=True).start()
+reader = threading.Thread(target=_listen_for_enter, args=(signals, stop))
+reader.start()
 signal = signals.get(timeout=5)
 stop.set()
+reader.join(1)
+assert not reader.is_alive()
 print(json.dumps({'source': signal[0], 'captured_at': signal[1]}), flush=True)
 """
         master, slave = pty.openpty()

@@ -1,84 +1,43 @@
-"""Serviço MQTT para gerenciamento remoto de .env (admin-only).
-
-Tópicos:
-  - env/request  (inbound): backend solicita snapshot do .env atual
-  - env/desired  (inbound): backend envia .env editado pelo admin
-  - env/reported (outbound): edge publica snapshot/status
-
-Todo conteúdo de .env trafega criptografado via envelope AES-256-GCM.
-"""
+"""Authenticated, replay-safe administrative .env control over MQTT v2."""
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
-import logging
 import os
-import shutil
-import stat
 import tempfile
-from datetime import datetime, timezone
+import threading
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from src.config.config_loader import configuration_transaction
+from src.infrastructure.filesystem.deferred_repository import LockBusy, exclusive_file
+from src.security.durable_state import private_json as _private_json
+from src.security.env_control import request_hash, sign_control, timestamp, validate_control
 from src.security.env_envelope import open_env_envelope, seal_env_envelope
-from src.security.hmac import hmac_sha256_base64
 from src.services.docker_action_request import DockerActionRequestService
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
-from src.utils.logger import setup_logger
-
-_AUDIT_CONSOLE_LEVEL = logging.CRITICAL + 1
-_env_audit_logger = setup_logger(
-    name="grava_nois_env_audit",
-    file_name="env_audit.log",
-    console_level=_AUDIT_CONSOLE_LEVEL,
-    file_level=logging.INFO,
-)
-
-_ENV_KEYS_NEVER_LOG = {
-    "DEVICE_SECRET",
-    "GN_DEVICE_SECRET",
-    "GN_API_TOKEN",
-    "GN_MQTT_PASSWORD",
-    "GN_MQTT_USERNAME",
-}
-
-
-def _audit_log(event: str, **fields: Any) -> None:
-    payload = {"event": event, **fields}
-    _env_audit_logger.info(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    )
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _parse_env_keys(content: str) -> list[str]:
-    """Extrai nomes de chaves do .env (sem valores)."""
-    keys: list[str] = []
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        eq = stripped.find("=")
-        if eq > 0:
-            keys.append(stripped[:eq].strip())
-    return keys
+    return [
+        line.split("=", 1)[0].strip()
+        for line in content.splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    ]
 
 
 def _content_hash(content: str) -> str:
-    import hashlib
-    import base64
-
-    return base64.b64encode(
-        hashlib.sha256(content.encode("utf-8")).digest()
-    ).decode("ascii")
+    return base64.b64encode(hashlib.sha256(content.encode()).digest()).decode()
 
 
 class DeviceEnvService:
-    """Gerencia .env admin via MQTT com envelope criptografado."""
-
     def __init__(
         self,
         mqtt_client: MQTTClient,
@@ -92,402 +51,279 @@ class DeviceEnvService:
         env_path: str | Path | None = None,
         device_secret: str = "",
         agent_version: str = "local-dev",
+        ledger_dir: Path | None = None,
+        action_service=None,
     ):
         self.mqtt_client = mqtt_client
-        self.device_id = device_id
-        self.client_id = client_id
-        self.venue_id = venue_id
-        self.request_topic = request_topic
-        self.desired_topic = desired_topic
-        self.reported_topic = reported_topic
-        self.env_path = Path(
-            env_path
-            or os.getenv("GN_HOST_ENV_PATH", "/usr/src/app/host_config/.env")
+        self.device_id, self.client_id, self.venue_id = device_id, client_id, venue_id
+        self.request_topic, self.desired_topic, self.reported_topic = (
+            request_topic,
+            desired_topic,
+            reported_topic,
         )
-        self.device_secret = device_secret
-        self.agent_version = agent_version
+        self.env_path = Path(
+            env_path or os.getenv("GN_HOST_ENV_PATH", "/usr/src/app/host_config/.env")
+        )
+        self.device_secret, self.agent_version = device_secret, agent_version
+        self.ledger_dir = (
+            ledger_dir
+            or Path(os.getenv("GN_RUNTIME_CONFIG_DIR", "/usr/src/app/runtime_config"))
+            / "env-control"
+        )
+        self.action_service = action_service or DockerActionRequestService.from_env(
+            logger=mqtt_logger
+        )
+        self._lock = threading.RLock()
+        self._stop = threading.Event()
+        self._thread = None
         self._connect_listener_registered = False
 
     def start(self) -> bool:
-        if not self.mqtt_client.is_enabled:
-            mqtt_logger.info("DeviceEnvService não iniciado: MQTT desabilitado")
+        if not self.mqtt_client.is_enabled or not self.device_secret:
             return False
-        if not self.device_secret:
-            mqtt_logger.warning(
-                "DeviceEnvService não iniciado: DEVICE_SECRET ausente"
-            )
-            return False
-        mqtt_logger.info(
-            "DeviceEnvService iniciando: request_topic=%s desired_topic=%s reported_topic=%s env_path=%s has_secret=%s mqtt_connected=%s",
-            self.request_topic,
-            self.desired_topic,
-            self.reported_topic,
-            self.env_path,
-            bool(self.device_secret),
-            self.mqtt_client.is_connected,
-        )
-        if not self.env_path.exists():
-            mqtt_logger.warning(
-                "DeviceEnvService iniciado sem .env acessível em %s; sync admin retornará rejected até montar host_config/GN_HOST_ENV_PATH corretamente",
-                self.env_path,
-            )
         if not self._connect_listener_registered:
             self.mqtt_client.add_on_connect_listener(self._handle_mqtt_connect)
             self._connect_listener_registered = True
-        request_subscribed = self.mqtt_client.subscribe(self.request_topic, self._handle_message)
-        desired_subscribed = self.mqtt_client.subscribe(self.desired_topic, self._handle_message)
-        mqtt_logger.info(
-            "DeviceEnvService subscriptions registradas: request=%s desired=%s",
-            request_subscribed,
-            desired_subscribed,
+        self.mqtt_client.subscribe(self.request_topic, self._handle_message)
+        self.mqtt_client.subscribe(self.desired_topic, self._handle_message)
+        self._thread = threading.Thread(
+            target=self._retry_reports, daemon=True, name="env-control-reports"
         )
+        self._thread.start()
         if self.mqtt_client.is_connected:
             self._handle_mqtt_connect()
         return True
 
     def stop(self) -> None:
-        pass
+        self._stop.set()
+        if self._thread:
+            self._thread.join(3)
+
+    def _retry_reports(self) -> None:
+        while not self._stop.wait(30):
+            self._handle_mqtt_connect()
 
     def _handle_mqtt_connect(self) -> None:
-        mqtt_logger.info("DeviceEnvService: conexão MQTT estabelecida")
+        # API correlation lasts 15 minutes. Never replay snapshots after their
+        # request expiry: a new sync must observe current data.
+        with self._lock:
+            for path in self.ledger_dir.glob("*.json"):
+                try:
+                    record = json.loads(path.read_text())
+                    if record.get("phase") == "done" and timestamp(
+                        record["expires_at"]
+                    ) + timedelta(days=1) < datetime.now(UTC):
+                        path.unlink()
+                        continue
+                    if record.get("type") != "env.desired":
+                        continue
+                    with (
+                        exclusive_file(self.ledger_dir / "control.lock"),
+                        configuration_transaction,
+                    ):
+                        if record.get("phase") != "done":
+                            self._recover(record, path)
+                        if timestamp(record["expires_at"]) + timedelta(minutes=13) > datetime.now(
+                            UTC
+                        ):
+                            self._publish(record["report"])
+                except (OSError, ValueError, KeyError, TypeError, AttributeError, LockBusy):
+                    mqtt_logger.warning("Env control recovery pending; no automatic reapplication")
 
     def _handle_message(self, topic: str, raw_payload: bytes) -> None:
         try:
-            payload = json.loads(raw_payload.decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise ValueError("payload deve ser um objeto JSON")
-
-            _audit_log(
-                "env_message_received",
-                deviceId=self.device_id,
-                topic=topic,
-                messageType=payload.get("type"),
-                requestId=payload.get("request_id"),
+            if len(raw_payload) > 512 * 1024:
+                raise ValueError("payload_too_large")
+            payload = json.loads(raw_payload)
+            expected = {self.request_topic: "env.request", self.desired_topic: "env.desired"}.get(
+                topic
             )
-            mqtt_logger.info(
-                "DeviceEnvService recebeu mensagem: topic=%s type=%s request_id=%s",
-                topic,
-                payload.get("type"),
-                payload.get("request_id"),
+            if expected is None:
+                raise ValueError("invalid_topic")
+            validate_control(self.device_secret, payload, self.device_id, expected)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            # Unauthenticated requests cannot create authoritative rejection reports.
+            mqtt_logger.warning("Invalid administrative env control ignored")
+            return
+        with self._lock:
+            try:
+                with exclusive_file(self.ledger_dir / "control.lock"), configuration_transaction:
+                    self._process(payload)
+            except Exception:
+                # Never log raw exceptions/content. No claim of success after IO failure.
+                mqtt_logger.error("Administrative env control failed; recovery artifacts retained")
+                # A durable intent may already have replaced the file. Publishing a
+                # rejection now would conflict with the immutable recovered result.
+                path = self.ledger_dir / f"{payload['request_id']}.json"
+                if not path.exists():
+                    self._publish(
+                        self._report(
+                            payload["request_id"], "rejected", rejection_reason="env_control_failed"
+                        )
+                    )
+
+    def _process(self, payload: dict[str, Any]) -> None:
+        path = self.ledger_dir / f"{payload['request_id']}.json"
+        digest = request_hash(payload)
+        if path.exists():
+            record = json.loads(path.read_text())
+            if record["request_hash"] != digest:
+                self._publish(
+                    self._report(
+                        payload["request_id"], "rejected", rejection_reason="request_id_conflict"
+                    )
+                )
+                return
+            if record["phase"] != "done":
+                self._recover(record, path)
+            self._publish(record["report"])
+            return
+        if payload["type"] == "env.request":
+            content = self._read_env_file()
+            report = self._report(
+                payload["request_id"],
+                "snapshot",
+                env_hash=_content_hash(content),
+                env_keys=_parse_env_keys(content),
+                envelope=seal_env_envelope(
+                    self.device_secret, payload["request_id"], self.device_id, content
+                ),
             )
-
-            if topic == self.request_topic:
-                self._handle_env_request(payload)
-            elif topic == self.desired_topic:
-                self._handle_env_desired(payload)
-            else:
-                raise ValueError(f"tópico de env não suportado: {topic}")
-
-        except Exception as exc:
-            _audit_log(
-                "env_message_rejected",
-                deviceId=self.device_id,
-                topic=topic,
-                reason=str(exc),
-            )
-            self._publish_error_report(
-                request_id=_safe_str(raw_payload, "request_id"),
-                reason=str(exc),
-            )
-
-    # ─── env/request: backend pede snapshot ────────────────────────────────
-
-    def _handle_env_request(self, payload: dict[str, Any]) -> None:
-        request_id = _required_str(payload, "request_id")
-        msg_type = payload.get("type", "")
-        mqtt_logger.info("DeviceEnvService processando env.request: request_id=%s", request_id)
-        if msg_type != "env.request":
-            raise ValueError(f"type inválido para env.request: {msg_type}")
-        if _required_str(payload, "device_id") != self.device_id:
-            raise ValueError("device_id divergente")
-
-        # Verificar assinatura do request
-        self._verify_request_signature(payload)
-        mqtt_logger.info("DeviceEnvService env.request validado: request_id=%s", request_id)
-
-        # Ler .env atual
-        env_content = self._read_env_file()
-        env_hash = _content_hash(env_content)
-        mqtt_logger.info(
-            "DeviceEnvService .env lido para snapshot: request_id=%s env_path=%s key_count=%s",
-            request_id,
-            self.env_path,
-            len(_parse_env_keys(env_content)),
-        )
-
-        # Criar envelope criptografado
-        envelope = seal_env_envelope(
-            device_secret=self.device_secret,
-            request_id=request_id,
-            device_id=self.device_id,
-            plaintext=env_content,
-        )
-
-        report: dict[str, Any] = {
-            "type": "env.reported",
-            "device_id": self.device_id,
-            "client_id": self.client_id,
-            "venue_id": self.venue_id,
-            "request_id": request_id,
-            "status": "snapshot",
-            "env_hash": env_hash,
-            "env_keys": _parse_env_keys(env_content),
-            "envelope": envelope,
-            "reported_at": _now_iso(),
-            "agent_version": self.agent_version,
+            record = {
+                "type": payload["type"],
+                "request_hash": digest,
+                "expires_at": payload["expires_at"],
+                "phase": "done",
+                "report": report,
+            }
+            _private_json(path, record)
+            self._publish(report)
+            return
+        if type(payload.get("restart_after_apply")) is not bool:
+            raise ValueError("invalid_restart_flag")
+        envelope = payload.get("envelope")
+        if (
+            not isinstance(envelope, dict)
+            or envelope.get("device_id") != self.device_id
+            or envelope.get("request_id") != payload["request_id"]
+        ):
+            raise ValueError("envelope_identity_mismatch")
+        content = open_env_envelope(self.device_secret, envelope)
+        self._validate_env_content(content)
+        # Require an existing managed file: a wrong mount must not create a new identity.
+        self._read_env_file()
+        record = {
+            "type": payload["type"],
+            "request_id": payload["request_id"],
+            "request_hash": digest,
+            "expires_at": payload["expires_at"],
+            "target_hash": _content_hash(content),
+            "env_keys": _parse_env_keys(content),
+            "restart_requested": payload["restart_after_apply"],
+            "phase": "prepared",
         }
+        _private_json(path, record)
+        self._create_backup(payload["request_id"])
+        self._write_env_atomic(content)
+        record["phase"] = "applied"
+        _private_json(path, record)
+        self._recover(record, path)
+        self._publish(record["report"])
 
-        published = self.mqtt_client.publish_json(self.reported_topic, report)
-        mqtt_logger.info(
-            "DeviceEnvService publicou env.reported snapshot: request_id=%s topic=%s published=%s",
-            request_id,
-            self.reported_topic,
-            published,
-        )
-        _audit_log(
-            "env_snapshot_sent",
-            deviceId=self.device_id,
-            requestId=request_id,
-            envHash=env_hash,
-            keyCount=len(_parse_env_keys(env_content)),
-            published=published,
-        )
+    def _recover(self, record: dict[str, Any], path: Path) -> None:
+        if _content_hash(self._read_env_file()) != record["target_hash"]:
+            report = self._report(
+                record["request_id"],
+                "rejected",
+                rejection_reason="interrupted_apply_requires_sync",
+                restart_requested=record["restart_requested"],
+                restart_status="uncertain",
+            )
+        else:
+            restart_status, error = "not_requested", None
+            if record["restart_requested"]:
+                result = self.action_service.submit_action(
+                    "restart_container",
+                    source="mqtt",
+                    request_id=record["request_id"],
+                    expires_at=record["expires_at"],
+                )
+                restart_status = (
+                    "queued"
+                    if result.accepted
+                    else ("uncertain" if result.code == "uncertain" else "rejected")
+                )
+                error = None if result.accepted else result.code
+            report = self._report(
+                record["request_id"],
+                "applied_requires_restart",
+                env_hash=record["target_hash"],
+                env_keys=record["env_keys"],
+                restart_requested=record["restart_requested"],
+                restart_status=restart_status,
+            )
+            if error:
+                report["restart_error_code"] = error
+        record.update(phase="done", report=report)
+        _private_json(path, record)
 
-    # ─── env/desired: backend envia .env editado ──────────────────────────
-
-    def _handle_env_desired(self, payload: dict[str, Any]) -> None:
-        request_id = _required_str(payload, "request_id")
-        msg_type = payload.get("type", "")
-        mqtt_logger.info("DeviceEnvService processando env.desired: request_id=%s", request_id)
-        if msg_type != "env.desired":
-            raise ValueError(f"type inválido para env.desired: {msg_type}")
-        if _required_str(payload, "device_id") != self.device_id:
-            raise ValueError("device_id divergente")
-
-        envelope_data = payload.get("envelope")
-        if not isinstance(envelope_data, dict):
-            raise ValueError("envelope ausente ou inválido")
-
-        restart_after_apply = bool(payload.get("restart_after_apply", False))
-
-        # Descriptografar e validar envelope
-        new_env_content = open_env_envelope(
-            device_secret=self.device_secret,
-            envelope=envelope_data,
-        )
-
-        # Validar conteúdo básico do .env
-        self._validate_env_content(new_env_content)
-
-        # Ler estado anterior para auditoria
-        old_content = ""
-        old_hash = ""
-        if self.env_path.exists():
-            old_content = self._read_env_file()
-            old_hash = _content_hash(old_content)
-
-        # Criar backup
-        backup_path = self._create_backup()
-
-        # Escrita atômica
-        self._write_env_atomic(new_env_content)
-
-        new_hash = _content_hash(new_env_content)
-        old_keys = set(_parse_env_keys(old_content))
-        new_keys = set(_parse_env_keys(new_env_content))
-        changed_keys = list((old_keys ^ new_keys) | self._diff_keys(old_content, new_env_content))
-        # Filtrar chaves sensíveis da auditoria de changed_keys
-        safe_changed = [k for k in changed_keys if k not in _ENV_KEYS_NEVER_LOG]
-
-        status = "applied_requires_restart"
-
-        _audit_log(
-            "env_applied",
-            deviceId=self.device_id,
-            requestId=request_id,
-            oldHash=old_hash,
-            newHash=new_hash,
-            changedKeys=safe_changed,
-            backupPath=str(backup_path) if backup_path else None,
-            status=status,
-            restartAfterApply=restart_after_apply,
-        )
-
-        report: dict[str, Any] = {
+    def _report(self, request_id: str, status: str, **fields) -> dict[str, Any]:
+        return {
             "type": "env.reported",
             "device_id": self.device_id,
             "client_id": self.client_id,
             "venue_id": self.venue_id,
             "request_id": request_id,
             "status": status,
-            "env_hash": new_hash,
-            "env_keys": _parse_env_keys(new_env_content),
             "reported_at": _now_iso(),
             "agent_version": self.agent_version,
+            **fields,
         }
 
-        published = self.mqtt_client.publish_json(self.reported_topic, report)
-        mqtt_logger.info(
-            "DeviceEnvService publicou env.reported apply: request_id=%s topic=%s published=%s",
-            request_id,
-            self.reported_topic,
-            published,
+    def _publish(self, report: dict[str, Any]) -> bool:
+        now = datetime.now(UTC)
+        signed = sign_control(
+            self.device_secret,
+            {
+                **report,
+                "issued_at": now.isoformat(),
+                "expires_at": (now + timedelta(seconds=120)).isoformat(),
+            },
         )
-
-        if restart_after_apply:
-            self._schedule_restart()
-
-    # ─── Helpers internos ─────────────────────────────────────────────────
+        return self.mqtt_client.publish_json(self.reported_topic, signed, qos=1, retain=False)
 
     def _read_env_file(self) -> str:
-        if not self.env_path.exists():
-            raise ValueError(f".env não encontrado: {self.env_path}")
+        if not self.env_path.is_file() or self.env_path.is_symlink():
+            raise ValueError("managed_env_unavailable")
         return self.env_path.read_text(encoding="utf-8")
 
-    def _validate_env_content(self, content: str) -> None:
-        """Validação básica: não pode ser binário, deve ter pelo menos uma chave."""
-        if "\x00" in content:
-            raise ValueError(".env contém bytes nulos (possivelmente binário)")
-        lines = content.splitlines()
-        has_key = any(
-            "=" in line and not line.strip().startswith("#")
-            for line in lines
-            if line.strip()
-        )
-        if not has_key and content.strip():
-            raise ValueError(".env não contém nenhuma chave válida (formato KEY=VALUE)")
+    @staticmethod
+    def _validate_env_content(content: str) -> None:
+        if "\x00" in content or (content.strip() and not _parse_env_keys(content)):
+            raise ValueError("invalid_env_content")
 
-    def _create_backup(self) -> Path | None:
-        if not self.env_path.exists():
-            return None
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        backup_path = self.env_path.with_suffix(f".bak.grn.{timestamp}")
-        shutil.copy2(str(self.env_path), str(backup_path))
-        mqtt_logger.info("Backup .env criado: %s", backup_path)
-        return backup_path
+    def _create_backup(self, request_id: str) -> Path:
+        backup = self.env_path.with_name(self.env_path.name + ".bak.grn." + request_id)
+        if not backup.exists():
+            self._write_atomic(backup, self._read_env_file())
+        return backup
 
     def _write_env_atomic(self, content: str) -> None:
-        """Escrita atômica: escreve em temp, move para destino, aplica chmod 600."""
-        parent = self.env_path.parent
-        parent.mkdir(parents=True, exist_ok=True)
-
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(parent), prefix=".env.tmp.", suffix=".grn"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
-            os.replace(tmp_path, str(self.env_path))
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-
-    def _diff_keys(self, old_content: str, new_content: str) -> set[str]:
-        """Retorna chaves cujos valores mudaram."""
-        old_map = self._parse_env_map(old_content)
-        new_map = self._parse_env_map(new_content)
-        changed: set[str] = set()
-        for key in old_map.keys() | new_map.keys():
-            if old_map.get(key) != new_map.get(key):
-                changed.add(key)
-        return changed
+        self._write_atomic(self.env_path, content)
 
     @staticmethod
-    def _parse_env_map(content: str) -> dict[str, str]:
-        result: dict[str, str] = {}
-        for line in content.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            eq = stripped.find("=")
-            if eq > 0:
-                result[stripped[:eq].strip()] = stripped[eq + 1:]
-        return result
-
-    def _verify_request_signature(self, payload: dict[str, Any]) -> None:
-        """Verifica HMAC do request de sync."""
-        if not self.device_secret:
-            raise ValueError("DEVICE_SECRET ausente para validar request")
-        signature = _required_str(payload, "signature")
-        canonical = ":".join(
-            [
-                "v1",
-                "ENV_REQUEST",
-                _required_str(payload, "device_id"),
-                _required_str(payload, "request_id"),
-                _required_str(payload, "requested_at"),
-            ]
-        )
-        import hmac as hmac_mod
-
-        expected = hmac_sha256_base64(self.device_secret, canonical)
-        if not hmac_mod.compare_digest(signature, expected):
-            raise ValueError("assinatura de env.request inválida")
-
-    def _publish_error_report(self, request_id: str | None, reason: str) -> None:
-        report: dict[str, Any] = {
-            "type": "env.reported",
-            "device_id": self.device_id,
-            "client_id": self.client_id,
-            "venue_id": self.venue_id,
-            "request_id": request_id or "",
-            "status": "rejected",
-            "rejection_reason": reason[:200],
-            "reported_at": _now_iso(),
-            "agent_version": self.agent_version,
-        }
-        published = self.mqtt_client.publish_json(self.reported_topic, report)
-        mqtt_logger.info(
-            "DeviceEnvService publicou env.reported rejeitado: request_id=%s topic=%s published=%s",
-            request_id or "",
-            self.reported_topic,
-            published,
-        )
-
-    def _schedule_restart(self) -> None:
-        """Agenda restart do container Docker após publicar status."""
-        mqtt_logger.info(
-            "Restart solicitado após aplicar .env; agendando em 3 segundos..."
-        )
-        import threading
-
-        def _do_restart() -> None:
-            _audit_log("env_restart_triggered", deviceId=self.device_id)
-            mqtt_logger.info("Solicitando recriacao do container via runner Docker do host...")
-            requested = DockerActionRequestService.from_env(
-                logger=mqtt_logger
-            ).request_action(
-                "restart_container",
-                source="admin_env",
-                fallback_on_failure=True,
-            )
-            if requested:
-                return
-            mqtt_logger.warning(
-                "Runner Docker indisponivel; aplicando fallback com TERM no PID 1"
-            )
-            os.system("kill -TERM 1")  # noqa: S605 - PID 1 = init do container
-
-        threading.Timer(3.0, _do_restart).start()
-
-
-# ─── Helpers de parsing ──────────────────────────────────────────────────────
-
-
-def _required_str(payload: dict[str, Any], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"campo obrigatório ausente: {key}")
-    return value.strip()
-
-
-def _safe_str(raw_payload: bytes, key: str) -> str | None:
-    try:
-        data = json.loads(raw_payload.decode("utf-8"))
-        return str(data.get(key, ""))
-    except Exception:
-        return None
+    def _write_atomic(path: Path, content: str) -> None:
+        fd, name = tempfile.mkstemp(dir=path.parent, prefix=".env.tmp.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, path)
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            Path(name).unlink(missing_ok=True)

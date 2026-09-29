@@ -1,5 +1,8 @@
 # CONFIGURATION.md — Modelo de configuração do grava_nois_system
 
+Contrato administrativo vigente: [DEVICE_RELIABILITY.md](./DEVICE_RELIABILITY.md). `.env` usa controle v2 integralmente assinado, sem fallback v1; comandos usam IPC durável v2 e ACK aplicativo assinado. Registros históricos de fase 1 não descrevem o dispatcher ativo.
+
+
 ## Contrato diferido v3 (opt-in)
 
 Novos campos: `processing.deferredEnabled=false` (`GN_DEFERRED_PROCESSING_ENABLED`, restart) e `processing.additionalWindows=[]` (`GN_PROCESSING_WINDOWS_JSON`, hot reload). Dias ISO 1–7, múltiplos intervalos HH:MM incluindo meia-noite; madrugada obrigatória não é configurável. Reutiliza `operationWindow.timeZone`. Versões menores são rejeitadas, duplicatas iguais só reportam resultado e conflitos de hash são rejeitados. Journal `config.transaction.json` recupera persistência interrompida. Configuração remota continua snapshot completo com HMAC e correlação.
@@ -306,7 +309,7 @@ Persistência local:
 
 Em Docker, os quatro arquivos acima devem compartilhar o mesmo diretorio persistente e gravavel. Montar apenas `config.json` como arquivo `:ro` quebra a promoção de configurações remotas e impede a persistência correta de pending/state/backup.
 
-O compose local e o compose gerenciado devem apontar `GN_CONFIG_PATH` para `/usr/src/app/runtime_config/config.json` e montar o diretório `runtime_config` como volume gravável. Esse mesmo diretório também recebe `docker-action.request.json` quando o Pico solicita manutenção Docker ao host.
+O compose local e o compose gerenciado devem apontar `GN_CONFIG_PATH` para `/usr/src/app/runtime_config/config.json` e montar o diretório `runtime_config` como volume gravável. Esse mesmo diretório recebe `device-actions/requests/<uuid>.json` quando Pico/MQTT solicita manutenção ao host. O caminho legado `GN_DOCKER_ACTION_REQUEST_PATH` ancora o IPC v2 em seu diretório pai; solicitações legadas pendentes continuam sendo detectadas e reconciliadas.
 
 Estados reportados:
 

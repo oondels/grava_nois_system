@@ -1,8 +1,11 @@
 # Edge Integrations
 
+Contrato administrativo vigente: [DEVICE_RELIABILITY.md](./DEVICE_RELIABILITY.md). `.env` usa controle v2 integralmente assinado, sem fallback v1; comandos usam IPC durável v2 e ACK aplicativo assinado. Registros históricos de fase 1 não descrevem o dispatcher ativo.
+
+
 ## Contrato diferido v3 (opt-in)
 
-A configuração usa os mesmos quatro canais MQTT existentes. Telemetria v2 acrescenta ACK aplicativo em `capture/events/ack` e `state/ack`: PUBACK não confirma persistência. O backend ainda precisa implementar essas extensões e discriminar snapshot operacional de presença no canal state. Ingestão oficial metadados → S3 → uploaded permanece. Não habilitar a funcionalidade sem integração API/app.
+A configuração usa os mesmos quatro canais MQTT existentes. Telemetria v2 acrescenta ACK aplicativo em `capture/events/ack` e `state/ack`: PUBACK não confirma persistência. O backend implementa essas extensões e discrimina snapshot operacional de presença no canal state; validar o conjunto em homologação. Ingestão oficial metadados → S3 → uploaded permanece. Não habilitar em produção antes da homologação integrada e no hardware mínimo.
 
 Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
 
