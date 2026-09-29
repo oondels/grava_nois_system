@@ -146,3 +146,8 @@ grava uma intent no runtime persistente, e o runner systemd do host:
 Consequencia: nessas duas acoes, o `.env` e a fonte autoritativa para os campos
 operacionais convertidos. Uma configuracao aplicada apenas em `config.json` por MQTT
 sera substituida pelos valores equivalentes do `.env` no proximo restart/pull.
+
+O gesto de cinco cliques e o feedback `ACCEPTED` confirmam o token recebido, nao
+o recreate concluido. Em device provisionado, confirme o resultado do runner e
+o novo `boot_id` na auditoria de conexao do painel admin. Sem o runner do host,
+o gesto nao reinicia um `main.py` executado diretamente no notebook.

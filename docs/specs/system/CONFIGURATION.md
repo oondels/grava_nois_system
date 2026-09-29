@@ -182,6 +182,10 @@ O `config.desired` operacional aceito é convertido para as variáveis equivalen
 
 Quando `restart_after_apply=true` está presente no envelope HMAC, o edge só agenda `restart_container` depois de persistir o `.env` e publicar o report de sucesso. O campo participa da assinatura; alterá-lo em trânsito invalida o comando.
 
+`applied_requires_restart` confirma a gravação do arquivo, não uma mudança no runtime. O status é conservador: também é emitido se a edição modificar apenas comentários ou outra linha sem efeito operacional. `restartStatus=not_requested|queued|rejected|uncertain` informa somente o encaminhamento do pedido; `queued` não confirma que o runner concluiu o recreate. Um `rejected` ou `uncertain` após a escrita não restaura o `.env` anterior. Reinício manual, pedido admin ou `RESTART_DOCKER` do Pico só ficam comprovados quando o novo processo publica outro `boot_id` em presence/heartbeat MQTT; a aba `.env` não atualiza retroativamente o resultado da escrita.
+
+No notebook executando `main.py` sem runner, pare o processo e inicie-o novamente. Para parâmetros que também existem em `config.json`, regenere antes o JSON no caminho de `GN_CONFIG_PATH` (por exemplo `bash env_to_config.sh .env runtime_config/config.json`); variáveis já exportadas no shell prevalecem sobre `load_dotenv()` sem `override`. No host provisionado, o runner faz a conversão e o recreate automaticamente. Procedimento e verificação: [README de grava_nois_config](https://github.com/oondels/grava_nois_config/blob/main/README.md#aplicar-alteracoes-de-ambiente-e-configuracao-admin).
+
 ---
 
 ## Formato e campos especiais

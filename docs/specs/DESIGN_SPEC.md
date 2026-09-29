@@ -10,6 +10,8 @@ O probe `python -m src.cli.rental_compat_probe` confirma, sem iniciar o pipeline
 Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclusive vazio; fontes legadas só participam quando o campo está ausente.
 Comandos administrativos invasivos permanecem opt-in, validam HMAC, expiração, identidade e idempotência, e só escrevem intents para o runner do host. A allowlist cobre restart/recreate do container, pull da imagem configurada, reboot e troca segura de Wi-Fi.
 O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
+
+Aplicação e confirmação de `.env`/configuração admin, inclusive reinício manual e Pico: [system/CONFIGURATION.md](./system/CONFIGURATION.md#gerenciamento-remoto-de-env-via-admin). Arquivo salvo e pedido enfileirado não comprovam novo runtime; a auditoria de conexão compara `boot_id`.
 No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
 
 ## Processamento diferido em fixed

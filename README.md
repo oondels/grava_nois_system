@@ -23,6 +23,8 @@ Contrato, estados, migração, limites, testes e rollback: [processamento diferi
 
 Controle administrativo v2, compatibilidade, ACK de comandos, recuperação e testes: [contrato de confiabilidade](docs/specs/system/DEVICE_RELIABILITY.md). O Compose local usa `host_config/.env` dedicado e a saúde do loop real (`python -m src.cli.healthcheck`, `--ready` inclui câmeras). O `.env` remoto exige sync autenticado v2; comandos exigem o runner com IPC v2. Aceite de uma solicitação não confirma reinício do serviço.
 
+Aplicacao de `.env` e configuracao admin: o arquivo salvo nao recarrega um processo existente. `applied_requires_restart` confirma escrita, e `restartStatus=queued` confirma somente o pedido duravel ao host. No device provisionado, o runner converte o `.env` para `config.json` e recria o container; no notebook com `main.py` direto, encerre e inicie o processo novamente, regenerando antes o JSON operacional quando necessario. A API/frontend confirmam um novo processo pela presenca MQTT com outro `boot_id`, nao pelo alerta da aba `.env`. Veja o [roteiro operacional do host](https://github.com/oondels/grava_nois_config/blob/main/README.md#aplicar-alteracoes-de-ambiente-e-configuracao-admin) e a [spec de configuracao](docs/specs/system/CONFIGURATION.md#gerenciamento-remoto-de-env-via-admin).
+
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -600,6 +602,8 @@ GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.
 O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele grava intents duráveis por UUID em `device-actions/requests/`, ao lado do caminho legado configurado acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
 
 Configurações operacionais recebidas por `config.desired` são persistidas no `config.json`/pending e nos campos equivalentes do `.env` gerenciado antes do report de sucesso. Assim, o próximo pull/restart reconstrói o JSON sem perder a alteração. Segredos, identidade e variáveis sem equivalente operacional são preservados.
+
+`RESTART_DOCKER` do Pico V1/V2 usa o mesmo runner e, portanto, tambem aplica o `.env` atualizado. O feedback inicial do Pico confirma recebimento do token, nao a conclusao do recreate; confirme o resultado do host e um novo `boot_id` na auditoria admin. O comando nao reinicia `main.py` executado diretamente sem o runner.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:

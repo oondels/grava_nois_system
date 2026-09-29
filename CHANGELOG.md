@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `docs(system)`: esclarece aplicacao de `.env`/configuracao admin, reinicio por runner/Pico ou notebook e confirmacao por novo `boot_id`.
+
 ## 2026-09-29
 
 ### Fixed
