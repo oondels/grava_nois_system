@@ -6,9 +6,11 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from src.services.mqtt.device_config_service import (
     DeviceConfigService,
+    RemoteConfigError,
     apply_pending_config_on_startup,
     hash_config,
     sign_desired_config_payload,
@@ -682,46 +684,72 @@ class DeviceConfigServiceTests(unittest.TestCase):
 
         self.assertIn("expirada", str(ctx.exception))
 
-    def test_applies_old_version_when_payload_is_valid(self) -> None:
+    def test_rejects_old_version_without_overwriting_current_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            client = _FakeMQTTClient()
-            (base / "config.json").write_text(
-                json.dumps(
-                    {
-                        **self._desired_config(),
-                        "version": 3,
-                        "updatedAt": "2026-04-08T12:00:00+00:00",
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (base / "config.state.json").write_text(
-                json.dumps({"lastAppliedVersion": 3}),
-                encoding="utf-8",
-            )
-            service = self._service(base, client)
-            payload = self._payload(
-                self._desired_config({"operationWindow": {"start": "08:00"}}),
-                version=2,
-            )
+            original = {**self._desired_config(), "version": 3, "updatedAt": "2026-04-08T12:00:00+00:00"}
+            (base / "config.json").write_text(json.dumps(original))
+            (base / "config.state.json").write_text(json.dumps({"lastAppliedVersion": 3}))
+            service = self._service(base)
+            with self.assertRaisesRegex(RemoteConfigError, "stale_config_version"):
+                service.process_desired_config(self._payload(self._desired_config(), version=2))
+            self.assertEqual(original, json.loads((base / "config.json").read_text()))
 
-            result = service.process_desired_config(payload)
-            config_data = json.loads((base / "config.json").read_text(encoding="utf-8"))
-            state_data = json.loads((base / "config.state.json").read_text(encoding="utf-8"))
-            service.publish_report(result)
+    def test_duplicate_version_returns_effective_result_without_reapplying(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            service = self._service(base)
+            payload = self._payload(self._desired_config({"processing": {"additionalWindows": []}}))
+            first = service.process_desired_config(payload)
+            current = (base / "config.pending.json") if first.status == "pending_restart" else (base / "config.json")
+            timestamp = current.stat().st_mtime_ns
+            repeated = service.process_desired_config(payload)
+            self.assertEqual(first.status, repeated.status)
+            self.assertEqual(timestamp, current.stat().st_mtime_ns)
 
-        report = client.published[-1][1]
-        self.assertEqual(result.status, "applied")
-        self.assertEqual(result.config_version, 2)
-        self.assertEqual(config_data["operationWindow"]["start"], "08:00")
-        self.assertEqual(state_data["lastAppliedVersion"], 2)
-        self.assertEqual(result.correlation_id, "corr-01")
-        self.assertEqual(report["status"], "applied")
-        self.assertEqual(report["last_applied_version"], 2)
-        self.assertIn("reported_config", report)
-        self.assertEqual(report["reported_hash"], hash_config(report["reported_config"]))
-        self.assertEqual(report["signature_version"], "hmac-sha256-v1")
+    def test_additional_windows_are_hot_and_enable_requires_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            current = self._desired_config({"processing": {"deferredEnabled": False, "additionalWindows": []}})
+            (base / "config.json").write_text(json.dumps(current))
+            service = self._service(base)
+            windows = [{"weekdays": [1, 7], "start": "23:00", "end": "07:00"}]
+            desired = self._desired_config({"processing": {"deferredEnabled": False, "additionalWindows": windows}})
+            self.assertEqual("applied", service.process_desired_config(self._payload(desired)).status)
+            desired["processing"]["deferredEnabled"] = True
+            self.assertEqual("pending_restart", service.process_desired_config(self._payload(desired, version=3)).status)
+            self.assertFalse(json.loads((base / "config.json").read_text())["processing"]["deferredEnabled"])
+
+    def test_conflicting_duplicate_and_invalid_windows_preserve_last_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "config.json").write_text(json.dumps(self._desired_config()))
+            service = self._service(base)
+            desired = self._desired_config({"processing": {"additionalWindows": []}})
+            service.process_desired_config(self._payload(desired))
+            before = (base / "config.json").read_bytes()
+            desired["processing"]["additionalWindows"] = [{"weekdays": [1], "start": "07:00", "end": "08:00"}]
+            with self.assertRaisesRegex(RemoteConfigError, "hash_conflict"):
+                service.process_desired_config(self._payload(desired))
+            desired["processing"]["additionalWindows"][0]["end"] = "24:00"
+            with self.assertRaises(RemoteConfigError):
+                service.process_desired_config(self._payload(desired, version=3))
+            self.assertEqual(before, (base / "config.json").read_bytes())
+
+    def test_interrupted_promotion_recovers_from_journal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "config.json").write_text(json.dumps(self._desired_config()))
+            service = self._service(base)
+            payload = self._payload(self._desired_config({"processing": {"additionalWindows": []}}))
+            with patch.object(service, "_write_state", side_effect=KeyboardInterrupt("power loss")):
+                with self.assertRaises(KeyboardInterrupt):
+                    service.process_desired_config(payload)
+            self.assertTrue((base / "config.transaction.json").exists())
+            result = apply_pending_config_on_startup(base / "config.json")
+            self.assertEqual("applied", result.status)
+            self.assertFalse((base / "config.transaction.json").exists())
+            self.assertEqual(2, json.loads((base / "config.state.json").read_text())["lastAppliedVersion"])
 
     def test_malformed_payload_still_publishes_signed_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -7,31 +7,32 @@ services:
     stdin_open: true # Mantém stdin aberto para trigger via Enter
     tty: true
     env_file:
-      - .env
+      - ./host_config/.env
     environment:
       GN_CONFIG_PATH: /usr/src/app/runtime_config/config.json
       GN_HOST_ENV_PATH: /usr/src/app/host_config/.env
     working_dir: /usr/src/app
     shm_size: 512m
 
-    # Health check: verifica se o processo principal Python está vivo
-    # (câmeras podem estar em modo degradado sem derrubar o container)
+    # Liveness do loop real; readiness de cameras usa healthcheck --ready.
     healthcheck:
-      test: ["CMD", "python", "-c", "import pathlib,sys; cmd=pathlib.Path('/proc/1/cmdline').read_text(); sys.exit(0 if 'python' in cmd and 'main.py' in cmd else 1)"]
+      test: ["CMD", "python", "-m", "src.cli.healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s  # Aguarda 60s antes de começar health checks (tempo para câmera inicializar)
 
     volumes:
-      - ./.env:/usr/src/app/.env:ro
-      - .:/usr/src/app/host_config:rw  # Expõe diretório do host para leitura/escrita do .env via admin
+      - ./host_config/.env:/usr/src/app/.env:ro
+      - ./host_config:/usr/src/app/host_config:rw
+      - /run/grn-device-actions:/usr/src/app/host_actions:rw
       - ./runtime_config:/usr/src/app/runtime_config
       - ./files:/usr/src/app/files:ro
       - ./recorded_clips:/usr/src/app/recorded_clips
       - ./queue_raw:/usr/src/app/queue_raw
       - ./highlights_wm:/usr/src/app/highlights_wm
       - ./failed_clips:/usr/src/app/failed_clips
+      - ./rental_clips_generated:/usr/src/app/rental_clips_generated
       - ./logs:/usr/src/app/logs  # Diretório para logs
 
     # Para RTSP remoto, host network costuma simplificar no edge.

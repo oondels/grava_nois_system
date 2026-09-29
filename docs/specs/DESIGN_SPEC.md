@@ -12,6 +12,12 @@ Comandos administrativos invasivos permanecem opt-in, validam HMAC, expiração,
 O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
 No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
 
+## Processamento diferido em fixed
+
+O edge inclui pipeline v3 opt-in, separado do legado: preservação no clique, mídia agendada, upload/finalização com checkpoints e telemetria com ACK aplicativo. Desligado por padrão; API/app implementados, liberação condicionada à homologação integrada e hardware. Contrato em [system/DEFERRED_PROCESSING.md](./system/DEFERRED_PROCESSING.md). Rental não participa desta ativação.
+
+Controle administrativo v2, assinaturas, idempotência, ACK e migração do runner: [system/DEVICE_RELIABILITY.md](./system/DEVICE_RELIABILITY.md).
+
 ## 1. Overview
 
 `grava_nois_system` é o software edge de captura e upload do ecossistema Grava Nóis. Esta spec é a entrada principal para lookup por code agents e auditoria técnica.

@@ -10,6 +10,7 @@ venv/
 *.json.bak
 !config.example.json
 !tests/characterization/fixtures/legacy_contracts.json
+!tests/fixtures/env-control-v2-*.json
 *.lock
 *.mp4
 *.jpg

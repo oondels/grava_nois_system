@@ -9,15 +9,30 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from src.infrastructure.filesystem.deferred_repository import LockBusy, exclusive_file
+from src.security.durable_state import private_json as atomic_json
+from src.security.env_control import timestamp
 
 
 def _is_truthy(value: str | None, default: bool = True) -> bool:
     if value is None or value == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+@dataclass(frozen=True)
+class ActionSubmission:
+    code: str
+    request_id: str
+
+    @property
+    def accepted(self) -> bool:
+        return self.code in {"created", "already_known"}
 
 
 class DockerActionRequestService:
@@ -41,7 +56,7 @@ class DockerActionRequestService:
         self.logger = logger
 
     @classmethod
-    def from_env(cls, logger: Any | None = None) -> "DockerActionRequestService":
+    def from_env(cls, logger: Any | None = None) -> DockerActionRequestService:
         return cls(
             enabled=_is_truthy(os.getenv("GN_PICO_DOCKER_ACTIONS_ENABLED"), True),
             request_path=Path(
@@ -52,9 +67,7 @@ class DockerActionRequestService:
             ),
             pull_token=os.getenv("GN_PICO_DOCKER_PULL_TOKEN", "PULL_DOCKER"),
             restart_token=os.getenv("GN_PICO_DOCKER_RESTART_TOKEN", "RESTART_DOCKER"),
-            shutdown_enabled=_is_truthy(
-                os.getenv("GN_PICO_HOST_SHUTDOWN_ENABLED"), False
-            ),
+            shutdown_enabled=_is_truthy(os.getenv("GN_PICO_HOST_SHUTDOWN_ENABLED"), False),
             shutdown_token=os.getenv("GN_PICO_HOST_SHUTDOWN_TOKEN", "SHUTDOWN_HOST"),
             logger=logger,
         )
@@ -65,7 +78,13 @@ class DockerActionRequestService:
         if not action:
             return False
 
-        return self.request_action(action, source="pico", token=normalized)
+        self.request_action(action, source="pico", token=normalized)
+        # Consumed token is not an execution receipt.
+        return True
+
+    @property
+    def action_root(self) -> Path:
+        return self.request_path.parent / "device-actions"
 
     def request_action(
         self,
@@ -77,73 +96,122 @@ class DockerActionRequestService:
         request_id: str | None = None,
         parameters: dict[str, Any] | None = None,
     ) -> bool:
-        if action not in {"pull_and_recreate", "restart_container", "shutdown_host", "reboot_host", "change_wifi"}:
-            self._log("warning", "Acao Docker invalida ignorada: %s", action)
-            return False
+        return self.submit_action(
+            action, source=source, token=token, request_id=request_id, parameters=parameters
+        ).accepted
 
-        if not self.enabled:
-            self._log("warning", "Acao Docker ignorada: recurso desabilitado")
-            return not fallback_on_failure
+    def submit_action(
+        self,
+        action: str,
+        *,
+        source: str,
+        token: str | None = None,
+        request_id: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        expires_at: str | None = None,
+    ) -> ActionSubmission:
+        request_id = request_id or str(uuid.uuid4())
 
-        if action == "shutdown_host" and not self.shutdown_enabled:
-            self._log("warning", "Desligamento do host ignorado: recurso desabilitado")
-            return not fallback_on_failure
+        def result(code):
+            return ActionSubmission(code, request_id)
 
-        if self.request_path.exists():
-            self._log(
-                "warning",
-                "Acao Docker ignorada: ja existe requisicao pendente em %s",
-                self.request_path,
-            )
-            return True
-
+        if action not in {
+            "pull_and_recreate",
+            "restart_container",
+            "shutdown_host",
+            "reboot_host",
+            "change_wifi",
+        }:
+            return result("invalid_action")
         try:
-            secret_path: Path | None = None
-            payload: dict[str, Any] = {
-                "schema_version": 1,
-                "request_id": request_id or str(uuid.uuid4()),
-                "requested_at": datetime.now(timezone.utc).isoformat(),
-                "source": source,
-                "action": action,
-                "pid": os.getpid(),
-            }
-            if token:
-                payload["token"] = token
-            if action == "change_wifi":
-                values = parameters or {}
-                ssid = values.get("ssid")
-                password = values.get("wifi_password")
-                if not isinstance(ssid, str) or not isinstance(password, str):
-                    raise ValueError("Credenciais Wi-Fi invalidas")
-                secret_dir = Path(os.getenv("GN_HOST_ACTION_SECRET_DIR", "/usr/src/app/host_actions"))
-                secret_dir.mkdir(parents=True, exist_ok=True)
-                secret_path = secret_dir / f"{payload['request_id']}.wifi.json"
-                secret_path.write_text(json.dumps({"ssid": ssid, "password": password}, ensure_ascii=False))
-                os.chmod(secret_path, 0o600)
-                payload["parameters"] = {"ssid": ssid, "secret_ref": secret_path.name}
-            self.request_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.request_path.with_name(f".{self.request_path.name}.tmp")
-            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-            os.chmod(tmp_path, 0o600)
-            tmp_path.replace(self.request_path)
-            self._log(
-                "warning",
-                "Acao Docker solicitada: %s source=%s (request_id=%s)",
-                action,
-                source,
-                payload["request_id"],
-            )
-        except Exception as exc:
-            if "secret_path" in locals() and secret_path is not None:
+            if str(uuid.UUID(request_id)) != request_id:
+                return result("invalid_request_id")
+        except (ValueError, TypeError, AttributeError):
+            return result("invalid_request_id")
+        source = "pico" if source == "pico" else "mqtt"
+        if action == "shutdown_host" and (source != "pico" or not self.shutdown_enabled):
+            return result("disabled")
+        now = datetime.now(UTC)
+        expires_at = expires_at or (now + timedelta(seconds=120)).isoformat()
+        secret_path = None
+        target = self.action_root / "requests" / f"{request_id}.json"
+        try:
+            with exclusive_file(self.action_root / "admission.lock"):
+                for folder in ("requests", "processing", "results", "receipts"):
+                    known = self.action_root / folder / f"{request_id}.json"
+                    if known.exists():
+                        previous = json.loads(known.read_text())
+                        if previous.get("action", action) != action:
+                            return result("request_id_conflict")
+                        return result("already_known")
+                if not self.enabled:
+                    return result("disabled")
+                if timestamp(expires_at) <= now or timestamp(expires_at) > now + timedelta(
+                    seconds=150
+                ):
+                    return result("expired")
+                if (
+                    self.request_path.exists()
+                    or self.request_path.with_name("docker-action.processing.json").exists()
+                    or any((self.action_root / "requests").glob("*.json"))
+                    or any((self.action_root / "processing").glob("*.json"))
+                ):
+                    return result("busy")
+                payload = {
+                    "schema_version": 2,
+                    "request_id": request_id,
+                    "requested_at": now.isoformat(),
+                    "expires_at": expires_at,
+                    "source": source,
+                    "action": action,
+                    "parameters": {},
+                }
+                if token:
+                    payload["token"] = token
+                if action == "change_wifi":
+                    values = parameters or {}
+                    ssid, password = values.get("ssid"), values.get("wifi_password")
+                    valid_password = isinstance(password, str) and (
+                        8 <= len(password) <= 63
+                        or (
+                            len(password) == 64
+                            and all(c in "0123456789abcdefABCDEF" for c in password)
+                        )
+                    )
+                    if (
+                        not isinstance(ssid, str)
+                        or not 1 <= len(ssid.encode()) <= 32
+                        or not valid_password
+                    ):
+                        return result("invalid_wifi")
+                    secret_dir = Path(
+                        os.getenv("GN_HOST_ACTION_SECRET_DIR", "/usr/src/app/host_actions")
+                    )
+                    secret_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    secret_path = secret_dir / f"{request_id}.wifi.json"
+                    atomic_json(secret_path, {"ssid": ssid, "password": password})
+                    payload["parameters"] = {"ssid": ssid, "secret_ref": secret_path.name}
+                target = self.action_root / "requests" / f"{request_id}.json"
+                atomic_json(target, payload)
+                return result("created")
+        except LockBusy:
+            return result("busy")
+        except (OSError, ValueError, TypeError):
+            # Admission was unlocked by unwinding. The host may already have
+            # claimed/completed a published request before we inspect its path.
+            try:
+                with exclusive_file(self.action_root / "admission.lock"):
+                    if any(
+                        (self.action_root / folder / f"{request_id}.json").exists()
+                        for folder in ("requests", "processing", "results", "receipts")
+                    ):
+                        return result("uncertain")
+            except (LockBusy, OSError):
+                return result("uncertain")
+            if secret_path is not None:
                 secret_path.unlink(missing_ok=True)
-            self._log(
-                "error",
-                "Falha ao registrar acao Docker em %s: %s",
-                self.request_path,
-                exc,
-            )
-            return not fallback_on_failure
-        return True
+            self._log("error", "Falha ao persistir solicitacao do host")
+            return result("persistence_failed")
 
     def _action_for_token(self, token: str) -> str | None:
         if token == self.pull_token:

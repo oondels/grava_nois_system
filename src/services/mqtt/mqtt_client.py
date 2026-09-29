@@ -28,6 +28,8 @@ class MQTTClient:
         self._subscriptions: dict[str, MQTTMessageHandler] = {}
         self._connect_listeners: list[Callable[[], None]] = []
         self._disconnect_listeners: list[Callable[[str], None]] = []
+        # Separate from the lifecycle lock: stop() may wait for the Paho thread.
+        self._registry_lock = threading.Lock()
         self._connected = threading.Event()
         self._lock = threading.Lock()
         self._started = False
@@ -191,7 +193,8 @@ class MQTTClient:
         *,
         qos: int | None = None,
     ) -> bool:
-        self._subscriptions[topic] = handler
+        with self._registry_lock:
+            self._subscriptions[topic] = handler
         if not self._client:
             return False
         if not self.is_connected:
@@ -205,19 +208,26 @@ class MQTTClient:
             return False
 
     def add_on_connect_listener(self, callback: Callable[[], None]) -> None:
-        self._connect_listeners.append(callback)
+        with self._registry_lock:
+            self._connect_listeners.append(callback)
 
     def add_on_disconnect_listener(self, callback: Callable[[str], None]) -> None:
-        self._disconnect_listeners.append(callback)
+        with self._registry_lock:
+            self._disconnect_listeners.append(callback)
 
     def _on_connect(self, client, _userdata, _flags, reason_code, _properties=None):
         code = getattr(reason_code, "value", reason_code)
         if code == 0:
-            self._connected.set()
+            with self._registry_lock:
+                self._connected.set()
+                subscriptions = tuple(self._subscriptions)
+                listeners = tuple(self._connect_listeners)
             if self.last_disconnect_at:
                 self.reconnect_count += 1
             mqtt_logger.info("Conectado ao broker MQTT")
-            for topic in self._subscriptions:
+            # Network calls and callbacks run outside the registry lock. New
+            # subscriptions use the connected path in subscribe() immediately.
+            for topic in subscriptions:
                 try:
                     client.subscribe(topic, qos=self.config.qos)
                     mqtt_logger.info("Inscrição restaurada: %s", topic)
@@ -227,7 +237,7 @@ class MQTTClient:
                         topic,
                         exc,
                     )
-            for callback in self._connect_listeners:
+            for callback in listeners:
                 try:
                     callback()
                 except Exception as exc:
@@ -240,15 +250,17 @@ class MQTTClient:
         code = getattr(reason_code, "value", reason_code)
         self._connected.clear()
         reason = "clean_disconnect" if code in {0, None} else f"unexpected_disconnect_rc_{code}"
-        from datetime import datetime, timezone
+        from datetime import UTC, datetime
 
-        self.last_disconnect_at = datetime.now(timezone.utc).isoformat()
+        self.last_disconnect_at = datetime.now(UTC).isoformat()
         self.last_disconnect_reason = reason
         if code in {0, None}:
             mqtt_logger.info("Cliente MQTT desconectado com limpeza")
         else:
             mqtt_logger.warning("Cliente MQTT desconectado inesperadamente: rc=%s", code)
-        for callback in self._disconnect_listeners:
+        with self._registry_lock:
+            listeners = tuple(self._disconnect_listeners)
+        for callback in listeners:
             try:
                 callback(reason)
             except Exception as exc:
@@ -257,7 +269,8 @@ class MQTTClient:
     def _on_message(self, _client, _userdata, msg):
         topic = getattr(msg, "topic", "")
         payload = getattr(msg, "payload", b"")
-        handler = self._subscriptions.get(topic)
+        with self._registry_lock:
+            handler = self._subscriptions.get(topic)
         if handler is None:
             mqtt_logger.debug("Mensagem MQTT sem handler: topic=%s", topic)
             return

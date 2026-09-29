@@ -1,5 +1,14 @@
 # Edge Integrations
 
+Contrato administrativo vigente: [DEVICE_RELIABILITY.md](./DEVICE_RELIABILITY.md). `.env` usa controle v2 integralmente assinado, sem fallback v1; comandos usam IPC durável v2 e ACK aplicativo assinado. Registros históricos de fase 1 não descrevem o dispatcher ativo.
+
+
+## Contrato diferido v3 (opt-in)
+
+A configuração usa os mesmos quatro canais MQTT existentes. Telemetria v2 acrescenta ACK aplicativo em `capture/events/ack` e `state/ack`: PUBACK não confirma persistência. O backend implementa essas extensões e discrimina snapshot operacional de presença no canal state; validar o conjunto em homologação. Ingestão oficial metadados → S3 → uploaded permanece. Não habilitar em produção antes da homologação integrada e no hardware mínimo.
+
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
+
 ## Integração rental
 
 - Em `GN_DEVICE_MODE=rental`, metadata segue para `/api/videos/rental/metadata` e mensagens MQTT mantêm `client_id=null` e `venue_id=null`.
@@ -162,6 +171,7 @@ Observações:
 - o cliente MQTT usa reconexão explícita com backoff do Paho (`reconnect_delay_set(min_delay=1, max_delay=120)`);
 - TLS usa validacao obrigatoria da cadeia (`ssl.CERT_REQUIRED`); falhas de certificado do broker nao devem ser contornadas com modo inseguro, e o cliente continua tentando reconectar ate o servidor ser corrigido;
 - mensagens recebidas são despachadas para uma thread dedicada de handlers, evitando I/O síncrono no loop Paho;
+- inscrições e listeners compartilham um lock curto de registro, separado do lock de lifecycle. A reconexão percorre snapshots estáveis; inscrições adicionadas nesse intervalo usam a conexão ativa, sem invalidar o percurso. Chamadas ao Paho e callbacks ocorrem fora do lock; listeners registrados durante um callback participam do próximo ciclo. Regressão concorrente em `tests/test_mqtt_client.py`, sem broker;
 - heartbeat e state são protegidos contra exceções no snapshot provider;
 - operações administrativas permanecem desabilitadas por padrão; quando habilitadas, exigem HMAC, expiração, identidade correspondente e allowlist fixa.
 - o `device_id` usado no namespace `grn/devices/{device_id}/...` deve ser um único nível de tópico; valores com `/`, `+`, `#` ou byte nulo são rejeitados na montagem do tópico e fazem apenas a presença MQTT ser ignorada.

@@ -5,6 +5,7 @@ import re
 import socket
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -317,6 +318,13 @@ def start_ffmpeg(cfg: CaptureConfig) -> subprocess.Popen:
             "0",
             out_pattern,
         ]
+
+    if cfg.track_segments:
+        cfg.capture_session_id = uuid.uuid4().hex
+        cmd[-1] = str(cfg.buffer_dir / f"buffer-{cfg.capture_session_id}-%06d.ts")
+        cfg.segment_list_path = cfg.buffer_dir / f"closed-{cfg.capture_session_id}.csv"
+        cmd[-1:-1] = ["-segment_list", str(cfg.segment_list_path),
+                      "-segment_list_type", "csv", "-segment_list_size", str(cfg.max_segments + 10)]
 
     # Configurar logging do FFmpeg (fallback relativo à raiz do projeto)
     base_dir = Path(__file__).resolve().parent.parent.parent

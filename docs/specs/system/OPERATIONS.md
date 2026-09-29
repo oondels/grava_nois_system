@@ -1,5 +1,14 @@
 # Edge Operations
 
+Contrato administrativo vigente: [DEVICE_RELIABILITY.md](./DEVICE_RELIABILITY.md). `.env` usa controle v2 integralmente assinado, sem fallback v1; comandos usam IPC durável v2 e ACK aplicativo assinado. Registros históricos de fase 1 não descrevem o dispatcher ativo.
+
+
+## Contrato diferido v3 (opt-in)
+
+Ativação apenas fixed, desligada por padrão. São necessários volumes persistentes de queue_raw e runtime_config; staging tmpfs/ramfs é rejeitado. Use rollback da flag nesta versão mantendo leitor v3, sem downgrade binário com pendências. Testes isolados: `python -m unittest tests.test_deferred_processing tests.test_deferred_recovery tests.test_deferred_media_integration`. FFmpeg sintético não qualifica hardware real.
+
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
+
 O repositório usa `unittest` como framework de teste.
 
 ## Startup behavior
@@ -48,6 +57,13 @@ Práticas:
 - manter `mqtt.log` separado para heartbeat/presença e evitar ruído em `app.log`.
 
 ## Test coverage present
+
+Execute a suíte de código com `.venv/bin/python scripts/test_isolated.py --coverage`.
+O runner limpa o ambiente herdado, desabilita dotenv, bloqueia conexões Python de
+saída e usa diretórios temporários; subprocessos não constituem um sandbox do SO.
+O CI usa o mesmo comando, exporta `coverage.xml` e exige cobertura de branches
+domain/application >=90%. Câmera, testes contínuos e integração completa são
+opt-in; roteiro e limites em `docs/reports/e2e-local-validation.md`.
 
 Testes visíveis:
 

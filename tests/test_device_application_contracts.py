@@ -141,7 +141,7 @@ class DeviceApplicationContractTests(unittest.TestCase):
         self.assertIn("venue_id", payload)
         self.assertIsNone(payload["venue_id"])
 
-    def test_command_handler_matches_legacy_rejection_payload(self) -> None:
+    def test_inactive_command_adapter_ignores_unsigned_payload_like_active_dispatcher(self) -> None:
         raw = json.dumps({"command": "restart_service"}).encode()
         topic_in = "grn/devices/edge-01/commands/in"
         topic_out = "grn/devices/edge-01/commands/out"
@@ -161,7 +161,7 @@ class DeviceApplicationContractTests(unittest.TestCase):
             device_id="edge-01",
             output_topic=topic_out,
         )
-        self.assertTrue(handler(topic_in, raw))
+        self.assertFalse(handler(topic_in, raw))
         self.assertEqual(legacy_client.published, new_client.published)
 
     def test_security_adapters_delegate_without_wire_changes(self) -> None:

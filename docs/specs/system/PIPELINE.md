@@ -1,5 +1,11 @@
 # Edge Pipeline
 
+## Contrato diferido v3 (opt-in)
+
+Com `processing.deferredEnabled=true` em fixed, o clique protege e copia segmentos fechados, publica manifesto v3 e retorna sem pós-buffer bloqueante. Concatenação, watermark e thumbnail passam pelo consumidor global. A descrição de `build_highlight`/`ProcessingWorker` abaixo continua aplicável ao caminho legado. Rental permanece nesse contrato próprio.
+
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
+
 ## Registro no modo rental
 
 O processamento local é idêntico. Na reserva do upload, o cliente envia metadata para `POST /api/videos/rental/metadata`; upload S3 e finalize continuam usando os contratos assinados existentes. O `captured_at` original determina a locação, e não o horário do retry.
@@ -57,6 +63,8 @@ Origens suportadas:
 - ENTER
 - GPIO
 - Pico serial (global ou por câmera)
+
+O listener `main._listen_for_enter` registra a recepção antes de enfileirar o horário original e o instante monotônico; EOF avisa que ENTER está indisponível, sem desligar os demais gatilhos. A quebra de linha do terminal não significa rejeição. No fluxo diferido, admissão apenas inicia `PREPARING`; logs separam câmera/buffer indisponível, início e resultado `capture.preserved`/`capture.not_preserved`. O resultado da preservação não é confirmação de upload/ACK MQTT. Cobertura com pseudo-terminal em `tests.test_terminal_trigger`.
 
 Resolução de origem:
 

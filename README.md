@@ -2,7 +2,7 @@
 
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
-> **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e também descarta clipes rejeitados pela API por restrição de horário.
+> **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e, no pipeline legado, descarta clipes rejeitados pela API por restrição de horário. O pipeline diferido v3 preserva essas pendências em `BLOCKED`.
 >
 > **Rental offline:** falhas de upload ficam em `rental_clips_generated/{rentalId}` e só são reenviadas por solicitação do responsável/admin. Itens sem agenda assinada ficam em quarentena por até 48 horas.
 >
@@ -12,6 +12,16 @@
 > Configuração remota continua disponível nesse modo e usa `client_id: null` e `venue_id: null` nos envelopes MQTT.
 > Com uma API base configurada, o processo exige `DEVICE_ID`/`GN_DEVICE_ID` e `DEVICE_SECRET`/`GN_DEVICE_SECRET` já no startup; `GN_CLIENT_ID` também é obrigatório apenas no modo `fixed`. Registro e retry aceitam o envelope oficial `{ data: { clip } }` da API.
 > Na clean architecture, URLs e headers assinados permanecem somente em memória; o checkpoint durável guarda apenas o ID remoto e o recibo de integridade necessário ao finalize.
+
+## Processamento diferido (etapa edge, desabilitado)
+
+`processing.deferredEnabled` (`GN_DEFERRED_PROCESSING_ENABLED=0`) habilita, apenas em dispositivos fixos, preservação persistente dos segmentos no clique e processamento posterior global. Autorização: madrugada obrigatória 00:00–05:00, janelas `processing.additionalWindows` (`GN_PROCESSING_WINDOWS_JSON=[]`) ou 30 minutos monotônicos sem cliques válidos. Usa o fuso existente; captura mantém sua janela operacional.
+
+A fila v3 vive em `queue_raw/.deferred`, recupera checkpoints e importa clipes antigos sem perder originais. Upload/finalização são independentes da agenda; alerta de armazenamento abre abaixo de **4.000.000.000 bytes**. MQTT de configuração é estendido; eventos/estado usam outbox e aguardam ACK de persistência do backend. A funcionalidade **não está liberada em produção**: API/app já implementam os contratos; faltam concluir a homologação integrada e a qualificação no hardware mínimo. `DEV=true` continua sem upload e não é controle de ativação. Rental não é alterado.
+
+Contrato, estados, migração, limites, testes e rollback: [processamento diferido](docs/specs/system/DEFERRED_PROCESSING.md). Desligar a flag nesta versão mantém recuperação de v3; versão antiga não entende esses manifestos.
+
+Controle administrativo v2, compatibilidade, ACK de comandos, recuperação e testes: [contrato de confiabilidade](docs/specs/system/DEVICE_RELIABILITY.md). O Compose local usa `host_config/.env` dedicado e a saúde do loop real (`python -m src.cli.healthcheck`, `--ready` inclui câmeras). O `.env` remoto exige sync autenticado v2; comandos exigem o runner com IPC v2. Aceite de uma solicitação não confirma reinício do serviço.
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 
@@ -48,7 +58,7 @@ Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC
 - **`src/workers/processing_worker.py`**: Worker de processamento, watermark, upload e retry
 - **`src/utils/logger.py`**: Sistema de logging centralizado
 - **`src/services/api_client.py`**: Cliente HTTP para comunicação com backend
-- **`src/services/mqtt/`**: Cliente MQTT, presença do device, configuração remota e bloqueio explícito de command/control
+- **`src/services/mqtt/`**: Cliente MQTT, presença do device, configuração remota e comandos administrativos autenticados opt-in
 
 ### Dependências
 
@@ -189,6 +199,8 @@ python3 main.py
 
 **Gerar highlight:** Pressione `ENTER` no terminal, o botão físico conectado ao GPIO ou o botão Pico serial.
 
+No terminal, a quebra de linha ao pressionar ENTER é normal. O listener registra `ENTER recebido` antes de encaminhar o gatilho; isso não confirma preservação. No modo diferido, o console distingue `Preservação iniciada`, câmera/buffer indisponível e os eventos `capture.preserved`/`capture.not_preserved`. O vídeo final continua sujeito à agenda. Entrada padrão encerrada (EOF, por exemplo execução sem stdin interativo) gera aviso de ENTER indisponível; GPIO/Pico continuam independentes. Testes: `tests.test_terminal_trigger`, incluindo ENTER em pseudo-terminal sem câmera ou serviços.
+
 ---
 
 ## 🔄 Fluxo de Funcionamento
@@ -302,6 +314,8 @@ Quando `GN_MQTT_ENABLED=1`, o edge sobe um serviço dedicado em paralelo ao pipe
 
 Falhas de MQTT não derrubam o loop principal de replay. O edge continua capturando e processando mesmo sem broker disponível.
 
+O registro de inscrições/listeners MQTT é sincronizado e a reconexão percorre uma cópia estável. Assim, serviços que adicionam tópicos de ACK durante o bootstrap não interrompem a thread Paho. Chamadas de rede e callbacks ficam fora do lock de registro; listeners adicionados durante callbacks valem para o próximo ciclo. Testes de concorrência sem broker: `tests.test_mqtt_client`.
+
 Observação de tópico:
 - `DEVICE_ID`/`GN_DEVICE_ID` usado no namespace MQTT deve ser um único nível de tópico. Valores com `/`, `+`, `#` ou byte nulo são rejeitados ao montar os tópicos para evitar wildcard/hierarquia inesperada; nesse caso a presença MQTT é ignorada sem derrubar captura/worker.
 - configuração remota exige `DEVICE_SECRET`/`GN_DEVICE_SECRET` para validar assinatura HMAC; sem esse segredo, mensagens `config/desired` são rejeitadas.
@@ -342,9 +356,9 @@ grava_nois_system/
 │           ├── mqtt_client.py            # Cliente MQTT e lifecycle
 │           ├── device_presence_service.py# Presença, heartbeat e estado
 │           ├── device_config_service.py  # Configuração remota assinada
-│           ├── command_dispatcher.py     # Estrutura futura de command/control
-│           ├── command_executor.py       # Placeholder sem execução real
-│           └── command_policy.py         # Política que bloqueia comandos na fase 1
+│           ├── command_dispatcher.py     # Autenticação, ledger e outbox com ACK
+│           ├── command_executor.py       # Admissão de intent no runner host
+│           └── command_policy.py         # Allowlist e expiração dos comandos opt-in
 │
 ├── files/
 │   ├── replay_grava_nois.png    # Logo principal (original)
@@ -426,6 +440,10 @@ Para converter um `.env` legado em `config.json` operacional:
 ./env_to_config.sh .env config.json
 ./env_to_config.sh .env config.json --dry-run
 ```
+
+Os argumentos são posicionais: primeiro a fonte `.env`, depois o destino JSON; `--dry-run` pode aparecer antes ou depois dos paths. Por exemplo, `bash env_to_config.sh .env runtime_config/config.json` grava somente nesse destino e mantém o `config.json` da raiz intacto. Argumentos posicionais extras são rejeitados antes de qualquer gravação. O fallback automático para `/opt/.grn/config/.env` existe apenas quando nenhum path é informado.
+
+Para a webcam do notebook, declare `GN_CAMERAS_JSON=[{"id":"notebook","name":"Webcam notebook","enabled":true,"sourceType":"v4l2"}]` antes da conversão. Sem fontes configuradas, o conversor gera `cameras: []`, que desativa a captura; não existe fallback V4L2 quando essa lista está presente. Testes isolados do conversor: `python -m unittest tests.test_env_to_config_cli` (somente arquivos sintéticos em diretório temporário).
 
 Em devices provisionados pelo `grava_nois_config`, use explicitamente os paths do host:
 ```bash
@@ -579,7 +597,7 @@ GN_PICO_HOST_SHUTDOWN_TOKEN=SHUTDOWN_HOST
 GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.json
 ```
 
-O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele apenas cria o arquivo de intenção acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
+O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele grava intents duráveis por UUID em `device-actions/requests/`, ao lado do caminho legado configurado acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
 
 Configurações operacionais recebidas por `config.desired` são persistidas no `config.json`/pending e nos campos equivalentes do `.env` gerenciado antes do report de sucesso. Assim, o próximo pull/restart reconstrói o JSON sem perder a alteração. Segredos, identidade e variáveis sem equivalente operacional são preservados.
 
@@ -658,14 +676,26 @@ O teste opcional `tests.test_camera_watermark_integration` também inclui a logo
 
 ```bash
 DEV=true                        # Pula chamadas de rede no ProcessingWorker
+DEV_USE_CAMERA=true             # Em DEV, false permite iniciar sem cameras RTSP/V4L2
 DEV_VIDEO_MODE=false            # Envia payload com "dev=true" no register de metadados
 ```
 
 Com `DEV=true`:
-- O processamento local do vídeo continua ativo.
+- Com `DEV_USE_CAMERA=true` (padrão), captura e processamento local do vídeo continuam ativos.
 - O worker não faz requisições HTTP para registro, upload e finalização.
 - O sidecar é marcado como `dev_local_preserved`.
 - Os artefatos locais ficam preservados para inspeção e deixam de ser reprocessados automaticamente.
+
+Para executar sem câmera, configure `DEV=true` e `DEV_USE_CAMERA=false` no `.env`
+e reinicie o processo. Isso desativa todas as fontes, inclusive câmeras gerenciadas em
+`config.json`, sem resolver credenciais RTSP nem usar o fallback de webcam V4L2.
+Não são iniciados captura FFmpeg, buffers, supervisores ou workers por câmera;
+gatilhos não geram novos clipes. MQTT e os listeners de gatilhos continuam conforme
+a configuração, e a presença informa zero câmeras. Filas e arquivos existentes não
+são apagados; o runtime deferred, quando aplicável, continua recuperando trabalhos
+pendentes em modo DEV. A flag permanece somente no `.env`, não altera `config.json`
+e é ignorada quando `DEV` está desativado. `DEV_USE_CAMERA=true` usa as fontes
+configuradas, respeitando `enabled=false` e `cameras: []`.
 
 #### Janela de Funcionamento
 
@@ -718,7 +748,13 @@ Fornecer visibilidade operacional de `online/offline`, heartbeat e saúde resumi
 Observação:
 - O `device_id` dos tópicos vem de `DEVICE_ID`/`GN_DEVICE_ID` no serviço de presença e precisa ser um único nível de tópico MQTT. O sistema rejeita `/`, `+`, `#` e byte nulo para evitar wildcard ou hierarquia inesperada; se o valor for inválido, somente MQTT é ignorado.
 
-### Tópicos da fase 1
+### Tópicos da fase 1 (referência histórica)
+
+A lista e os exemplos abaixo registram a base histórica. Para os contratos atuais
+de `env/*` e `commands/*`, incluindo ACK, consulte
+[DEVICE_RELIABILITY.md](docs/specs/system/DEVICE_RELIABILITY.md); para telemetria
+e ACK de processamento diferido, consulte
+[DEFERRED_PROCESSING.md](docs/specs/system/DEFERRED_PROCESSING.md).
 
 - `grn/devices/{device_id}/presence`
 - `grn/devices/{device_id}/heartbeat`
@@ -1772,6 +1808,13 @@ Para contribuir com o projeto:
 3. Siga as convenções de logging estabelecidas
 4. Atualize toda documentação impactada no mesmo change (`README.md`, `.env.example`, specs e `AGENTS.md` quando aplicável)
 
+Suíte de código isolada: `.venv/bin/python scripts/test_isolated.py --coverage`
+(dependências em `requirements-dev.txt`). Não carrega `.env`, usa estado temporário e
+bloqueia conexões Python de saída; gera `coverage.xml` e exige 90% de cobertura de
+branches nas camadas domain/application. Integrações com câmera e serviços ficam
+opt-in. Veja o [relatório de correções](docs/reports/device-reliability-2026-09-29.md)
+e o [roteiro de integração manual](docs/reports/e2e-local-validation.md).
+
 ---
 
 ## 📞 Suporte
@@ -1784,5 +1827,5 @@ Em caso de problemas:
 
 ---
 
-**Última atualização:** 2026-03-31
+**Última atualização:** 2026-09-29
 **Versão:** 2.4.0 (multi-botão Pico por câmera + cooldown por câmera)

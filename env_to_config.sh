@@ -48,6 +48,7 @@ LEGACY_ENV_FILE="/opt/.grn/config/.env"
 ENV_FILE="$DEFAULT_ENV_FILE"
 OUTPUT_FILE="config.json"
 DRY_RUN="false"
+POSITIONAL_COUNT=0
 
 for arg in "$@"; do
     case "$arg" in
@@ -61,11 +62,15 @@ for arg in "$@"; do
             exit 1
             ;;
         *)
-            if [[ "$ENV_FILE" == ".env" && "$arg" != "$OUTPUT_FILE" ]]; then
-                ENV_FILE="$arg"
-            elif [[ "$OUTPUT_FILE" == "config.json" ]]; then
-                OUTPUT_FILE="$arg"
-            fi
+            case "$POSITIONAL_COUNT" in
+                0) ENV_FILE="$arg" ;;
+                1) OUTPUT_FILE="$arg" ;;
+                *)
+                    echo "Argumentos demais. Uso: $0 [ENV_FILE] [OUTPUT_FILE] [--dry-run]" >&2
+                    exit 1
+                    ;;
+            esac
+            POSITIONAL_COUNT=$((POSITIONAL_COUNT + 1))
             ;;
     esac
 done
@@ -78,7 +83,7 @@ if ! command -v python3 &>/dev/null; then
     exit 1
 fi
 
-if [[ "$ENV_FILE" == "$DEFAULT_ENV_FILE" && ! -f "$ENV_FILE" && -f "$LEGACY_ENV_FILE" ]]; then
+if [[ "$POSITIONAL_COUNT" -eq 0 && ! -f "$ENV_FILE" && -f "$LEGACY_ENV_FILE" ]]; then
     ENV_FILE="$LEGACY_ENV_FILE"
     OUTPUT_FILE="/opt/.grn/config/runtime/config.json"
 fi
@@ -368,10 +373,12 @@ def build_cameras_section() -> list[dict]:
             "postSegments": _int("GN_RTSP_POST_SEGMENTS", 3),
         }]
 
-    # --- Sem fonte RTSP: câmera vazia (V4L2 via fallback do loader) ---
+    # cameras=[] is authoritative: it disables capture, including V4L2 fallback.
     warnings.append(
         "Nenhuma fonte RTSP encontrada (GN_CAMERAS_JSON / GN_RTSP_URLS / GN_RTSP_URL). "
-        "O sistema usará V4L2 local como fallback."
+        "O config.json terá cameras=[] e a captura ficará desativada. "
+        "Para webcam local, declare uma câmera enabled=true com sourceType=v4l2 "
+        "em GN_CAMERAS_JSON."
     )
     return []
 
@@ -505,6 +512,8 @@ config: dict = {
         },
     },
     "processing": {
+        "deferredEnabled": _bool("GN_DEFERRED_PROCESSING_ENABLED", False),
+        "additionalWindows": json.loads(_str("GN_PROCESSING_WINDOWS_JSON", "[]") or "[]"),
         "lightMode":      _bool("GN_LIGHT_MODE", False),
         "maxAttempts":    max(1, _int("GN_MAX_ATTEMPTS", 3)),
         "verticalFormat": _bool("VERTICAL_FORMAT", False),

@@ -1,5 +1,11 @@
 # Edge Architecture
 
+## Contrato diferido v3 (opt-in)
+
+`main.py` seleciona `DeferredRuntime` para fixed com flag ativa ou fila v3 existente. Esse bootstrap usa `PreserveReplay`, `DeferredCoordinator`, `ProcessClipJob` e adaptadores concretos de filesystem/mídia/HTTP/MQTT; não inicia workers legados em paralelo. Fila, leases e writer existentes são reaproveitados; não há RabbitMQ ativo nem scheduler externo.
+
+Detalhes e dependências de liberação: [DEFERRED_PROCESSING.md](DEFERRED_PROCESSING.md).
+
 ## Identidade operacional
 
 `GN_DEVICE_MODE=fixed` mantém a identidade cliente/venue. `GN_DEVICE_MODE=rental` mantém somente device/HMAC, omite cliente/venue e deixa a API associar a captura ao contrato temporário.

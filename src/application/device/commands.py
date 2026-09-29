@@ -47,6 +47,7 @@ class HandleDeviceCommand:
         self._validator = validator or ValidateDeviceCommand()
 
     def __call__(self, topic: str, raw_payload: bytes) -> bool:
-        request = self._validator.parse(topic, raw_payload)
-        response = self._validator.rejection(self._device_id, request)
-        return self._publisher.publish_json(self._output_topic, response, retain=False)
+        # This adapter is not wired into the active runtime. Until the signed
+        # command port is migrated in RF-011, fail closed without emitting an
+        # unauthenticated phase-one rejection that could be mistaken for a receipt.
+        return False

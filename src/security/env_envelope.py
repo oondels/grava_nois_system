@@ -15,17 +15,18 @@ import base64
 import hashlib
 import hmac as hmac_mod
 import os
+from datetime import UTC
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 _AES_KEY_LENGTH = 32  # 256 bits
 _IV_LENGTH = 12  # GCM standard
 _AUTH_TAG_LENGTH = 16  # 128-bit tag (GCM appends tag to ciphertext)
 _HKDF_INFO = b"grn-env-envelope-v1"
-_SIGNATURE_VERSION = "v1"
+_SIGNATURE_VERSION = "v2"
 
 
 # ─── Key derivation ─────────────────────────────────────────────────────────
@@ -45,9 +46,7 @@ def derive_aes_key(device_secret: str, request_id: str) -> bytes:
 # ─── Encrypt / Decrypt ──────────────────────────────────────────────────────
 
 
-def _encrypt_aes256_gcm(
-    key: bytes, plaintext: bytes
-) -> tuple[bytes, bytes, bytes]:
+def _encrypt_aes256_gcm(key: bytes, plaintext: bytes) -> tuple[bytes, bytes, bytes]:
     """Retorna (iv, ciphertext, auth_tag)."""
     iv = os.urandom(_IV_LENGTH)
     aesgcm = AESGCM(key)
@@ -58,9 +57,7 @@ def _encrypt_aes256_gcm(
     return iv, ciphertext, auth_tag
 
 
-def _decrypt_aes256_gcm(
-    key: bytes, iv: bytes, ciphertext: bytes, auth_tag: bytes
-) -> bytes:
+def _decrypt_aes256_gcm(key: bytes, iv: bytes, ciphertext: bytes, auth_tag: bytes) -> bytes:
     """Descriptografa e verifica autenticidade."""
     aesgcm = AESGCM(key)
     ct_with_tag = ciphertext + auth_tag
@@ -112,10 +109,10 @@ def seal_env_envelope(
     issued_at: str | None = None,
 ) -> dict[str, str]:
     """Criptografa e assina conteúdo de .env em um envelope seguro."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     if issued_at is None:
-        issued_at = datetime.now(timezone.utc).isoformat()
+        issued_at = datetime.now(UTC).isoformat()
 
     plaintext_bytes = plaintext.encode("utf-8")
     key = derive_aes_key(device_secret, request_id)

@@ -33,7 +33,7 @@ class TestEnvEnvelope(unittest.TestCase):
             issued_at="2026-04-13T00:00:00.000Z",
         )
 
-        self.assertEqual(envelope["version"], "v1")
+        self.assertEqual(envelope["version"], "v2")
         self.assertEqual(envelope["request_id"], REQUEST_ID)
         self.assertEqual(envelope["device_id"], DEVICE_ID)
         self.assertEqual(envelope["issued_at"], "2026-04-13T00:00:00.000Z")
@@ -98,7 +98,7 @@ class TestEnvEnvelope(unittest.TestCase):
             plaintext=ENV_CONTENT,
         )
         tampered = dict(envelope)
-        tampered["version"] = "v2"
+        tampered["version"] = "v1"
 
         with self.assertRaises(ValueError) as ctx:
             open_env_envelope(device_secret=DEVICE_SECRET, envelope=tampered)

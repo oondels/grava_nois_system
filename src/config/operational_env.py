@@ -87,6 +87,8 @@ def operational_config_to_env(config: dict[str, Any]) -> dict[str, str]:
         "GN_GPIO_PIN": _nullable(gpio.get("pin")),
         "GN_GPIO_DEBOUNCE_MS": str(gpio["debounceMs"]),
         "GN_GPIO_COOLDOWN_SEC": str(gpio["cooldownSeconds"]),
+        "GN_DEFERRED_PROCESSING_ENABLED": _bool(processing.get("deferredEnabled", False)),
+        "GN_PROCESSING_WINDOWS_JSON": json.dumps(processing.get("additionalWindows", []), separators=(",", ":")),
         "GN_LIGHT_MODE": _bool(processing["lightMode"]),
         "GN_MAX_ATTEMPTS": str(processing["maxAttempts"]),
         "VERTICAL_FORMAT": _bool(processing["verticalFormat"]),

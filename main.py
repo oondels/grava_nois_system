@@ -12,10 +12,11 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from src.bootstrap.deferred_runtime import DeferredRuntime
 from src.config.config_loader import get_effective_config
 from src.config.settings import (
     CaptureConfig,
@@ -32,6 +33,7 @@ from src.services.mqtt.device_config_service import (
 )
 from src.services.mqtt.device_diagnostic_service import DeviceDiagnosticEventService
 from src.services.mqtt.device_env_service import DeviceEnvService
+from src.services.runtime_health import RuntimeHealth
 from src.services.mqtt.device_presence_service import (
     DevicePresenceService,
     build_runtime_snapshot,
@@ -75,6 +77,35 @@ CAMERA_STALE_RESTART_STATUSES = {"STALE", "MISSING", "UNKNOWN"}
 CAMERA_SUPERVISOR_INTERVAL_SEC = 5.0
 
 
+def _listen_for_enter(
+    trigger_q: queue.Queue[tuple[str, str, float]], stop_evt: threading.Event
+) -> None:
+    """Read lines without holding Python's buffered stdin lock during shutdown."""
+    import select
+    import sys
+
+    try:
+        fd = sys.stdin.fileno()
+        while not stop_evt.is_set():
+            ready, _, _ = select.select([fd], [], [], 0.2)
+            if not ready:
+                continue
+            data = os.read(fd, 4096)
+            if not data:
+                logger.warning("Entrada padrão encerrada; gatilho ENTER indisponível neste processo")
+                return
+            for _ in range(data.count(b"\n")):
+                if stop_evt.is_set():
+                    return
+                signal = ("enter", datetime.now(UTC).isoformat(), time.monotonic())
+                logger.info("ENTER recebido; encaminhando gatilho para validação e preservação")
+                trigger_q.put(signal)
+    except KeyboardInterrupt:
+        stop_evt.set()
+    except (OSError, ValueError):
+        logger.warning("Entrada padrão indisponível; gatilho ENTER desativado")
+
+
 def _send_pico_command(
     fd: int,
     command: str,
@@ -96,6 +127,7 @@ class CameraRuntime:
     segbuf: SegmentBuffer | None = None
     capture_lock: threading.Lock = field(default_factory=threading.Lock)
     _cooldown_until: float = field(default=0.0)
+    deferred: DeferredRuntime | None = None
     camera_status: str = "STARTING"
     last_error: str = ""
     last_error_at: str = ""
@@ -152,8 +184,41 @@ def _trigger_fan_out(
     *,
     trigger_source: str = "unknown",
     capture_event_service: CaptureEventService | None = None,
+    captured_at: str | None = None,
+    triggered_mono: float | None = None,
 ) -> None:
     """Dispatch trigger concurrently to all active cameras."""
+
+    captured_at = captured_at or datetime.now(timezone.utc).isoformat()
+    triggered_mono = time.monotonic() if triggered_mono is None else triggered_mono
+    if not runtimes:
+        logger.warning(
+            "[%s] Gatilho %s sem câmera ativa; lance não preservado",
+            trigger_id, trigger_source,
+        )
+        return
+    deferred = next((rt.deferred for rt in runtimes if rt.deferred is not None), None)
+    if deferred is not None:
+        deferred.record_activity(triggered_mono)
+    if deferred is not None and get_effective_config().processing.deferred_enabled:
+        for rt in runtimes:
+            try:
+                if not _camera_readiness(rt)["ready"]:
+                    logger.warning(
+                        "[%s][%s] Gatilho recebido, mas câmera/buffer indisponível; lance não preservado",
+                        rt.cfg.camera_id, trigger_id,
+                    )
+                    deferred.events.emit("capture.not_preserved", stage="preservation", code="camera_not_ready", severity="error",
+                        context={"trigger_id": trigger_id, "camera_id": rt.cfg.camera_id, "captured_at": captured_at})
+                    continue
+                job_id = deferred.admit(rt.cfg, rt.segbuf, trigger_id, captured_at, triggered_mono)
+                logger.info(
+                    "[%s][%s] Preservação iniciada: trabalho=%s; aguardando segmentos completos",
+                    rt.cfg.camera_id, trigger_id, job_id,
+                )
+            except Exception:
+                logger.error("[%s] Replay preservation admission failed", rt.cfg.camera_id)
+        return
 
     def _process_one(rt: CameraRuntime) -> None:
         cfg = rt.cfg
@@ -181,7 +246,10 @@ def _trigger_fan_out(
             return
         try:
             logger.info(f"[{cfg.camera_id}][{trigger_id}] building highlight")
-            out = build_highlight(cfg, rt.segbuf)
+            if deferred is not None:
+                out = deferred.build_immediate(cfg, rt.segbuf)
+            else:
+                out = build_highlight(cfg, rt.segbuf)
             if out:
                 try:
                     enqueue_clip(cfg, out)
@@ -412,7 +480,8 @@ def _camera_supervisor(
                 except Exception:
                     pass
 
-            clear_buffer(rt.cfg)
+            if not rt.cfg.track_segments:
+                clear_buffer(rt.cfg)
             proc = start_ffmpeg(rt.cfg)
             segbuf = SegmentBuffer(rt.cfg)
             segbuf.start()
@@ -516,6 +585,7 @@ def main() -> int:
     capture_event_service: CaptureEventService | None = None
     diagnostic_event_service: DeviceDiagnosticEventService | None = None
     rental_offline_service: RentalOfflineService | None = None
+    deferred_runtime: DeferredRuntime | None = None
     boot_id = str(uuid.uuid4())
 
     if mqtt_config.enabled and not device_id:
@@ -531,6 +601,8 @@ def main() -> int:
                 trigger_source=trigger_source,
                 camera_stale_after_sec=CAMERA_STALE_AFTER_SEC,
             )
+            if deferred_runtime is not None:
+                snapshot["runtime"]["operational"] = deferred_runtime.snapshot()
             snapshot["health"]["gpio_enabled"] = gpio_enabled
             snapshot["health"]["pico_enabled"] = pico_enabled
             snapshot["runtime"]["boot_id"] = boot_id
@@ -637,7 +709,12 @@ def main() -> int:
                 )
 
     # --- Estado de câmeras: cria runtimes sem bloquear o bootstrap em RTSP/FFmpeg ---
+    use_deferred_runtime = device_mode == "fixed" and (
+        op_cfg.processing.deferred_enabled or (base / "queue_raw" / ".deferred").exists())
+    if device_mode == "rental" and op_cfg.processing.deferred_enabled:
+        raise RuntimeError("Deferred processing is supported only for fixed devices")
     for cfg in camera_cfgs:
+        cfg.track_segments = use_deferred_runtime
         clear_buffer(cfg)
         cfg.ensure_dirs()
         runtimes.append(CameraRuntime(cfg=cfg))
@@ -679,7 +756,7 @@ def main() -> int:
     primary_cfg = camera_cfgs[0] if camera_cfgs else None
 
     # --- Disparo por ENTER/GPIO/Pico: inicia antes das câmeras para sinalizar runtime básico ---
-    trigger_q: queue.Queue[str] = queue.Queue()
+    trigger_q: queue.Queue[tuple[str, str, float]] = queue.Queue()
 
     # Cooldown de botão físico (GPIO/Pico): por câmera via CameraRuntime._cooldown_until
     gpio_cooldown_sec = op_cfg.triggers.gpio.cooldown_seconds
@@ -737,7 +814,18 @@ def main() -> int:
         if pico_monitor is not None:
             pico_monitor.publish_feedback("TRIGGER", f"REJECTED:{reason}")
 
-    for rt in runtimes:
+    if use_deferred_runtime:
+        deferred_runtime = DeferredRuntime(base=base, cameras=camera_cfgs, mqtt_client=mqtt_client,
+            topic_for=lambda suffix: mqtt_config.topic_for(device_id, suffix),
+            identity={"device_id": device_id, "client_id": client_id, "venue_id": venue_id},
+            secret=os.getenv("DEVICE_SECRET") or os.getenv("GN_DEVICE_SECRET") or "",
+            watermark=watermark_path, client_watermark=client_watermark_path,
+            top_watermark=client_top_watermark_path, dev_mode=dev_mode)
+        for rt in runtimes:
+            rt.deferred = deferred_runtime
+        deferred_runtime.start()
+
+    for rt in ([] if use_deferred_runtime else runtimes):
         cfg = rt.cfg
         worker = ProcessingWorker(
             queue_dir=cfg.queue_dir,
@@ -807,21 +895,9 @@ def main() -> int:
                 return _handler
             token_map[_token.strip().upper()] = _make_handler(_rt)
 
-    def _stdin_listener():
-        try:
-            while not stop_evt.is_set():
-                try:
-                    input()
-                except EOFError:
-                    break
-                except KeyboardInterrupt:
-                    stop_evt.set()
-                    break
-                trigger_q.put("enter")
-        except Exception as e:
-            logger.exception(f"Erro no listener de stdin: {e}")
-
-    stdin_t = threading.Thread(target=_stdin_listener, daemon=True)
+    stdin_t = threading.Thread(
+        target=_listen_for_enter, args=(trigger_q, stop_evt), daemon=True, name="trigger-enter"
+    )
     stdin_t.start()
 
     # habilita GPIO se o modo selecionado permitir.
@@ -882,7 +958,7 @@ def main() -> int:
                             if (now - last_ts) * 1000.0 < debounce_ms:
                                 return
                             last_ts = now
-                            trigger_q.put("gpio")
+                            trigger_q.put(("gpio", datetime.now(timezone.utc).isoformat(), time.monotonic()))
 
                     cb = pi.callback(gpio_pin, pigpio.FALLING_EDGE, on_edge)
                     gpio_enabled = True
@@ -982,7 +1058,7 @@ def main() -> int:
                     line_upper, pico_trigger_token
                 ):
                     logger.info("[Pico] Token '%s' -> fan-out global", line_upper)
-                    trigger_q.put("pico")
+                    trigger_q.put(("pico", datetime.now(timezone.utc).isoformat(), time.monotonic()))
                 else:
                     logger.warning("[Pico] Token desconhecido: %r", line_upper)
 
@@ -1037,13 +1113,19 @@ def main() -> int:
         "Gravando… pressione ENTER"
         + (f" ou {' ou '.join(trigger_hints)}" if trigger_hints else "")
         + f" para capturar {capture_desc} (Ctrl+C sai)"
-    )
+    ) if runtimes else "Serviço ativo sem câmeras; gatilhos não geram clipes (Ctrl+C sai)"
     logger.info(prompt)
+    runtime_health = RuntimeHealth(base, boot_id, CAMERA_STALE_AFTER_SEC)
 
     try:
         while not stop_evt.is_set():
             try:
-                trig = trigger_q.get(timeout=0.3)
+                runtime_health.tick(runtimes)
+            except OSError:
+                logger.warning("Não foi possível atualizar a saúde local do runtime")
+            try:
+                signal = trigger_q.get(timeout=0.3)
+                trig, captured_at, triggered_mono = signal if isinstance(signal, tuple) else (signal, datetime.now(timezone.utc).isoformat(), time.monotonic())
             except queue.Empty:
                 continue
 
@@ -1094,6 +1176,7 @@ def main() -> int:
                 trigger_executor,
                 trigger_id,
                 trigger_source=trig,
+                captured_at=captured_at, triggered_mono=triggered_mono,
                 capture_event_service=capture_event_service,
             )
             if trig == "pico" and pico_monitor is not None:
@@ -1103,10 +1186,17 @@ def main() -> int:
         logger.info("Encerrando...")
     finally:
         stop_evt.set()
+        try:
+            runtime_health.tick(runtimes, stopped=True)
+        except OSError:
+            pass
+        stdin_t.join(timeout=1)
         if pico_monitor is not None:
             pico_monitor.stop()
         if pico_controller is not None:
             pico_controller.stop()
+        if deferred_runtime is not None:
+            deferred_runtime.stop()
         if rental_offline_service is not None:
             rental_offline_service.stop()
         if mqtt_dispatcher is not None:
@@ -1114,6 +1204,8 @@ def main() -> int:
                 mqtt_dispatcher.stop()
             except Exception:
                 pass
+        if mqtt_env_service is not None:
+            mqtt_env_service.stop()
         if mqtt_config_service is not None:
             try:
                 mqtt_config_service.stop()

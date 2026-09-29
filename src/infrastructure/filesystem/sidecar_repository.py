@@ -154,13 +154,13 @@ class FilesystemClipJobRepository:
     @staticmethod
     def _encode(job: ClipJob) -> dict[str, Any]:
         return {
-            "schema_version": 2,
+            "schema_version": job.schema_version,
             "job_id": job.job_id,
             "camera_id": job.camera_id.value,
             "source_location": job.source_location,
             "created_at": job.created_at.isoformat(),
             "state": job.state.value,
-            "status": _STATE_TO_LEGACY[job.state],
+            "status": _STATE_TO_LEGACY.get(job.state, job.state.value.lower()),
             "attempts": job.attempts,
             "next_attempt_at": (
                 job.next_attempt_at.isoformat() if job.next_attempt_at is not None else None
