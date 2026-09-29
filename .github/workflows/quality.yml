@@ -30,14 +30,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
-      - name: Run tests with branch coverage
-        run: python -m pytest
-
-      - name: Enforce architecture-layer coverage
-        run: |
-          python -m coverage report \
-            --include='src/domain/*,src/application/*' \
-            --fail-under=90
+      - name: Run isolated tests and enforce architecture branch coverage
+        run: python scripts/test_isolated.py --coverage
 
       - name: Check architecture-layer lint
         shell: bash
