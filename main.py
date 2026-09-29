@@ -1104,7 +1104,7 @@ def main() -> int:
         "Gravando… pressione ENTER"
         + (f" ou {' ou '.join(trigger_hints)}" if trigger_hints else "")
         + f" para capturar {capture_desc} (Ctrl+C sai)"
-    )
+    ) if runtimes else "Serviço ativo sem câmeras; gatilhos não geram clipes (Ctrl+C sai)"
     logger.info(prompt)
 
     try:

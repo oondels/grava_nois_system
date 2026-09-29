@@ -14,7 +14,7 @@ Parâmetros que NUNCA saem de env/secret (fora desta camada):
   - GN_CLIENT_ID / CLIENT_ID
   - GN_VENUE_ID / VENUE_ID
   - GN_API_BASE / API_BASE_URL
-  - Flags de dev/teste: DEV, DEV_VIDEO_MODE, GN_HMAC_DRY_RUN, GN_FORCE_RASPBERRY_PI
+  - Flags de dev/teste: DEV, DEV_USE_CAMERA, DEV_VIDEO_MODE, GN_HMAC_DRY_RUN, GN_FORCE_RASPBERRY_PI
   - Paths de host/container: GN_BUFFER_DIR, GN_LOG_DIR
 
 Parâmetros que dependem de decisão arquitetural e permanecem em env nesta fase:

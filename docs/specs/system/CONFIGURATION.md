@@ -73,6 +73,7 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 | `GN_PICO_HOST_SHUTDOWN_ENABLED` | — | Opt-in para poweroff confirmado via Pico; default `0` |
 | `GN_PICO_HOST_SHUTDOWN_TOKEN` | — | Token serial de poweroff; default `SHUTDOWN_HOST` |
 | `DEV` | — | Flag de desenvolvimento |
+| `DEV_USE_CAMERA` | — | Usa câmeras em DEV; padrão `true`, ignorado fora de DEV e exige restart |
 | `DEV_VIDEO_MODE` | — | Flag de teste |
 | `GN_HMAC_DRY_RUN` | `HMAC_DRY_RUN` | Flag de auditoria/debug |
 | `GN_FORCE_RASPBERRY_PI` | — | Override de plataforma (teste) |
@@ -128,8 +129,24 @@ Duas opções:
 
 O campo `cameras` é autoritativo quando presente. Um array vazio ou composto apenas
 por entradas `enabled=false` desabilita todas as câmeras e nunca aciona fallback.
-Uma câmera RTSP habilitada com `env:VAR_NAME` ausente causa falha explícita no startup;
+Com captura habilitada, uma câmera RTSP com `env:VAR_NAME` ausente causa falha explícita no startup;
 a mensagem contém apenas câmera e nome da variável, nunca seu valor.
+
+### Execução DEV sem câmera
+
+`DEV=true` com `DEV_USE_CAMERA=false` desativa todas as câmeras antes da resolução
+de fontes e credenciais, inclusive as gerenciadas em `config.json`. Não há fallback
+RTSP/V4L2, captura FFmpeg, buffers, supervisores ou workers por câmera. MQTT e
+listeners de gatilhos permanecem conforme a configuração; a presença reporta zero
+câmeras e gatilhos não preservam clipes. O log de startup informa que o serviço está
+ativo sem câmeras. Filas e artefatos existentes são preservados; a recuperação
+deferred, quando aplicável, continua em modo DEV.
+
+`DEV_USE_CAMERA` permanece exclusivamente no env e exige restart. O padrão é
+`true`, mantendo as fontes configuradas e respeitando `enabled=false`/`cameras: []`.
+Fora de DEV, a flag é ignorada. Como os demais booleanos de settings, valores
+`1`, `true`, `yes`, `y` e `on` habilitam a flag, sem distinção de maiúsculas e com
+espaços externos removidos; demais valores, incluindo `0` e `false`, desabilitam.
 
 ---
 

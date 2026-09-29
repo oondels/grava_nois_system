@@ -10,6 +10,7 @@ from src.config.config_loader import (
     OperationalConfig,
     get_effective_config,
 )
+from src.utils.logger import logger
 
 
 @dataclass
@@ -161,6 +162,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
     """Carrega configurações de câmera a partir do loader central ou env legado.
 
     Política de fonte de câmeras:
+      0. DEV=true e DEV_USE_CAMERA=false → nenhuma câmera, sem resolver fontes
       1. Se config.json possui o campo 'cameras' → usa-o como fonte autoritativa
       2. Se o campo estiver ausente → fallback para env legado
       3. Se nenhuma fonte RTSP → câmera V4L2 local
@@ -168,6 +170,10 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
     URLs RTSP com credenciais devem usar 'env:VAR_NAME' em config.json ou
     permanecer exclusivamente em GN_CAMERAS_JSON / GN_RTSP_URL no env.
     """
+    if _env_bool("DEV") and not _env_bool("DEV_USE_CAMERA", True):
+        logger.info("Câmeras desativadas em modo DEV (DEV_USE_CAMERA=false)")
+        return []
+
     cfg: OperationalConfig = get_effective_config()
     capture = cfg.capture
 

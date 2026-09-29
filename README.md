@@ -674,14 +674,26 @@ O teste opcional `tests.test_camera_watermark_integration` também inclui a logo
 
 ```bash
 DEV=true                        # Pula chamadas de rede no ProcessingWorker
+DEV_USE_CAMERA=true             # Em DEV, false permite iniciar sem cameras RTSP/V4L2
 DEV_VIDEO_MODE=false            # Envia payload com "dev=true" no register de metadados
 ```
 
 Com `DEV=true`:
-- O processamento local do vídeo continua ativo.
+- Com `DEV_USE_CAMERA=true` (padrão), captura e processamento local do vídeo continuam ativos.
 - O worker não faz requisições HTTP para registro, upload e finalização.
 - O sidecar é marcado como `dev_local_preserved`.
 - Os artefatos locais ficam preservados para inspeção e deixam de ser reprocessados automaticamente.
+
+Para executar sem câmera, configure `DEV=true` e `DEV_USE_CAMERA=false` no `.env`
+e reinicie o processo. Isso desativa todas as fontes, inclusive câmeras gerenciadas em
+`config.json`, sem resolver credenciais RTSP nem usar o fallback de webcam V4L2.
+Não são iniciados captura FFmpeg, buffers, supervisores ou workers por câmera;
+gatilhos não geram novos clipes. MQTT e os listeners de gatilhos continuam conforme
+a configuração, e a presença informa zero câmeras. Filas e arquivos existentes não
+são apagados; o runtime deferred, quando aplicável, continua recuperando trabalhos
+pendentes em modo DEV. A flag permanece somente no `.env`, não altera `config.json`
+e é ignorada quando `DEV` está desativado. `DEV_USE_CAMERA=true` usa as fontes
+configuradas, respeitando `enabled=false` e `cameras: []`.
 
 #### Janela de Funcionamento
 

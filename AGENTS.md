@@ -15,6 +15,8 @@ pip install -r requirements.txt
 
 Run the edge service locally with `python3 main.py`. Use environment overrides inline when validating pipeline variants, for example `GN_RTSP_USE_WALLCLOCK=1 GN_RTSP_FPS=20 python3 main.py`. Run the main targeted test suite with `python -m unittest tests.test_mobile_format`. For the optional real-camera integration flow, use `GN_RUN_CAMERA_INTEGRATION=1 PYTHONPATH=. python -m unittest tests.test_camera_watermark_integration`.
 
+For local development without cameras, set `DEV=true` and `DEV_USE_CAMERA=false` in `.env` and restart. `DEV_USE_CAMERA` defaults to `true` and is ignored outside DEV; keep it enabled for real-camera integration tests. Validate this rule with `python -m unittest tests.test_dev_camera_mode`.
+
 ## Coding Style & Naming Conventions
 Use Python with 4-space indentation, type hints where the module already uses them, and small, direct functions. Match existing naming: `snake_case` for functions, variables, and test methods; `PascalCase` for classes; uppercase for environment variables such as `GN_WM_REL_WIDTH`.
 
