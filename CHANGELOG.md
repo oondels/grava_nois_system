@@ -2,9 +2,16 @@
 
 ## Unreleased
 
-- `fix(storage)`: limita backups privados do `.env` a cinco cópias e 30 dias; evita backup sem mudança, limpa retries finalizados e expira falhas terminais legadas e manifestos v3 finalizados após 30 dias.
-- `fix(mqtt)`: limita o outbox de eventos de captura a 64 MiB, com reserva para erros e contador persistido de eventos suprimidos.
-- `docs(system)`: esclarece aplicacao de `.env`/configuracao admin, reinicio por runner/Pico ou notebook e confirmacao por novo `boot_id`.
+### Fixed
+
+- `fix(config)`: limita conjuntamente os backups privados de `.env` a cinco cópias e 30 dias, sem criar nova cópia quando o conteúdo não muda; arquivos desconhecidos e symlinks não entram no expurgo.
+- `fix(video)`: o retry manual remove vídeo e sidecar apenas após persistir uma finalização confirmada pela API. Recibos antigos confirmados são reconciliados sem novo upload; casos incertos ou sem sidecar permanecem para inspeção.
+- `fix(storage)`: expira após 30 dias somente falhas terminais da fila legada e manifestos v3 `FINALIZED` já limpos. Trabalhos diferidos `FAILED`, `BLOCKED` e `DEV_PRESERVED` continuam preservados.
+- `fix(mqtt)`: limita o outbox de eventos de captura a 64 MiB, reserva 8 MiB para erros e persiste o contador de eventos suprimidos na saturação.
+
+### Documentation
+
+- `docs(system)`: esclarece aplicação de `.env`/configuração admin, reinício por runner/Pico ou notebook e confirmação por novo `boot_id`.
 
 ## 2026-09-29
 
