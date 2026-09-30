@@ -12,8 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.config.config_loader import configuration_transaction, get_config_path, get_effective_config, reset_config_cache
+from src.config.config_loader import (
+    configuration_transaction,
+    get_config_path,
+    get_effective_config,
+    reset_config_cache,
+)
 from src.config.config_schema import validate_config_dict
+from src.config.env_backup_retention import prune_env_backups
 from src.config.operational_env import persist_operational_config, restore_env_content
 from src.security.hmac import hmac_sha256_base64
 from src.services.docker_action_request import DockerActionRequestService
@@ -196,6 +202,7 @@ class DeviceConfigService:
         self._apply_lock = threading.RLock()
 
     def start(self) -> bool:
+        self._prune_env_backups()
         if not self.mqtt_client.is_enabled:
             return False
         if not self._connect_listener_registered:
@@ -210,6 +217,22 @@ class DeviceConfigService:
 
     def stop(self) -> None:
         return None
+
+    def _prune_env_backups(self) -> None:
+        if self.env_path is None:
+            return
+        try:
+            if self.config_path.with_name("config.transaction.json").exists():
+                return
+            removed, bytes_removed = prune_env_backups(self.env_path)
+            if removed:
+                mqtt_logger.info(
+                    "Env backup retention removed %s files (%s bytes)",
+                    removed,
+                    bytes_removed,
+                )
+        except OSError:
+            mqtt_logger.warning("Env backup retention pending")
 
     def queue_startup_report(self, report: "_ReportResult" | None) -> bool:
         if report is None:
@@ -377,6 +400,7 @@ class DeviceConfigService:
                     }
                 )
                 journal.unlink(missing_ok=True)
+                self._prune_env_backups()
                 return _ReportResult(
                     status="pending_restart",
                     config_version=config_version,
@@ -419,6 +443,7 @@ class DeviceConfigService:
             journal.unlink(missing_ok=True)
             raise
         journal.unlink(missing_ok=True)
+        self._prune_env_backups()
         _audit_log(
             "config_applied_immediately",
             deviceId=self.device_id,

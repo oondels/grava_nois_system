@@ -12,6 +12,7 @@ Comandos administrativos invasivos permanecem opt-in, validam HMAC, expiração,
 O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
 
 Aplicação e confirmação de `.env`/configuração admin, inclusive reinício manual e Pico: [system/CONFIGURATION.md](./system/CONFIGURATION.md#gerenciamento-remoto-de-env-via-admin). Arquivo salvo e pedido enfileirado não comprovam novo runtime; a auditoria de conexão compara `boot_id`.
+Retenção local: backups do `.env` têm limite conjunto de cinco cópias/30 dias; falhas terminais do worker legado vencem em 30 dias; somente manifestos v3 finalizados e limpos vencem em 30 dias. Detalhes de recuperação, outbox e inspeção estão em [system/OPERATIONS.md](./system/OPERATIONS.md#retenção-e-inspeção-de-disco) e [system/PIPELINE.md](./system/PIPELINE.md).
 No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
 
 ## Processamento diferido em fixed

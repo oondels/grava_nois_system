@@ -235,7 +235,7 @@ Canonical string:
 
 ## Retry upload diagnostics
 
-`src/services/retry_upload.py` mantém sidecars locais para auditoria de reprocessamento, mas respostas de backend são sanitizadas antes de persistir campos sensíveis como `upload_url` e `signed_upload_url`.
+`src/services/retry_upload.py` preserva sidecars enquanto upload/finalização estiverem pendentes ou incertos. Após recibo oficial de finalização persistido, remove vídeo e sidecar; uma execução posterior também reconcilia recibos antigos confirmados sem repetir upload. Respostas de backend são sanitizadas antes de persistir campos sensíveis como `upload_url` e `signed_upload_url`.
 
 ## Hardware integrations
 

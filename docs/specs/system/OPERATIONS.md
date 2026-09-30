@@ -56,6 +56,21 @@ Práticas:
 - registrar contexto suficiente para retry e auditoria local.
 - manter `mqtt.log` separado para heartbeat/presença e evitar ruído em `app.log`.
 
+## Retenção e inspeção de disco
+
+No dispositivo provisionado, execute no diretório do Compose (normalmente `/opt/.grn/compose`) para medir volumes sem ler segredos:
+
+```bash
+du -sh host_config failed_clips queue_raw runtime_config rental_clips_generated logs
+find host_config -maxdepth 1 -type f -name '.env.bak.grn.*' -printf '%s\n' |
+  awk '{n++; bytes+=$1} END {printf "backups .env: %d arquivos, %.1f MiB\n", n, bytes/1048576}'
+find queue_raw/.deferred -name manifest.json -type f 2>/dev/null | wc -l
+```
+
+Backups de `.env` (edição remota e configuração operacional) usam no máximo cinco cópias e 30 dias. A fila legada expira apenas falhas terminais comprovadas após 30 dias, em varredura horária; o retry manual remove mídia depois de finalização confirmada. O monitor v3 remove após 30 dias somente manifestos `FINALIZED` já limpos e sem arquivos desconhecidos. `FAILED`, `BLOCKED`, `DEV_PRESERVED`, uploads incertos e originais importados permanecem recuperáveis. Inspecione estes itens antes de limpeza manual; não remova marcadores `.deferred.json` para forçar reimportação.
+
+O outbox de captura limita pendências a 64 MiB, reservando 8 MiB para eventos de erro. `runtime_config/capture_event_outbox/status` registra `suppressed` e `saturated`; a saturação emite erro no log e não apaga eventos ainda pendentes. O alerta global de 4 GB livres continua informativo, sem expurgo geral.
+
 ## Test coverage present
 
 Execute a suíte de código com `.venv/bin/python scripts/test_isolated.py --coverage`.
@@ -81,6 +96,7 @@ Testes visíveis:
 - `test_pico_utils.py`
 - `test_pico_operational_v2.py`
 - `test_retry_upload.py`
+- `test_storage_retention.py`
 - `test_security_signing.py`
 - `test_trigger_fanout.py`
 - `test_trigger_sources.py`

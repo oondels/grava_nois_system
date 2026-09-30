@@ -165,8 +165,10 @@ def persist_operational_config(env_path: Path, config: dict[str, Any]) -> str:
             )
         )
     merged = merge_env_content(original, updates)
+    if merged == original:
+        return original
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = env_path.with_suffix(f".bak.grn.config.{timestamp}")
+    backup_path = env_path.with_name(env_path.name + f".bak.grn.config.{timestamp}")
     shutil.copy2(env_path, backup_path)
     os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR)
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `fix(storage)`: limita backups privados do `.env` a cinco cópias e 30 dias; evita backup sem mudança, limpa retries finalizados e expira falhas terminais legadas e manifestos v3 finalizados após 30 dias.
+- `fix(mqtt)`: limita o outbox de eventos de captura a 64 MiB, com reserva para erros e contador persistido de eventos suprimidos.
 - `docs(system)`: esclarece aplicacao de `.env`/configuracao admin, reinicio por runner/Pico ou notebook e confirmacao por novo `boot_id`.
 
 ## 2026-09-29

@@ -55,7 +55,7 @@ WATERMARKED → REGISTERED → UPLOADED → FINALIZED → cleaned
 
 `flock` do equipamento e do trabalho substituem expiração de lease para estes trabalhos. O descritor global é herdado pelo processo de mídia: mesmo se o processo Python morrer, um FFmpeg órfão não libera concorrência antecipadamente. Execução usa `timeout --signal=TERM --kill-after=5s`, limite `max(300 s, 30×duração)`, prioridade `nice +10`, encode/filtros com uma thread, ffprobe com 30 s. Essas ferramentas são dependências Linux do runtime. Não é prova de segurança de desempenho no Raspberry Pi mais fraco.
 
-Limpeza remove segmentos, intermediários, final, thumbnail e assets apenas depois de FINALIZED. Manifesto permanece. DEV, FAILED, BLOCKED e arquivos desconhecidos/corrompidos não são apagados automaticamente. `invalid_manifests` e `legacy_pending` expõem itens que exigem intervenção.
+Limpeza remove segmentos, intermediários, final, thumbnail e assets apenas depois de FINALIZED. O manifesto e o marcador legado permanecem por até 30 dias após a limpeza; então o monitor os remove somente se `FINALIZED`, `cleaned=true`, sem mídia de origem nem arquivos desconhecidos no trabalho. DEV, FAILED, BLOCKED e arquivos desconhecidos/corrompidos não são apagados automaticamente. `invalid_manifests` e `legacy_pending` expõem itens que exigem intervenção.
 
 ## Fila antiga e rollback
 

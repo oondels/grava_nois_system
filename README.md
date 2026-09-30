@@ -19,6 +19,8 @@
 
 A fila v3 vive em `queue_raw/.deferred`, recupera checkpoints e importa clipes antigos sem perder originais. Upload/finalização são independentes da agenda; alerta de armazenamento abre abaixo de **4.000.000.000 bytes**. MQTT de configuração é estendido; eventos/estado usam outbox e aguardam ACK de persistência do backend. A funcionalidade **não está liberada em produção**: API/app já implementam os contratos; faltam concluir a homologação integrada e a qualificação no hardware mínimo. `DEV=true` continua sem upload e não é controle de ativação. Rental não é alterado.
 
+O monitor remove após 30 dias apenas metadados de trabalhos v3 `FINALIZED` já limpos; `FAILED`, `BLOCKED`, `DEV_PRESERVED`, arquivos desconhecidos e mídia ainda pendente são preservados. Backups remotos do `.env` são privados e limitados às cinco cópias mais recentes, com idade máxima de 30 dias.
+
 Contrato, estados, migração, limites, testes e rollback: [processamento diferido](docs/specs/system/DEFERRED_PROCESSING.md). Desligar a flag nesta versão mantém recuperação de v3; versão antiga não entende esses manifestos.
 
 Controle administrativo v2, compatibilidade, ACK de comandos, recuperação e testes: [contrato de confiabilidade](docs/specs/system/DEVICE_RELIABILITY.md). O Compose local usa `host_config/.env` dedicado e a saúde do loop real (`python -m src.cli.healthcheck`, `--ready` inclui câmeras). O `.env` remoto exige sync autenticado v2; comandos exigem o runner com IPC v2. Aceite de uma solicitação não confirma reinício do serviço.
@@ -294,6 +296,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 
 - **Retry automático:** Até 3 tentativas com backoff
 - **Pasta de falhas:** Vídeos que falharam vão para `failed_clips/upload_failed/`
+- **Retenção local:** o worker remove após 30 dias apenas clipes legados com falha terminal comprovada. Itens em retry, sidecars ambíguos e originais importados pela fila diferida permanecem para recuperação. O comando manual `retry_upload.py` remove vídeo e JSON somente depois de registrar uma finalização confirmada pela API; upload anterior com finalização incerta exige reconciliação manual e não é reenviado automaticamente.
 - **Reprocessamento:** Sistema tenta reprocessar falhas periodicamente
 - **Diagnóstico seguro:** O retry registra a resposta do backend no sidecar sanitizando `upload_url`/URLs assinadas antes de persistir metadados locais.
 - **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
@@ -956,7 +959,7 @@ Evento assinado publicado quando um trigger é rejeitado por falta de câmera/bu
 }
 ```
 
-Se MQTT estiver indisponível, o evento é salvo em `runtime_config/capture_event_outbox/` e reenviado quando o heartbeat conseguir reconectar.
+Se MQTT estiver indisponível, o evento é salvo em `runtime_config/capture_event_outbox/` e reenviado quando o heartbeat conseguir reconectar. O outbox é limitado a 64 MiB, com 8 MiB reservados a eventos de erro; ao saturar, registra `suppressed` e `saturated` no arquivo `status` da mesma pasta e emite erro local.
 
 #### `grn/devices/{device_id}/events`
 

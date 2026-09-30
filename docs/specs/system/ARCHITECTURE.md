@@ -60,6 +60,7 @@ Bootstrap em [`main.py`](../../../main.py):
 
 - [`src/config/config_loader.py`](../../../src/config/config_loader.py)
 - [`src/config/settings.py`](../../../src/config/settings.py)
+- `src/config/env_backup_retention.py`: retenção conjunta das cópias privadas do `.env`
 - resolve configuração operacional, single camera, multi-camera via JSON e RTSP legacy
 
 ### Video
@@ -83,6 +84,7 @@ Bootstrap em [`main.py`](../../../main.py):
 - [`src/services/api_client.py`](../../../src/services/api_client.py)
 - [`src/services/api_error_policy.py`](../../../src/services/api_error_policy.py)
 - [`src/services/retry_upload.py`](../../../src/services/retry_upload.py)
+- `src/services/storage_retention.py`: expurgo conservador de falhas legadas e metadados v3 finalizados
 - `src/services/mqtt/mqtt_client.py`
 - `src/services/mqtt/device_presence_service.py`
 - `src/services/mqtt/device_config_service.py`

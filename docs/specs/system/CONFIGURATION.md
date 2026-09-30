@@ -174,11 +174,11 @@ O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env`
 - `env/desired`: backend envia o novo conteúdo criptografado;
 - `env/reported`: edge responde snapshot, aplicação ou rejeição.
 
-O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
+O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<request_id>` antes de alterar o conteúdo e publica `rejected` quando o arquivo não existe ou a assinatura falha. Uma gravação sem mudança não cria backup.
 
 Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. Antes do recreate, o runner executa o conversor persistente e regenera atomicamente `config.json` a partir do `.env`; falha na conversao interrompe a acao. Identidade e segredos permanecem somente no `.env`.
 
-O `config.desired` operacional aceito é convertido para as variáveis equivalentes e gravado atomicamente no `.env` gerenciado antes do report MQTT. A escrita preserva identidade, segredos e campos não gerenciados, cria backup `0600` e faz rollback se a promoção do JSON falhar. Assim, `.env` e JSON permanecem reconciliados durante `restart_container` e `pull_and_recreate`.
+O `config.desired` operacional aceito é convertido para as variáveis equivalentes e gravado atomicamente no `.env` gerenciado antes do report MQTT. A escrita preserva identidade, segredos e campos não gerenciados, cria backup `0600` (`.env.bak.grn.config.<timestamp>`) somente se o conteúdo mudar e faz rollback se a promoção do JSON falhar. Assim, `.env` e JSON permanecem reconciliados durante `restart_container` e `pull_and_recreate`. As duas famílias de backup compartilham o limite de cinco cópias recentes e 30 dias; o expurgo ignora nomes desconhecidos e symlinks e ocorre após a transação de configuração. Segredos históricos permanecem nas cópias até sua expiração.
 
 Quando `restart_after_apply=true` está presente no envelope HMAC, o edge só agenda `restart_container` depois de persistir o `.env` e publicar o report de sucesso. O campo participa da assinatura; alterá-lo em trânsito invalida o comando.
 

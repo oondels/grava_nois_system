@@ -16,6 +16,7 @@ from src.config.config_loader import get_effective_config
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
 from src.services.backend_response_sanitizer import sanitize_backend_response
+from src.services.storage_retention import prune_legacy_failed
 from src.utils.logger import logger
 from src.video.processor import (
     _sha256_file,
@@ -63,6 +64,7 @@ class ProcessingWorker:
         self.operational_event_callback = operational_event_callback
         self.pending_destination = pending_destination
         self._last_noapi_log = 0.0
+        self._next_retention_scan = 0.0
 
         self._stop = threading.Event()
         self._t = None
@@ -71,6 +73,17 @@ class ProcessingWorker:
         self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
     def _scan_retry_failed(self):
+        if time.monotonic() >= self._next_retention_scan:
+            self._next_retention_scan = time.monotonic() + 3600
+            removed, bytes_removed = prune_legacy_failed(
+                self.failed_dir_highlight, max_attempts=self.max_attempts
+            )
+            if removed:
+                logger.info(
+                    "Retencao: %s clipes legados expirados removidos (%s bytes)",
+                    removed,
+                    bytes_removed,
+                )
         # diretórios candidatos a retry ( só com upload_failed)
         retry_dirs = [self.failed_dir_highlight / "upload_failed"]
         # futuramente incluir outros diretorios:

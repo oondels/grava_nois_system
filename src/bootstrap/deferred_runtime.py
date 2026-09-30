@@ -28,6 +28,7 @@ from src.infrastructure.http.deferred_gateway import DeferredVideoGateway
 from src.infrastructure.media.deferred_media import DeferredMedia
 from src.services.mqtt.operational_event_service import OperationalEventService
 from src.services.storage_monitor import StorageMonitor
+from src.services.storage_retention import prune_finalized_jobs
 from src.utils.logger import logger
 
 
@@ -283,6 +284,15 @@ class DeferredRuntime:
 
     def _monitor(self):
         self._import_legacy()
+        removed, bytes_removed = prune_finalized_jobs(
+            self.jobs, (self.base / "queue_raw", self.base / "failed_clips")
+        )
+        if removed:
+            logger.info(
+                "Retencao: %s manifestos finalizados removidos (%s bytes)",
+                removed,
+                bytes_removed,
+            )
         jobs = self.jobs.all()
         counts = {}
         active = []

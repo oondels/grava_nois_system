@@ -188,6 +188,8 @@ Se `_process_one()` falhar:
 - respeita idade mínima e backoff;
 - só reprocessa estados elegíveis.
 
+Uma varredura horária remove após 30 dias somente vídeos/sidecars legados com `status=failed` ou retry de upload comprovadamente esgotado. Sidecar ausente/corrompido, `.lock`, marcador `.deferred.json` e estados ainda elegíveis são preservados. O retry manual remove vídeo e sidecar após persistir o recibo de finalização; se o upload já ocorreu mas a finalização está incerta, mantém o item para reconciliação sem repetir o upload.
+
 ## 9. API interaction points
 
 Chamadas principais:

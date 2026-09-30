@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config.operational_env import persist_operational_config
 from src.services.mqtt.device_config_service import (
     DeviceConfigService,
     RemoteConfigError,
@@ -54,6 +55,17 @@ def _deep_update(target: dict, overrides: dict) -> None:
 
 
 class DeviceConfigServiceTests(unittest.TestCase):
+    def test_unchanged_operational_env_does_not_create_second_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("CUSTOM_OPTION=fixture-only\n")
+            config = self._desired_config()
+            persist_operational_config(env_path, config)
+            first = list(env_path.parent.glob(".env.bak.grn.config.*"))
+            persist_operational_config(env_path, config)
+            self.assertEqual(len(first), 1)
+            self.assertEqual(list(env_path.parent.glob(".env.bak.grn.config.*")), first)
+
     def _service(
         self,
         base: Path,
