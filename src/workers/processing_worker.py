@@ -52,6 +52,8 @@ class ProcessingWorker:
         self.watermark_path = watermark_path
         self.client_watermark_path = client_watermark_path
         self.client_top_watermark_path = client_top_watermark_path
+        from src.video.watermark_assets import WatermarkAssets
+        self.watermark_assets = WatermarkAssets(watermark_path.parent, client_watermark_path, client_top_watermark_path)
         self.scan_interval = scan_interval
         self.max_attempts = max_attempts
         self.wm_margin = wm_margin
@@ -367,18 +369,19 @@ class ProcessingWorker:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
         else:
             tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
+            client_logo, top_logo = self.watermark_assets.resolve()
             add_image_watermark(
                 input_path=str(mp4),
                 watermark_path=str(self.watermark_path),
                 top_watermark_path=(
-                    str(self.client_top_watermark_path)
-                    if self.client_top_watermark_path is not None
+                    str(top_logo)
+                    if top_logo is not None
                     else None
                 ),
                 output_path=str(tmp_out),
                 secondary_watermark_path=(
-                    str(self.client_watermark_path)
-                    if self.client_watermark_path is not None
+                    str(client_logo)
+                    if client_logo is not None
                     else None
                 ),
                 margin=self.wm_margin,

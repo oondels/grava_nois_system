@@ -78,3 +78,7 @@ failed_clips/
 .vscode/
 .claude/
 .idea/
+
+# Device-specific immutable client watermark revisions
+/files/client-versions/
+/files/client-watermarks.json

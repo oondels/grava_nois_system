@@ -60,3 +60,7 @@ Never commit `.env` or camera credentials. Treat `.env.example` as the public co
 - Host actions use durable IPC v2 per request. Token consumption is not action admission, MQTT publish is not an application persistence receipt, and queued restart is not service readiness.
 - Preserve command results until authenticated `commands/ack`; unknown host outcomes require reconciliation, never automatic replay of invasive effects.
 - Validate with `tests.test_device_env_service`, `tests.test_env_envelope_cross`, `tests.test_mqtt_commands`, `tests.test_docker_action_request`, and terminal shutdown tests. See `docs/specs/system/DEVICE_RELIABILITY.md` for rollout and compatibility.
+
+## Manutenção administrativa independente
+
+Preservar a seleção persistida de transporte e os ledgers/outboxes. Comandos do host exigem presença própria, HMAC, TTL e idempotência; nunca oferecer shell/path/imagem arbitrários. Resultados IPC `source=maintenance` pertencem ao agente do host. Logos usam revisões imutáveis; não remover assets referenciados por trabalhos pendentes. Não executar instalação, migrations ou operações físicas como parte dos testes isolados.

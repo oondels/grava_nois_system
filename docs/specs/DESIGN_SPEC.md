@@ -1,5 +1,7 @@
 # DESIGN_SPEC - Grava Nois System
 
+Manutenção independente da captura, disponibilidade administrativa e logos gerenciadas: [system/MAINTENANCE.md](system/MAINTENANCE.md).
+
 ## Modo rental
 
 O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a dependência de venue e usa o endpoint de metadata específico; veja `system/CONFIGURATION.md`, `PIPELINE.md` e `BUSINESS_RULES.md`.

@@ -106,6 +106,8 @@ class DeferredRuntime:
         self.identity = identity
         self.dev_mode = dev_mode
         self.watermarks = (watermark, client_watermark, top_watermark)
+        from src.video.watermark_assets import WatermarkAssets
+        self.watermark_assets = WatermarkAssets(watermark.parent, client_watermark, top_watermark)
         self.root = self.base / "queue_raw" / ".deferred"
         require_persistent_storage(self.root)
         require_persistent_storage(self.base / "runtime_config" / "operational")
@@ -170,6 +172,7 @@ class DeferredRuntime:
         self._snapshot = {}
 
     def policy(self):
+        client_logo, top_logo = self.watermark_assets.resolve()
         cfg = get_effective_config()
         p = cfg.processing
         return {
@@ -182,8 +185,8 @@ class DeferredRuntime:
             "relative_width": p.watermark.relative_width,
             "max_attempts": p.max_attempts,
             "watermark": str(self.watermarks[0]),
-            "client_watermark": str(self.watermarks[1]) if self.watermarks[1] else None,
-            "top_watermark": str(self.watermarks[2]) if self.watermarks[2] else None,
+            "client_watermark": str(client_logo) if client_logo else None,
+            "top_watermark": str(top_logo) if top_logo else None,
             "config_version": cfg.config_version,
             "schedule_required": p.deferred_enabled,
             "dev": self.dev_mode,

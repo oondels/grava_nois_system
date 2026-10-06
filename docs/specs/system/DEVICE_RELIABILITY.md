@@ -125,3 +125,7 @@ Native `python main.py` retains its existing root .env workflow. Do not commit e
 managed env file. Capture, replay/rental data, logs and runtime state remain mounted
 persistently. Updating existing Compose must accompany the compatible edge image;
 older images do not provide the new healthcheck CLI.
+
+## Independent host maintenance
+
+The optional host agent owns `maintenance/*` and IPC results with `source=maintenance`; the edge ignores these results. Channel selection is persisted per API operation. Capture may be offline while the host remains reachable. See [MAINTENANCE.md](MAINTENANCE.md).

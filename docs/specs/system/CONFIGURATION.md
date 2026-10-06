@@ -379,3 +379,7 @@ câmera só funcionam como fallback enquanto o campo `cameras` estiver ausente.
 ## Exemplo completo
 
 Veja `config.example.json` na raiz do projeto para um exemplo completo com todos os domínios funcionais.
+
+## Logos gerenciadas em runtime
+
+`files/client-watermarks.json` permite aplicar revisões imutáveis das logos do cliente sem restart. A seleção legada permanece como fallback e `GN_CLIENT_WATERMARK_ENABLED` permanece exclusivo do `.env`. Contrato: [MAINTENANCE.md](MAINTENANCE.md).

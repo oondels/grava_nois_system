@@ -1,5 +1,7 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+Manutenção remota: [agente independente, diagnóstico e logos sem reinício](docs/specs/system/MAINTENANCE.md). Implementação preparada; ativação depende da implantação compatível e homologação no device.
+
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e, no pipeline legado, descarta clipes rejeitados pela API por restrição de horário. O pipeline diferido v3 preserva essas pendências em `BLOCKED`.

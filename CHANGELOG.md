@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+
+- `feat(device)`: manutenção administrativa por agente independente no host, diagnóstico/logs sob demanda, transporte autenticado e logos do cliente sem reinício.
 ### Fixed
 
 - `fix(config)`: limita conjuntamente os backups privados de `.env` a cinco cópias e 30 dias, sem criar nova cópia quando o conteúdo não muda; arquivos desconhecidos e symlinks não entram no expurgo.
