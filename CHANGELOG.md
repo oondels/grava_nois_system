@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `docs(device)`: registra recuperação com captura parada como **implementada e validada no dispositivo piloto** em 2026-10-07, conforme confirmação do responsável pelos testes.
+- `docs(config)`: registra configuração com reinício como **implementada e validada no dispositivo piloto** em 2026-10-07; a falha observada foi resolvida atualizando os scripts em `/opt/.grn/bin`.
+- `docs(device)`: registra atualização remota de logos/imagens de watermark e ajuste de disposição (posicionamento e dimensionamento pelo layout da câmera) como **implementados e validados no dispositivo piloto** em 2026-10-07.
+- `docs(device)`: registra coleta remota de diagnósticos e logs como **implementada e validada no dispositivo piloto** em 2026-10-07.
+
 - `fix(device)`: corrige reinício de configuração pendente, recriação previsível com imagem local e feedback sanitizado de falhas do host.
 
 

@@ -1,5 +1,7 @@
 # Watermarks proporcionais no processamento
 
+Atualização remota de logos/imagens e ajuste de posicionamento e dimensionamento pelo layout da câmera implementados e validados no dispositivo piloto, conforme confirmação do responsável em 2026-10-07. Registro conjunto de validação: [MAINTENANCE.md](MAINTENANCE.md).
+
 ## Runtime
 
 `src/config/watermark_layout.py` valida o contrato e calcula geometria. `src/services/watermark_catalog.py` importa os três arquivos conhecidos do fluxo legado, publica inventário assinado, baixa imagens por UUID e verifica SHA-256/dimensões. A sincronização sondará até três segmentos TS completos recentes por câmera, ignorando o mais novo que ainda pode estar sendo escrito.

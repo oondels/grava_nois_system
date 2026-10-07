@@ -1,5 +1,20 @@
 # Logos gerenciadas e agente de manutenção
 
+## Validação funcional no dispositivo — 2026-10-07
+
+Implementação concluída e validação funcional confirmada pelo responsável pelos testes no dispositivo piloto em 2026-10-07:
+
+| Funcionalidade | Estado e cenário validado |
+| --- | --- |
+| Recuperação com captura parada | Implementada e validada: container parado com `docker stop grava_nois_system`, manutenção independente conectada e recuperação por recriação remota. |
+| Configuração com reinício | Implementada e validada: alteração de configuração, solicitação de reinício e confirmação da aplicação no dispositivo. |
+| Logos e layout de watermark | Implementados e validados: atualização remota da imagem e alteração de posição e dimensões pelo layout da câmera. |
+| Diagnósticos e logs | Implementados e validados: coleta remota pelo fluxo administrativo. |
+
+A falha de reinício observada durante o piloto foi resolvida após atualizar os scripts instalados em `/opt/.grn/bin`. Atualizar o repositório ou baixar/recriar a imagem Docker não substitui esses scripts. O procedimento de atualização deve contemplar API, frontend, imagem do edge e scripts do host compatíveis.
+
+Este registro usa a confirmação dos testes feita pelo responsável no piloto; não representa uma nova execução automatizada nem homologação de todos os equipamentos e ambientes. As flags de ativação, autenticação e requisitos de implantação permanecem vigentes.
+
 O serviço independente no host recebe operações em `maintenance/*`; a captura mantém seus tópicos existentes. Resultados de IPC com `source=maintenance` pertencem ao agente do host e são ignorados pelo dispatcher do edge. A captura pode ficar desconectada enquanto o host continua administrável.
 
 ## Assets e compatibilidade

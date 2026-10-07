@@ -1,5 +1,7 @@
 # DESIGN_SPEC - Grava Nois System
 
+Status em 2026-10-07: recuperação com captura parada, configuração com reinício, atualização remota de logos/layout por câmera e diagnósticos/logs implementados e validados no dispositivo piloto, conforme confirmação do responsável. Evidência e pré-requisitos: [system/MAINTENANCE.md](system/MAINTENANCE.md).
+
 Reinício durável de configuração, recriação local e estados de falha: [system/CONFIGURATION.md](system/CONFIGURATION.md).
 
 Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](system/WATERMARK_LAYOUT.md).

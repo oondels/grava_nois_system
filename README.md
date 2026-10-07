@@ -5,7 +5,7 @@ Reinício/recriação de devices: contrato e atualização em [docs/specs/system
 
 Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](docs/specs/system/WATERMARK_LAYOUT.md).
 
-Manutenção remota: [agente independente, diagnóstico e logos sem reinício](docs/specs/system/MAINTENANCE.md). Implementação preparada; ativação depende da implantação compatível e homologação no device.
+Manutenção remota: [agente independente, diagnóstico e logos sem reinício](docs/specs/system/MAINTENANCE.md). Implementação concluída e validação funcional no dispositivo piloto confirmada em 2026-10-07: recuperação com captura parada, configuração com reinício, atualização remota de logos/layout por câmera e coleta de diagnósticos/logs. A implantação requer versões compatíveis, incluindo os scripts instalados em `/opt/.grn/bin`.
 
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
