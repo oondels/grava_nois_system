@@ -387,3 +387,9 @@ Veja `config.example.json` na raiz do projeto para um exemplo completo com todos
 ## Watermarks v2 (2026-10-06)
 
 O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.
+
+## Reinício durável de configuração (2026-10-07)
+
+Reenvio autenticado da mesma versão/hash pendente com `restart_after_apply=true` solicita reinício sem regravar a configuração. Versão já aplicada não reinicia novamente. `config.restart.json`, privado e persistente junto ao config, vincula UUID do IPC à versão/hash/correlation e conserva a intenção antes da admissão. A recuperação reutiliza esse UUID; resultados desconhecidos nunca repetem o efeito. Nova tentativa após falha conhecida exige envelope explícito com `issued_at` posterior. Confirmar a versão/hash aplicada encerra a intenção anterior.
+
+O monitor reconcilia requests/processing/results e a cópia durável em `device-operations/host-results`. A configuração permanece `pending_restart` quando a admissão ou execução falha. `applied` depende da configuração efetiva no startup, não da admissão no runner. Reports podem incluir `restart` com `request_id`, `status`, `stage`, `error_code`; o HMAC inclui esses quatro campos nessa ordem, após `:restart:`. Estados: prepared, queued, running, failed, unknown, succeeded. A API compatível deve ser implantada antes do edge.

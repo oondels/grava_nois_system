@@ -498,6 +498,41 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertFalse((base / "config.json").exists())
         self.assertEqual(state_data["pendingVersion"], 2)
 
+    def test_republish_pending_version_honors_restart_without_rewriting_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            payload = self._payload(self._desired_config({"capture": {"segmentSeconds": 2}}))
+            service.process_desired_config(payload)
+            before = service.pending_path.read_bytes()
+            payload["restart_after_apply"] = True
+            payload["signature"] = sign_desired_config_payload(payload=payload, device_secret="secret-123")
+            result = service.process_desired_config(payload)
+            self.assertTrue(result.restart_after_apply)
+            self.assertEqual(service.pending_path.read_bytes(), before)
+
+    def test_restart_admission_failure_does_not_reject_saved_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            payload = self._payload(self._desired_config({"capture": {"segmentSeconds": 2}}))
+            payload["restart_after_apply"] = True
+            payload["signature"] = sign_desired_config_payload(payload=payload, device_secret="secret-123")
+            with patch.object(service, '_restart_coordinator', side_effect=OSError('disk full')):
+                service._handle_message(service.desired_topic, json.dumps(payload).encode())
+            self.assertTrue(service.pending_path.exists())
+            report = service.mqtt_client.published[-1][1]
+            self.assertEqual(report['status'], 'pending_restart')
+            self.assertEqual(report['restart']['status'], 'unknown')
+
+    def test_restart_report_signature_binds_optional_metadata(self):
+        payload = dict(device_id='edge-01', config_version=2, correlation_id='abc',
+                       reported_at='2026-10-07T12:00:00Z', status='pending_restart', reported_hash='hash')
+        original = sign_reported_config_payload(payload=payload, device_secret='secret-123')
+        payload['restart'] = dict(request_id='id', status='queued', stage='admission', error_code='')
+        signed = sign_reported_config_payload(payload=payload, device_secret='secret-123')
+        self.assertNotEqual(original, signed)
+        payload['restart']['status'] = 'failed'
+        self.assertNotEqual(signed, sign_reported_config_payload(payload=payload, device_secret='secret-123'))
+
     def test_signed_restart_request_is_bound_to_desired_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

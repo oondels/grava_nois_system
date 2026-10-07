@@ -1,5 +1,7 @@
 # DESIGN_SPEC - Grava Nois System
 
+Reinício durável de configuração, recriação local e estados de falha: [system/CONFIGURATION.md](system/CONFIGURATION.md).
+
 Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](system/WATERMARK_LAYOUT.md).
 
 Manutenção independente da captura, disponibilidade administrativa e logos gerenciadas: [system/MAINTENANCE.md](system/MAINTENANCE.md).

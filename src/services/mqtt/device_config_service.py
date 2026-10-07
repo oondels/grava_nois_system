@@ -11,6 +11,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid5, NAMESPACE_URL
 
 from src.config.config_loader import (
     configuration_transaction,
@@ -23,6 +24,7 @@ from src.config.env_backup_retention import prune_env_backups
 from src.config.operational_env import persist_operational_config, restore_env_content
 from src.security.hmac import hmac_sha256_base64
 from src.services.docker_action_request import DockerActionRequestService
+from src.services.config_restart import ConfigRestart
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
 from src.utils.logger import setup_logger
 
@@ -200,6 +202,8 @@ class DeviceConfigService:
         self._connect_listener_registered = False
         self._pending_startup_report: _ReportResult | None = None
         self._apply_lock = threading.RLock()
+        self._restart_stop = threading.Event()
+        self._restart_thread = None
 
     def start(self) -> bool:
         self._prune_env_backups()
@@ -213,10 +217,42 @@ class DeviceConfigService:
             started = self.mqtt_client.subscribe(self.request_topic, self._enqueue_message) and started
         if self.mqtt_client.is_connected:
             self._handle_mqtt_connect()
+        if self._restart_thread is None:
+            self._restart_stop.clear()
+            self._restart_thread = threading.Thread(target=self._monitor_restart, daemon=True, name='config-restart')
+            self._restart_thread.start()
         return started
 
     def stop(self) -> None:
-        return None
+        self._restart_stop.set()
+
+    def _restart_coordinator(self):
+        coordinator = ConfigRestart(self.config_path.with_name('config.restart.json'),
+                                    DockerActionRequestService.from_env(logger=mqtt_logger))
+        current = self._load_current_config()
+        coordinator.confirm_applied(current.get('version'), hash_config(current))
+        return coordinator
+
+    def _monitor_restart(self):
+        last_report = None
+        while not self._restart_stop.wait(5):
+            try:
+                with self._apply_lock:
+                    coordinator = self._restart_coordinator()
+                    record = coordinator.load()
+                    if not record:
+                        continue
+                    # Startup promotion confirms application; do not admit an obsolete intent.
+                    if not self.pending_path.exists():
+                        continue
+                    record = coordinator.reconcile(record)
+                    report = _ReportResult(**record['report'])
+                    report.restart = record['restart']
+                    fingerprint = json.dumps(record, sort_keys=True)
+                    if fingerprint != last_report and self.publish_report(report):
+                        last_report = fingerprint
+            except Exception:
+                mqtt_logger.warning('Config restart reconciliation pending')
 
     def _prune_env_backups(self) -> None:
         if self.env_path is None:
@@ -282,9 +318,19 @@ class DeviceConfigService:
             )
             if topic == self.desired_topic:
                 result = self.process_desired_config(payload)
-                published = self.publish_report(result)
-                if published and result.restart_after_apply:
-                    self._schedule_restart()
+                if result.restart_after_apply:
+                    try:
+                        with self._apply_lock:
+                            record = self._restart_coordinator().request(payload, {
+                                key: value for key, value in vars(result).items() if key != 'restart'
+                            })
+                            result.restart = record['restart']
+                    except Exception:
+                        # Configuration remains valid even when restart admission cannot be proven.
+                        result.restart = dict(request_id=str(uuid5(NAMESPACE_URL, f'{self.device_id}:{result.correlation_id}:{result.config_version}')),
+                                              status='unknown', stage='admission', error_code='restart_admission_uncertain')
+                        mqtt_logger.warning('Config restart admission requires reconciliation')
+                self.publish_report(result)
                 return
             if self.request_topic and topic == self.request_topic:
                 self.process_config_request(payload)
@@ -357,7 +403,8 @@ class DeviceConfigService:
                 config_version=known, correlation_id=correlation_id, requires_restart=pending,
                 reported_hash=desired_hash, reported_config=None if pending else actual,
                 rejection_reason=None, last_applied_version=state.get("lastAppliedVersion"),
-                pending_version=known if pending else None)
+                pending_version=known if pending else None,
+                restart_after_apply=pending and bool(payload.get("restart_after_apply", False)))
         desired_processing = desired_config.get("processing", {})
         if desired_processing.get("deferredEnabled") and self.venue_id is None:
             raise RemoteConfigError("deferred_processing_requires_fixed_device")
@@ -484,18 +531,6 @@ class DeviceConfigService:
             last_applied_version=config_version,
         )
 
-    def _schedule_restart(self) -> None:
-        def request_restart() -> None:
-            requested = DockerActionRequestService.from_env(logger=mqtt_logger).request_action(
-                "restart_container",
-                source="remote_config",
-                fallback_on_failure=True,
-            )
-            if not requested:
-                mqtt_logger.warning("Runner Docker indisponível para aplicar configuração")
-
-        threading.Timer(3.0, request_restart).start()
-
     def publish_report(self, result: "_ReportResult") -> bool:
         payload: dict[str, Any] = {
             "type": "config.reported",
@@ -512,6 +547,8 @@ class DeviceConfigService:
             "rejection_reason": _sanitize_reason(result.rejection_reason),
             "agent_version": self.agent_version,
         }
+        if result.restart is not None:
+            payload["restart"] = result.restart
         if result.reported_config is not None:
             payload["reported_config"] = result.reported_config
         if result.last_applied_version is not None:
@@ -740,6 +777,7 @@ class _ReportResult:
         self.last_applied_version = last_applied_version
         self.pending_version = pending_version
         self.restart_after_apply = restart_after_apply
+        self.restart = None
 
 
 def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:
@@ -885,7 +923,7 @@ def _canonical_signature_payload(payload: dict[str, Any], desired_hash: str) -> 
 
 def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:
     config_version = payload.get("config_version")
-    return ":".join(
+    canonical = ":".join(
         [
             "v1",
             "CONFIG_REPORTED",
@@ -897,6 +935,11 @@ def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:
             str(payload.get("reported_hash") or ""),
         ]
     )
+
+    if "restart" in payload:
+        restart = payload["restart"]
+        canonical += ":restart:" + ":".join(str(restart.get(key) or "") for key in ("request_id", "status", "stage", "error_code"))
+    return canonical
 
 
 def _canonical_request_signature_payload(payload: dict[str, Any]) -> str:

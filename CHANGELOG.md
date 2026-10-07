@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `fix(device)`: corrige reinício de configuração pendente, recriação previsível com imagem local e feedback sanitizado de falhas do host.
+
+
 - `feat(device)`: editor/contrato de watermarks v2 por câmera, catálogo de imagens e aplicação proporcional com confirmação remota; documentação e testes de compatibilidade.
 
 

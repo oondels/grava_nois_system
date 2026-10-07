@@ -1,5 +1,8 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+Reinício/recriação de devices: contrato e atualização em [docs/specs/system/CONFIGURATION.md](docs/specs/system/CONFIGURATION.md). Implantar API compatível antes do novo edge; scripts do host são atualizados separadamente.
+
+
 Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](docs/specs/system/WATERMARK_LAYOUT.md).
 
 Manutenção remota: [agente independente, diagnóstico e logos sem reinício](docs/specs/system/MAINTENANCE.md). Implementação preparada; ativação depende da implantação compatível e homologação no device.
