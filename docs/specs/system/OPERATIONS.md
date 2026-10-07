@@ -171,3 +171,7 @@ Para habilitar em homologação:
 5. na troca de Wi-Fi, confirme associação à rede nova, acesso ao broker e rollback para a rede anterior em caso de falha.
 
 Para interromper novas operações, volte a flag para `0` e recrie o container. Intents já aceitas podem concluir no host; consulte o histórico da API antes de repetir manualmente.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

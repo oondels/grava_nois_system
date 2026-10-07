@@ -338,6 +338,70 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(reported_config["processing"]["watermark"]["opacity"], 0.8)
         self.assertIsInstance(reported_config["processing"]["watermark"]["opacity"], float)
 
+    def test_watermark_layout_stages_before_apply_and_preserves_state_on_failure(self):
+        from tests.test_watermark_layout import fixture
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                initial = self._desired_config()
+                (base / 'config.json').write_text(json.dumps(initial))
+                env = base / '.env'
+                env.write_text('GN_CLIENT_WATERMARK_ENABLED=1\n')
+                service = self._service(base, env_path=env)
+                desired = self._desired_config()
+                desired['processing']['watermark']['layout'] = fixture()
+                desired['processing']['watermark']['layout']['clientEnabled'] = False
+                before = (base / 'config.json').read_bytes()
+                with patch('src.services.watermark_catalog.prepare_assets', side_effect=ValueError('watermark_asset_integrity') if failure else None) as prepare:
+                    if failure:
+                        with self.assertRaisesRegex(ValueError, 'watermark_asset_integrity'):
+                            service.process_desired_config(self._payload(desired))
+                    else:
+                        result = service.process_desired_config(self._payload(desired))
+                prepare.assert_called_once()
+                if failure:
+                    self.assertEqual((base / 'config.json').read_bytes(), before)
+                    self.assertEqual(env.read_text(), 'GN_CLIENT_WATERMARK_ENABLED=1\n')
+                    self.assertFalse((base / 'config.pending.json').exists())
+                else:
+                    self.assertEqual(result.status, 'applied')
+                    self.assertFalse(result.requires_restart)
+                    self.assertIn('GN_CLIENT_WATERMARK_ENABLED=0', env.read_text())
+                    self.assertEqual(json.loads((base / 'config.json').read_text())['processing']['watermark']['layout'], desired['processing']['watermark']['layout'])
+
+    def test_journal_watermark_missing_file_preserves_current_config_at_boot(self):
+        from tests.test_watermark_layout import fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            current = base / 'config.json'
+            current.write_text(json.dumps(self._desired_config()))
+            desired = self._desired_config()
+            desired['version'] = 2
+            desired['processing']['watermark']['layout'] = fixture()
+            journal = base / 'config.transaction.json'
+            journal.write_text(json.dumps({'desired': desired, 'desired_hash': hash_config(desired), 'config_version': 2, 'correlation_id': 'interrupted'}))
+            before = current.read_bytes()
+            with patch('src.services.watermark_catalog.verify_local_assets', side_effect=ValueError('watermark_asset_integrity')):
+                self.assertIsNone(apply_pending_config_on_startup(current))
+            self.assertEqual(current.read_bytes(), before)
+            self.assertTrue(journal.exists())
+
+    def test_pending_watermark_missing_file_does_not_promote_at_boot(self):
+        from tests.test_watermark_layout import fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            initial = self._desired_config()
+            (base / 'config.json').write_text(json.dumps(initial))
+            desired = self._desired_config()
+            desired['version'] = 2
+            desired['processing']['watermark']['layout'] = fixture()
+            (base / 'config.pending.json').write_text(json.dumps(desired))
+            before = (base / 'config.json').read_bytes()
+            with patch('src.services.watermark_catalog.verify_local_assets', side_effect=ValueError('watermark_asset_integrity')):
+                self.assertIsNone(apply_pending_config_on_startup(base / 'config.json'))
+            self.assertEqual((base / 'config.json').read_bytes(), before)
+            self.assertTrue((base / 'config.pending.json').exists())
+
     def test_applies_hot_reload_safe_config_and_reports_applied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

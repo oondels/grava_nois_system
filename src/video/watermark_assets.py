@@ -16,10 +16,10 @@ class WatermarkAssets:
         self.revision = None
         self.lock = RLock()
 
-    def resolve(self) -> tuple[Path | None, Path | None]:
+    def resolve(self, respect_enabled: bool = True) -> tuple[Path | None, Path | None]:
         # Disabled client logos stay disabled regardless of a remotely installed manifest.
         from src.config.settings import load_client_watermark_enabled
-        if not load_client_watermark_enabled():
+        if respect_enabled and not load_client_watermark_enabled():
             return None, None
         with self.lock:
             try:

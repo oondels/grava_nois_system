@@ -522,6 +522,7 @@ config: dict = {
         "lmCrf":          _int_range("GN_LM_CRF", 26, 0, 51),
         "lmPreset":       _str("GN_LM_PRESET", "veryfast") or "veryfast",
         "watermark": {
+            **({"layout": {**json.loads(_str("GN_WATERMARK_LAYOUT_JSON", "{}")), "clientEnabled": _bool("GN_CLIENT_WATERMARK_ENABLED", True)}} if _str("GN_WATERMARK_LAYOUT_JSON", "") else {}),
             "relativeWidth": max(0.01, _float("GN_WM_REL_WIDTH", 0.18)),
             "opacity":       max(0.0, min(1.0, _float("GN_WM_OPACITY", 0.8))),
             "margin":        _int_range("GN_WM_MARGIN", 24, 0, 500),

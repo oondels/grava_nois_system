@@ -267,6 +267,7 @@ def add_image_watermark(
     top_watermark_path: Optional[str] = None,
     runner=None,
     threads: int | None = None,
+    watermark_layout: dict | None = None,
 ) -> None:
     """
     Aplica marca d'água de imagem usando ffmpeg.
@@ -315,6 +316,10 @@ def add_image_watermark(
         input_video_label = "[v_transformed]"
         vw_final = max(1, int(vh * 9 / 16))
         vh_final = vh
+        if watermark_layout is not None:
+            vw_final = max(2, int(min(vw, vh * 9 / 16)) // 2 * 2)
+            vh_final = vh // 2 * 2
+            transform_filter = f'[0:v]crop={vw_final}:{vh_final}:(iw-{vw_final})/2:0[v_transformed]'
         logger.info(f"Vertical format: crop 9:16 — {vw}x{vh} → {vw_final}x{vh_final}")
     else:
         transform_filter = None
@@ -370,6 +375,23 @@ def add_image_watermark(
         filt_parts.append(
             f"{top_input}[wm_top]overlay=x={int(margin)}:y={int(margin)}[v]"
         )
+
+    if watermark_layout is not None:
+        from src.config.watermark_layout import image_rect
+        placements = watermark_layout['placements']
+        filt_parts = [transform_filter] if transform_filter else []
+        slots = [('institutional', 1)]
+        if secondary_wm_p is not None: slots.append(('clientBottom', 2))
+        if top_wm_p is not None: slots.append(('clientTop', 3 if secondary_wm_p is not None else 2))
+        previous = input_video_label
+        for number, (slot, index) in enumerate(slots):
+            p = placements[slot]
+            x, y, width, height = image_rect(p, p['imageWidth'], p['imageHeight'], vw_final, vh_final)
+            scaled = f'[layout_{number}]'
+            output = '[v]' if number == len(slots)-1 else f'[layout_out_{number}]'
+            filt_parts.append(f'[{index}:v]scale={width}:{height},format=rgba,colorchannelmixer=aa={p["opacity"]:.6f}{scaled}')
+            filt_parts.append(f'{previous}{scaled}overlay=x={x}:y={y}{output}')
+            previous = output
 
     filt = ";".join(filt_parts)
 

@@ -383,3 +383,7 @@ Veja `config.example.json` na raiz do projeto para um exemplo completo com todos
 ## Logos gerenciadas em runtime
 
 `files/client-watermarks.json` permite aplicar revisões imutáveis das logos do cliente sem restart. A seleção legada permanece como fallback e `GN_CLIENT_WATERMARK_ENABLED` permanece exclusivo do `.env`. Contrato: [MAINTENANCE.md](MAINTENANCE.md).
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

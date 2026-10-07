@@ -211,3 +211,7 @@ As rotas protegidas por HMAC são:
 - `build_highlight()` não deve correr em paralelo para a mesma câmera;
 - `build_highlight()` só deve ser chamado para câmera com FFmpeg vivo e `SegmentBuffer` ativo;
 - a fila continua sendo filesystem-based, não DB-based.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

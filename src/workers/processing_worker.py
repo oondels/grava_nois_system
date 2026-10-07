@@ -45,10 +45,12 @@ class ProcessingWorker:
         operational_event_callback: Callable[[str], None] | None = None,
         pending_destination: Callable[[dict], tuple[Path, dict]] | None = None,
         client_top_watermark_path: Path | None = None,
+        camera_id: str | None = None,
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
         self.failed_dir_highlight = failed_dir_highlight
+        self.camera_id = camera_id
         self.watermark_path = watermark_path
         self.client_watermark_path = client_watermark_path
         self.client_top_watermark_path = client_top_watermark_path
@@ -370,9 +372,25 @@ class ProcessingWorker:
         else:
             tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
             client_logo, top_logo = self.watermark_assets.resolve()
+            primary_logo = str(self.watermark_path)
+            snapshot = meta.get('watermark_snapshot')
+            if snapshot is None and _proc_cfg.watermark.layout:
+                from src.services.watermark_catalog import snapshot_layout
+                layout, paths = snapshot_layout(_proc_cfg.watermark.layout, self.camera_id, self.watermark_path.parent)
+                snapshot = {'layout': layout, 'paths': paths, 'configVersion': get_effective_config().config_version, 'verticalFormat': vertical_format}
+                meta['watermark_snapshot'] = snapshot
+                from src.infrastructure.filesystem.deferred_repository import atomic_json
+                atomic_json(meta_path, meta)
+            if snapshot:
+                vertical_format = snapshot.get('verticalFormat', vertical_format)
+                primary_logo = snapshot['paths']['institutional']
+                client_logo = snapshot['paths']['clientBottom']
+                top_logo = snapshot['paths']['clientTop']
+
             add_image_watermark(
                 input_path=str(mp4),
-                watermark_path=str(self.watermark_path),
+                watermark_path=primary_logo,
+                watermark_layout=snapshot["layout"] if snapshot else None,
                 top_watermark_path=(
                     str(top_logo)
                     if top_logo is not None

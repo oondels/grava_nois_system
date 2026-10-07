@@ -15,3 +15,7 @@ O `.env` continua sendo a única fonte de `GN_CLIENT_WATERMARK_ENABLED`. Desabil
 Compose passa `files` para leitura/escrita; configuração, filas e logs continuam persistentes. Scripts, compose e estado privado do agente ficam no host. Não se monta `/opt/.grn` inteiro nem socket Docker.
 
 Validar `tests/test_watermark_assets.py`, watermark/worker, snapshots diferidos e `tests/test_host_action_contract.py`. Deploy depende do provisionamento compatível, migration/API e broker com ACL dos tópicos de manutenção. Reinício físico, nova imagem e câmera precisam de piloto; testes com subprocessos simulados não os homologam.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

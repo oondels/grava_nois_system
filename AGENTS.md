@@ -64,3 +64,7 @@ Never commit `.env` or camera credentials. Treat `.env.example` as the public co
 ## Manutenção administrativa independente
 
 Preservar a seleção persistida de transporte e os ledgers/outboxes. Comandos do host exigem presença própria, HMAC, TTL e idempotência; nunca oferecer shell/path/imagem arbitrários. Resultados IPC `source=maintenance` pertencem ao agente do host. Logos usam revisões imutáveis; não remover assets referenciados por trabalhos pendentes. Não executar instalação, migrations ou operações físicas como parte dos testes isolados.
+
+## Watermarks v2
+
+Antes de alterar editor, catálogo ou processamento proporcional, leia `docs/specs/system/WATERMARK_LAYOUT.md`. Preserve contrato normalizado, isolamento por device, imagens imutáveis e compatibilidade das filas.

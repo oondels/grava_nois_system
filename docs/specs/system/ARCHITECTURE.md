@@ -187,3 +187,7 @@ Ponto de integração:
 - o edge depende de FFmpeg/ffprobe no ambiente;
 - integrações com backend devem respeitar assinatura HMAC nas rotas protegidas;
 - o pipeline precisa tolerar conectividade intermitente sem corromper a fila local.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

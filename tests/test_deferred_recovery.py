@@ -177,7 +177,7 @@ class LegacyMigrationTests(unittest.TestCase):
         self.runtime.cameras = []
         self.runtime.storage = Mock()
         self.runtime.events = Mock()
-        self.runtime.policy = lambda: {"max_attempts": 3, "assets_saved": True}
+        self.runtime.policy = lambda camera_id=None: {"max_attempts": 3, "assets_saved": True}
         self.config = OperationalConfig()
         self.config.processing.deferred_enabled = True
         patcher = patch(

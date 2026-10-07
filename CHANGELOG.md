@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `feat(device)`: editor/contrato de watermarks v2 por câmera, catálogo de imagens e aplicação proporcional com confirmação remota; documentação e testes de compatibilidade.
+
 
 - `feat(device)`: manutenção administrativa por agente independente no host, diagnóstico/logs sob demanda, transporte autenticado e logos do cliente sem reinício.
 ### Fixed

@@ -135,6 +135,7 @@ class DeferredMedia:
             str(temporary),
             secondary_watermark_path=asset("client_watermark"),
             top_watermark_path=asset("top_watermark"),
+            watermark_layout=policy.get("watermark_layout"),
             margin=policy["margin"],
             opacity=policy["opacity"],
             rel_width=policy["relative_width"],

@@ -59,7 +59,12 @@ def operational_config_to_env(config: dict[str, Any]) -> dict[str, str]:
         for camera in config["cameras"]
     ]
 
+    layout_env = {}
+    if watermark.get('layout') is not None:
+        layout_env = {'GN_WATERMARK_LAYOUT_JSON': json.dumps(watermark['layout'], separators=(',', ':')),
+                      'GN_CLIENT_WATERMARK_ENABLED': _bool(watermark['layout']['clientEnabled'])}
     return {
+        **layout_env,
         "GN_CONFIG_VERSION": str(config.get("version", 1)),
         "GN_CONFIG_UPDATED_AT": str(config.get("updatedAt") or ""),
         "GN_SEG_TIME": str(capture["segmentSeconds"]),

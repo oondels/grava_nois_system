@@ -36,3 +36,6 @@ htmlcov/
 # Device-specific immutable client watermark revisions
 /files/client-versions/
 /files/client-watermarks.json
+
+# Shared, non-sensitive geometry contract fixture
+!tests/fixtures/watermark-geometry.json

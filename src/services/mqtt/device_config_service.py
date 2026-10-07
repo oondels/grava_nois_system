@@ -94,7 +94,7 @@ _ALLOWED_KEYS_BY_PATH: dict[tuple[str, ...], set[str]] = {
         "watermark",
     },
     ("processing", "additionalWindows", "*"): {"weekdays", "start", "end"},
-    ("processing", "watermark"): {"relativeWidth", "opacity", "margin"},
+    ("processing", "watermark"): {"relativeWidth", "opacity", "margin", "layout"},
     ("operationWindow",): {"timeZone", "start", "end"},
     ("mqtt",): {
         "enabled",
@@ -208,9 +208,9 @@ class DeviceConfigService:
         if not self._connect_listener_registered:
             self.mqtt_client.add_on_connect_listener(self._handle_mqtt_connect)
             self._connect_listener_registered = True
-        started = self.mqtt_client.subscribe(self.desired_topic, self._handle_message)
+        started = self.mqtt_client.subscribe(self.desired_topic, self._enqueue_message)
         if self.request_topic:
-            started = self.mqtt_client.subscribe(self.request_topic, self._handle_message) and started
+            started = self.mqtt_client.subscribe(self.request_topic, self._enqueue_message) and started
         if self.mqtt_client.is_connected:
             self._handle_mqtt_connect()
         return started
@@ -250,6 +250,20 @@ class DeviceConfigService:
             report.config_version,
         )
         return False
+
+    def _enqueue_message(self, topic, raw_payload):
+        # Bound outstanding work; MQTT network callback must never wait for downloads.
+        if not hasattr(self, '_message_queue'):
+            import queue
+            self._message_queue = queue.Queue(maxsize=16)
+            def consume():
+                while True:
+                    topic, raw = self._message_queue.get()
+                    try: self._handle_message(topic, raw)
+                    finally: self._message_queue.task_done()
+            threading.Thread(target=consume, daemon=True, name='remote-config').start()
+        try: self._message_queue.put_nowait((topic, raw_payload))
+        except Exception: mqtt_logger.warning('Config worker busy; sync required')
 
     def _handle_message(self, topic: str, raw_payload: bytes) -> None:
         payload: dict[str, Any]
@@ -361,6 +375,13 @@ class DeviceConfigService:
         restart_after_apply = bool(payload.get("restart_after_apply", False))
         if restart_after_apply and not requires_restart:
             raise RemoteConfigError("restart_after_apply sem configuração pendente de restart")
+
+        layout = desired_processing.get('watermark', {}).get('layout')
+        if current_processing.get('watermark', {}).get('layout') and not layout:
+            raise RemoteConfigError('watermark_layout_missing_from_desired')
+        if layout:
+            from src.services.watermark_catalog import prepare_assets
+            prepare_assets(layout, Path(__file__).resolve().parents[3] / 'files')
 
         previous_config = self.config_path.read_bytes() if self.config_path.exists() else None
         previous_state = self.state_path.read_bytes() if self.state_path.exists() else None
@@ -540,7 +561,17 @@ class DeviceConfigService:
             topic=self.request_topic,
             requestId=request_id,
         )
-        return self.publish_state_snapshot(request_id=request_id)
+        published = self.publish_state_snapshot(request_id=request_id)
+        try:
+            from src.services.watermark_catalog import sync_inventory
+            from src.config.settings import load_capture_configs
+            root = Path(__file__).resolve().parents[3]
+            cameras = load_capture_configs(root, get_effective_config().capture.segment_seconds)
+            sync_inventory(self._load_current_config(), Path(__file__).resolve().parents[3] / 'files',
+                           {c.camera_id: c.buffer_dir for c in cameras})
+        except Exception:
+            mqtt_logger.warning('Watermark inventory sync unavailable')
+        return published
 
     def publish_state_snapshot(self, *, request_id: str | None = None) -> bool:
         config_snapshot = _build_state_snapshot_config(self.config_path)
@@ -713,20 +744,20 @@ class _ReportResult:
 
 def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:
     effective_config_path = config_path or get_config_path()
-    _recover_config_transaction(effective_config_path)
     pending_path = effective_config_path.with_name("config.pending.json")
     state_path = effective_config_path.with_name("config.state.json")
     backup_path = effective_config_path.with_name("config.backup.json")
 
-    if not pending_path.exists():
-        return None
-
     try:
+        _recover_config_transaction(effective_config_path)
+        if not pending_path.exists():
+            return None
         pending_data = json.loads(pending_path.read_text(encoding="utf-8"))
         if not isinstance(pending_data, dict):
             raise RemoteConfigError("config.pending.json deve conter um objeto JSON")
 
         _validate_remote_config(pending_data)
+        _verify_staged_watermarks(pending_data)
 
         state: dict[str, Any] = {}
         if state_path.exists():
@@ -1103,6 +1134,7 @@ def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, A
             "lmCrf": config.processing.lm_crf,
             "lmPreset": config.processing.lm_preset,
             "watermark": {
+                **({"layout": config.processing.watermark.layout} if config.processing.watermark.layout is not None else {}),
                 "relativeWidth": config.processing.watermark.relative_width,
                 "opacity": config.processing.watermark.opacity,
                 "margin": config.processing.watermark.margin,
@@ -1157,6 +1189,13 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     atomic_json(path, data)
 
 
+def _verify_staged_watermarks(config):
+    layout = config.get('processing', {}).get('watermark', {}).get('layout')
+    if layout:
+        from src.services.watermark_catalog import verify_local_assets
+        verify_local_assets(layout, Path(__file__).resolve().parents[3] / 'files')
+
+
 def _recover_config_transaction(path: Path) -> None:
     journal = path.with_name("config.transaction.json")
     if not journal.exists():
@@ -1174,6 +1213,7 @@ def _recover_config_transaction(path: Path) -> None:
         return
     if data["config_version"] == current.get("version") and hash_config(current) != data["desired_hash"]:
         raise RemoteConfigError("config_transaction_hash_conflict")
+    _verify_staged_watermarks(desired)
     env_path = os.getenv("GN_HOST_ENV_PATH")
     if env_path:
         persist_operational_config(Path(env_path), desired)

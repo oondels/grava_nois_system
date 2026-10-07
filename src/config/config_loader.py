@@ -200,10 +200,22 @@ class TriggerConfig:
     gpio: GpioConfig = field(default_factory=GpioConfig)
 
 
+def _load_watermark_layout_env():
+    import json
+    raw = os.getenv("GN_WATERMARK_LAYOUT_JSON", "")
+    if not raw:
+        return None
+    from src.config.watermark_layout import validate_layout
+    data = validate_layout(json.loads(raw))
+    data['clientEnabled'] = _env_bool('GN_CLIENT_WATERMARK_ENABLED', data['clientEnabled'])
+    return data
+
+
 @dataclass
 class WatermarkConfig:
     """Parâmetros de watermark/branding."""
 
+    layout: Optional[dict] = None
     relative_width: float = 0.18
     opacity: float = 0.8
     margin: int = 24
@@ -493,6 +505,7 @@ def _build_from_env() -> OperationalConfig:
             lm_crf=max(0, min(51, _env_int("GN_LM_CRF", 26))),
             lm_preset=_env_str("GN_LM_PRESET", "veryfast") or "veryfast",
             watermark=WatermarkConfig(
+                layout=_load_watermark_layout_env(),
                 relative_width=max(0.01, _env_float("GN_WM_REL_WIDTH", 0.18)),
                 opacity=max(0.0, min(1.0, _env_float("GN_WM_OPACITY", 0.8))),
                 margin=max(0, _env_int("GN_WM_MARGIN", 24)),
@@ -657,6 +670,7 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
         lm_crf=max(0, min(51, _get(proc_d, "lmCrf", base.processing.lm_crf))),
         lm_preset=_get(proc_d, "lmPreset", base.processing.lm_preset) or "veryfast",
         watermark=WatermarkConfig(
+            layout=wm_d.get("layout", base.processing.watermark.layout),
             relative_width=max(
                 0.01, _get(wm_d, "relativeWidth", base.processing.watermark.relative_width)
             ),

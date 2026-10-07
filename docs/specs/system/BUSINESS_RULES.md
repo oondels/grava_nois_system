@@ -186,3 +186,7 @@ O edge aceita apenas `restart_container`, `reboot_host`, `pull_and_recreate` e `
 - o container não aceita imagem, tag, shell ou path arbitrário e não recebe o socket Docker;
 - a senha Wi-Fi é decifrada somente após validação do envelope e segue ao runner em arquivo transitório `0600`; a intent contém apenas SSID e referência segura;
 - o resultado do runner é observado após restart/reboot e publicado com HMAC, sem campos sensíveis.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

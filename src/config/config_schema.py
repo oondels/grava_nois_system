@@ -268,6 +268,13 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
             f"processing.lmPreset inválido: {lm_preset!r}. Válidos: {sorted(_VALID_PRESETS)}"
         )
 
+    layout = (processing.get("watermark") or {}).get("layout") if isinstance(processing.get("watermark"), dict) else None
+    if layout is not None:
+        try:
+            from src.config.watermark_layout import validate_layout
+            validate_layout(layout)
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            errors.append(str(error))
     wm = processing.get("watermark") or {}
     if not isinstance(wm, dict):
         errors.append("processing.watermark deve ser um objeto")

@@ -1,5 +1,7 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](docs/specs/system/WATERMARK_LAYOUT.md).
+
 Manutenção remota: [agente independente, diagnóstico e logos sem reinício](docs/specs/system/MAINTENANCE.md). Implementação preparada; ativação depende da implantação compatível e homologação no device.
 
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
