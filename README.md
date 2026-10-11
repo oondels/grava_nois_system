@@ -467,7 +467,9 @@ sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.js
 - Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
 - Para gerenciamento admin de `.env`, monte o diretório que contém o `.env` em `/usr/src/app/host_config:rw` e defina `GN_HOST_ENV_PATH=/usr/src/app/host_config/.env`. Se esse arquivo não existir no container, o edge responderá `env.reported` com `status=rejected`.
 
-**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`. A variável referenciada deve existir; do contrário, o startup falha informando somente o nome da câmera e da variável, sem expor seu conteúdo.
+**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"` ou `"rtspUrl": "env:GN_RTSP_URL"`. Se a variável estiver ausente/vazia ou a câmera gerenciada não tiver URL, somente essa câmera é ignorada neste boot, com aviso sem credenciais. As demais câmeras continuam; mesmo sem nenhuma, o runtime inicia MQTT e serviços administrativos quando configurados. Corrija a URL e reinicie/recrie a captura para carregar a câmera novamente. O array gerenciado continua autoritativo, sem fallback automático para fontes legadas.
+
+Sem `cameras` no JSON, permanecem as fontes legadas `GN_CAMERAS_JSON`, `GN_RTSP_URLS` e `GN_RTSP_URL`. JSON de câmeras malformado ou que não seja uma lista gera aviso e inicia sem câmeras. Entradas sem `rtsp_url` são ignoradas. Se nenhuma fonte RTSP estiver definida, permanece o fallback local V4L2, cuja tentativa de captura acontece em background e não bloqueia o MQTT. Este tratamento não modifica o conversor `env_to_config.sh` nem dispensa identidade e credenciais válidas para ficar online.
 
 ---
 

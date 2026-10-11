@@ -17,6 +17,7 @@ No startup, o serviço:
 
 - carrega env;
 - resolve câmeras ativas;
+- ignora câmeras gerenciadas sem URL RTSP resolvível com aviso sanitizado; JSON legado de câmeras inválido inicia sem câmeras, sem abortar a presença;
 - inicializa MQTT antes das câmeras, quando habilitado e com `DEVICE_ID` válido;
 - publica presença/heartbeat/state em modo degradado mesmo que nenhuma câmera suba;
 - limpa buffer local por câmera;
@@ -28,6 +29,8 @@ No startup, o serviço:
 - inicializa listeners de ENTER/GPIO/Pico.
 
 Falha de hardware de câmera, rede do broker ou API não deve ser condição bloqueante do runtime principal. O container deve permanecer vivo enquanto o processo Python estiver executando; saúde de câmera é reportada por payload MQTT e logs.
+
+Uma câmera ignorada por configuração ausente não aparece no snapshot de câmeras em execução. Corrija seu `.env`/configuração e reinicie/recrie a captura; não há retry de resolução de URL nesse boot. Presença online continua exigindo configuração MQTT, identidade e conectividade válidas.
 
 ## Shutdown behavior
 

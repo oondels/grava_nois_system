@@ -132,8 +132,20 @@ Duas opções:
 
 O campo `cameras` é autoritativo quando presente. Um array vazio ou composto apenas
 por entradas `enabled=false` desabilita todas as câmeras e nunca aciona fallback.
-Com captura habilitada, uma câmera RTSP com `env:VAR_NAME` ausente causa falha explícita no startup;
-a mensagem contém apenas câmera e nome da variável, nunca seu valor.
+Com captura habilitada, uma câmera RTSP sem URL ou com `env:VAR_NAME` não resolvível
+(inclusive variável ausente/vazia) é ignorada neste boot com aviso sanitizado. Não se
+registra o conteúdo da referência nem a exceção de resolução. As câmeras válidas
+continuam; as ignoradas não recebem worker/supervisor nem aparecem no snapshot de
+câmeras em execução. Mesmo com a lista efetiva vazia, o runtime inicia MQTT e serviços
+administrativos quando configurados. Não há fallback para fontes legadas nesse caso.
+Corrija a configuração e reinicie/recrie a captura para resolver novamente as URLs.
+
+No caminho legado, `GN_CAMERAS_JSON` malformado ou que não seja lista gera aviso e
+retorna nenhuma câmera, sem abortar o startup e sem expor o payload. Entradas sem
+`rtsp_url` são ignoradas; a precedência das demais fontes válidas permanece. Sem
+fontes RTSP, permanece o fallback V4L2 local, supervisionado em background. Isso
+não altera a geração de referências por `env_to_config.sh` nem os requisitos de
+identidade, autenticação e conectividade MQTT para presença online.
 
 ### Execução DEV sem câmera
 

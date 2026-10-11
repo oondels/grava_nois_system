@@ -50,6 +50,7 @@ Bootstrap em [`main.py`](../../../main.py):
 ### Resiliência de startup
 
 - Falha de câmera não aborta o processo; MQTT e Pico/LED iniciam antes das tentativas RTSP/FFmpeg.
+- A resolução ignora câmeras gerenciadas sem URL RTSP disponível; JSON legado de câmeras inválido produz lista vazia. O bootstrap mantém MQTT e administração ativos mesmo sem câmeras; uma nova resolução exige reiniciar/recriar a captura.
 - Supervisor monitora `proc.poll()` e reinicia FFmpeg com backoff (5s..300s).
 - Heartbeat MQTT protegido contra exceções no snapshot provider.
 - Trigger fan-out verifica disponibilidade da câmera antes de disparar.

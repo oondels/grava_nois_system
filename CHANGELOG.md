@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `fix(config)`: ausência de URL/variável RTSP ignora somente a câmera gerenciada afetada, preservando câmeras válidas, filas existentes e startup MQTT/admin; `GN_CAMERAS_JSON` inválido inicia sem câmeras. Inclui regressões de bootstrap sem hardware/rede e documentação de recuperação por reinício/recriação.
+
 - `docs(device)`: registra recuperação com captura parada como **implementada e validada no dispositivo piloto** em 2026-10-07, conforme confirmação do responsável pelos testes.
 - `docs(config)`: registra configuração com reinício como **implementada e validada no dispositivo piloto** em 2026-10-07; a falha observada foi resolvida atualizando os scripts em `/opt/.grn/bin`.
 - `docs(device)`: registra atualização remota de logos/imagens de watermark e ajuste de disposição (posicionamento e dimensionamento pelo layout da câmera) como **implementados e validados no dispositivo piloto** em 2026-10-07.

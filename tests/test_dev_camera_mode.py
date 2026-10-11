@@ -79,12 +79,14 @@ class DevCameraModeTests(unittest.TestCase):
             with self.subTest(cameras=cameras):
                 self.assertEqual([], self.load({"cameras": cameras}, DEV_USE_CAMERA="true"))
 
-    def test_enabled_still_validates_rtsp_credentials(self):
-        with self.assertRaisesRegex(ValueError, "MISSING_CAMERA_URL"):
+    def test_enabled_skips_camera_with_missing_rtsp_credentials(self):
+        self.assertEqual(
+            [],
             self.load(
                 {"cameras": [{"id": "managed", "rtspUrl": "env:MISSING_CAMERA_URL"}]},
                 DEV_USE_CAMERA="true",
-            )
+            ),
+        )
 
     def test_bootstrap_keeps_mqtt_without_starting_camera_or_touching_pending_clip(self):
         self.config_path.write_text(
