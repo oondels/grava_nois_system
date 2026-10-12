@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- `fix(config)`: ausência de URL/variável RTSP ignora somente a câmera gerenciada afetada, preservando câmeras válidas, filas existentes e startup MQTT/admin; `GN_CAMERAS_JSON` inválido inicia sem câmeras. Inclui regressões de bootstrap sem hardware/rede e documentação de recuperação por reinício/recriação.
+- `fix(config)`: câmera gerenciada sem `rtspUrl` ou com referência de ambiente ausente/vazia, como `GN_RTSP_URL` ou `GN_CAM01_RTSP_URL`, passa a ser ignorada neste boot com aviso sem credenciais, em vez de abortar a inicialização. Câmeras válidas continuam funcionando e clipes pendentes são preservados.
+- `fix(config)`: `GN_CAMERAS_JSON` malformado ou que não seja uma lista permite iniciar sem câmeras; entradas sem `rtsp_url` são ignoradas. A lista `cameras` gerenciada continua autoritativa; sem lista gerenciada e sem fontes RTSP, permanece o fallback V4L2 em background.
+- `fix(device)`: ausência de configuração RTSP não impede o início do MQTT e dos serviços administrativos, inclusive com zero câmeras ativas. Presença online continua exigindo identidade, configuração MQTT e conectividade válidas.
+- `docs(config)`: documenta que câmeras ignoradas não aparecem no snapshot de câmeras em execução e exigem reinício/recriação da captura após corrigir o `.env`/configuração; o conversor `env_to_config.sh` permanece inalterado.
+- `test(config)`: adiciona regressões de bootstrap sem hardware/rede para URLs ausentes, câmeras parcialmente configuradas, JSON inválido, preservação de clipes pendentes e inicialização dos serviços MQTT/admin. Validação do patch: 27 testes direcionados aprovados; suíte completa com 477 aprovados, um ignorado e seis falhas preexistentes reproduzidas no HEAD anterior.
 
 - `docs(device)`: registra recuperação com captura parada como **implementada e validada no dispositivo piloto** em 2026-10-07, conforme confirmação do responsável pelos testes.
 - `docs(config)`: registra configuração com reinício como **implementada e validada no dispositivo piloto** em 2026-10-07; a falha observada foi resolvida atualizando os scripts em `/opt/.grn/bin`.
