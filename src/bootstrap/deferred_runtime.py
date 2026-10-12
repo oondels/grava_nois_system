@@ -28,6 +28,7 @@ from src.infrastructure.http.deferred_gateway import DeferredVideoGateway
 from src.infrastructure.media.deferred_media import DeferredMedia
 from src.services.mqtt.operational_event_service import OperationalEventService
 from src.services.storage_monitor import StorageMonitor
+from src.services.storage_retention import prune_finalized_jobs
 from src.utils.logger import logger
 
 
@@ -105,6 +106,8 @@ class DeferredRuntime:
         self.identity = identity
         self.dev_mode = dev_mode
         self.watermarks = (watermark, client_watermark, top_watermark)
+        from src.video.watermark_assets import WatermarkAssets
+        self.watermark_assets = WatermarkAssets(watermark.parent, client_watermark, top_watermark)
         self.root = self.base / "queue_raw" / ".deferred"
         require_persistent_storage(self.root)
         require_persistent_storage(self.base / "runtime_config" / "operational")
@@ -168,10 +171,18 @@ class DeferredRuntime:
         self._threads = []
         self._snapshot = {}
 
-    def policy(self):
+    def policy(self, camera_id=None):
+        client_logo, top_logo = self.watermark_assets.resolve()
         cfg = get_effective_config()
         p = cfg.processing
+        primary = str(self.watermarks[0])
+        layout = None
+        if p.watermark.layout:
+            from src.services.watermark_catalog import snapshot_layout
+            layout, paths = snapshot_layout(p.watermark.layout, camera_id, self.watermarks[0].parent)
+            primary, client_logo, top_logo = (paths[k] for k in ('institutional', 'clientBottom', 'clientTop'))
         return {
+            **({'watermark_layout': layout} if layout else {}),
             "crf": p.lm_crf if p.light_mode else p.hq_crf,
             "preset": p.lm_preset if p.light_mode else p.hq_preset,
             "vertical_format": p.vertical_format,
@@ -180,9 +191,9 @@ class DeferredRuntime:
             "opacity": p.watermark.opacity,
             "relative_width": p.watermark.relative_width,
             "max_attempts": p.max_attempts,
-            "watermark": str(self.watermarks[0]),
-            "client_watermark": str(self.watermarks[1]) if self.watermarks[1] else None,
-            "top_watermark": str(self.watermarks[2]) if self.watermarks[2] else None,
+            "watermark": primary,
+            "client_watermark": str(client_logo) if client_logo else None,
+            "top_watermark": str(top_logo) if top_logo else None,
             "config_version": cfg.config_version,
             "schedule_required": p.deferred_enabled,
             "dev": self.dev_mode,
@@ -240,7 +251,7 @@ class DeferredRuntime:
             captured_at=captured_at,
             triggered_mono=triggered_mono,
             identity=self.identity,
-            policy=self.policy(),
+            policy=self.policy(cfg.camera_id),
         )
 
     def start(self):
@@ -283,6 +294,15 @@ class DeferredRuntime:
 
     def _monitor(self):
         self._import_legacy()
+        removed, bytes_removed = prune_finalized_jobs(
+            self.jobs, (self.base / "queue_raw", self.base / "failed_clips")
+        )
+        if removed:
+            logger.info(
+                "Retencao: %s manifestos finalizados removidos (%s bytes)",
+                removed,
+                bytes_removed,
+            )
         jobs = self.jobs.all()
         counts = {}
         active = []
@@ -423,7 +443,7 @@ class DeferredRuntime:
                     state = ClipJobState.FAILED
                 if status == "upload_pending" and not processed:
                     raise ValueError("legacy artifact stage ambiguous")
-                policy = self.policy()
+                policy = self.policy(self._legacy_camera_id(meta, source))
                 policy["schedule_required"] = get_effective_config().processing.deferred_enabled
                 job = ClipJob(
                     job_id,

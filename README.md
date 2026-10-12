@@ -1,5 +1,12 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+Reinício/recriação de devices: contrato e atualização em [docs/specs/system/CONFIGURATION.md](docs/specs/system/CONFIGURATION.md). Implantar API compatível antes do novo edge; scripts do host são atualizados separadamente.
+
+
+Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](docs/specs/system/WATERMARK_LAYOUT.md).
+
+Manutenção remota: [agente independente, diagnóstico e logos sem reinício](docs/specs/system/MAINTENANCE.md). Implementação concluída e validação funcional no dispositivo piloto confirmada em 2026-10-07: recuperação com captura parada, configuração com reinício, atualização remota de logos/layout por câmera e coleta de diagnósticos/logs. A implantação requer versões compatíveis, incluindo os scripts instalados em `/opt/.grn/bin`.
+
 > **Objetivo:** Capturar replays com pré/pós-buffer, gerar highlights, aplicar crop vertical opcional e marca d'água local, e fazer upload automático para backend via URL assinada. Otimizado para rodar em Raspberry Pi.
 >
 > **Regra de operação:** O sistema respeita janela de horário comercial configurável no trigger local e, no pipeline legado, descarta clipes rejeitados pela API por restrição de horário. O pipeline diferido v3 preserva essas pendências em `BLOCKED`.
@@ -19,9 +26,13 @@
 
 A fila v3 vive em `queue_raw/.deferred`, recupera checkpoints e importa clipes antigos sem perder originais. Upload/finalização são independentes da agenda; alerta de armazenamento abre abaixo de **4.000.000.000 bytes**. MQTT de configuração é estendido; eventos/estado usam outbox e aguardam ACK de persistência do backend. A funcionalidade **não está liberada em produção**: API/app já implementam os contratos; faltam concluir a homologação integrada e a qualificação no hardware mínimo. `DEV=true` continua sem upload e não é controle de ativação. Rental não é alterado.
 
+O monitor remove após 30 dias apenas metadados de trabalhos v3 `FINALIZED` já limpos; `FAILED`, `BLOCKED`, `DEV_PRESERVED`, arquivos desconhecidos e mídia ainda pendente são preservados. Backups remotos do `.env` são privados e limitados às cinco cópias mais recentes, com idade máxima de 30 dias.
+
 Contrato, estados, migração, limites, testes e rollback: [processamento diferido](docs/specs/system/DEFERRED_PROCESSING.md). Desligar a flag nesta versão mantém recuperação de v3; versão antiga não entende esses manifestos.
 
 Controle administrativo v2, compatibilidade, ACK de comandos, recuperação e testes: [contrato de confiabilidade](docs/specs/system/DEVICE_RELIABILITY.md). O Compose local usa `host_config/.env` dedicado e a saúde do loop real (`python -m src.cli.healthcheck`, `--ready` inclui câmeras). O `.env` remoto exige sync autenticado v2; comandos exigem o runner com IPC v2. Aceite de uma solicitação não confirma reinício do serviço.
+
+Aplicacao de `.env` e configuracao admin: o arquivo salvo nao recarrega um processo existente. `applied_requires_restart` confirma escrita, e `restartStatus=queued` confirma somente o pedido duravel ao host. No device provisionado, o runner converte o `.env` para `config.json` e recria o container; no notebook com `main.py` direto, encerre e inicie o processo novamente, regenerando antes o JSON operacional quando necessario. A API/frontend confirmam um novo processo pela presenca MQTT com outro `boot_id`, nao pelo alerta da aba `.env`. Veja o [roteiro operacional do host](https://github.com/oondels/grava_nois_config/blob/main/README.md#aplicar-alteracoes-de-ambiente-e-configuracao-admin) e a [spec de configuracao](docs/specs/system/CONFIGURATION.md#gerenciamento-remoto-de-env-via-admin).
 
 Lookup principal para auditoria e navegação técnica: [`docs/specs/DESIGN_SPEC.md`](docs/specs/DESIGN_SPEC.md).
 
@@ -292,6 +303,7 @@ O `ProcessingWorker` varre a fila periodicamente:
 
 - **Retry automático:** Até 3 tentativas com backoff
 - **Pasta de falhas:** Vídeos que falharam vão para `failed_clips/upload_failed/`
+- **Retenção local:** o worker remove após 30 dias apenas clipes legados com falha terminal comprovada. Itens em retry, sidecars ambíguos e originais importados pela fila diferida permanecem para recuperação. O comando manual `retry_upload.py` remove vídeo e JSON somente depois de registrar uma finalização confirmada pela API; upload anterior com finalização incerta exige reconciliação manual e não é reenviado automaticamente.
 - **Reprocessamento:** Sistema tenta reprocessar falhas periodicamente
 - **Diagnóstico seguro:** O retry registra a resposta do backend no sidecar sanitizando `upload_url`/URLs assinadas antes de persistir metadados locais.
 - **Exceção de horário comercial:** Se a API rejeitar o registro com `HTTP 403` por janela de horário (`request_outside_allowed_time_window`), o worker exclui o vídeo e sidecar local imediatamente (sem retry e sem enviar para `failed_clips`)
@@ -455,7 +467,9 @@ sudo ./env_to_config.sh /opt/.grn/config/.env /opt/.grn/config/runtime/config.js
 - Em Docker provisionado, monte o diretorio runtime de config como volume gravavel e use `GN_CONFIG_PATH=/usr/src/app/runtime_config/config.json`; mantenha o `.env` separado e somente leitura.
 - Para gerenciamento admin de `.env`, monte o diretório que contém o `.env` em `/usr/src/app/host_config:rw` e defina `GN_HOST_ENV_PATH=/usr/src/app/host_config/.env`. Se esse arquivo não existir no container, o edge responderá `env.reported` com `status=rejected`.
 
-**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"`. A variável referenciada deve existir; do contrário, o startup falha informando somente o nome da câmera e da variável, sem expor seu conteúdo.
+**Nunca coloque em `config.json`:** senhas, tokens, `DEVICE_SECRET`, URLs RTSP com `user:pass@`. Para câmeras com credenciais use `"rtspUrl": "env:GN_CAM01_RTSP_URL"` ou `"rtspUrl": "env:GN_RTSP_URL"`. Se a variável estiver ausente/vazia ou a câmera gerenciada não tiver URL, somente essa câmera é ignorada neste boot, com aviso sem credenciais. As demais câmeras continuam; mesmo sem nenhuma, o runtime inicia MQTT e serviços administrativos quando configurados. Corrija a URL e reinicie/recrie a captura para carregar a câmera novamente. O array gerenciado continua autoritativo, sem fallback automático para fontes legadas.
+
+Sem `cameras` no JSON, permanecem as fontes legadas `GN_CAMERAS_JSON`, `GN_RTSP_URLS` e `GN_RTSP_URL`. JSON de câmeras malformado ou que não seja uma lista gera aviso e inicia sem câmeras. Entradas sem `rtsp_url` são ignoradas. Se nenhuma fonte RTSP estiver definida, permanece o fallback local V4L2, cuja tentativa de captura acontece em background e não bloqueia o MQTT. Este tratamento não modifica o conversor `env_to_config.sh` nem dispensa identidade e credenciais válidas para ficar online.
 
 ---
 
@@ -600,6 +614,8 @@ GN_DOCKER_ACTION_REQUEST_PATH=/usr/src/app/runtime_config/docker-action.request.
 O edge **não executa Docker e não monta `/var/run/docker.sock`**. Ele grava intents duráveis por UUID em `device-actions/requests/`, ao lado do caminho legado configurado acima. O `grava_nois_config` instala `grn-docker-action.path`/`grn-docker-action.service` no host. Antes de `RESTART_DOCKER` e `PULL_DOCKER`, o runner regenera atomicamente `config.json` a partir do `.env` e aborta se a conversao falhar. Depois disso, restart recria sem baixar imagem e pull baixa e recria. `SHUTDOWN_HOST` para o compose por até 30 segundos antes de solicitar `systemctl poweroff` e fica desabilitado por padrão.
 
 Configurações operacionais recebidas por `config.desired` são persistidas no `config.json`/pending e nos campos equivalentes do `.env` gerenciado antes do report de sucesso. Assim, o próximo pull/restart reconstrói o JSON sem perder a alteração. Segredos, identidade e variáveis sem equivalente operacional são preservados.
+
+`RESTART_DOCKER` do Pico V1/V2 usa o mesmo runner e, portanto, tambem aplica o `.env` atualizado. O feedback inicial do Pico confirma recebimento do token, nao a conclusao do recreate; confirme o resultado do host e um novo `boot_id` na auditoria admin. O comando nao reinicia `main.py` executado diretamente sem o runner.
 
 Observações:
 - O sistema tenta detectar automaticamente a porta do Pico nesta ordem:
@@ -952,7 +968,7 @@ Evento assinado publicado quando um trigger é rejeitado por falta de câmera/bu
 }
 ```
 
-Se MQTT estiver indisponível, o evento é salvo em `runtime_config/capture_event_outbox/` e reenviado quando o heartbeat conseguir reconectar.
+Se MQTT estiver indisponível, o evento é salvo em `runtime_config/capture_event_outbox/` e reenviado quando o heartbeat conseguir reconectar. O outbox é limitado a 64 MiB, com 8 MiB reservados a eventos de erro; ao saturar, registra `suppressed` e `saturated` no arquivo `status` da mesma pasta e emite erro local.
 
 #### `grn/devices/{device_id}/events`
 

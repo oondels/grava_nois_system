@@ -259,6 +259,8 @@ class CommandDispatcher:
 
     def _copy_host_result(self, result_path: Path) -> None:
         result = self._object(result_path)
+        if result.get("source") == "maintenance":
+            return
         request_id = result.get("request_id")
         if (
             not self._uuid(request_id)

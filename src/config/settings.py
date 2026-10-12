@@ -169,6 +169,8 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
 
     URLs RTSP com credenciais devem usar 'env:VAR_NAME' em config.json ou
     permanecer exclusivamente em GN_CAMERAS_JSON / GN_RTSP_URL no env.
+    Câmeras gerenciadas sem URL resolvível são ignoradas neste boot, sem
+    fallback para outra fonte e sem impedir a inicialização do MQTT.
     """
     if _env_bool("DEV") and not _env_bool("DEV_USE_CAMERA", True):
         logger.info("Câmeras desativadas em modo DEV (DEV_USE_CAMERA=false)")
@@ -275,14 +277,22 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
 
             try:
                 rtsp_url = cam.resolve_rtsp_url()
-            except ValueError as exc:
-                raise ValueError(
-                    f"camera gerenciada {cam.id!r} possui rtspUrl invalida: {exc}"
-                ) from exc
-            if not rtsp_url:
-                raise ValueError(
-                    f"camera gerenciada {cam.id!r} exige rtspUrl ou referencia env:VAR_NAME"
+            except ValueError:
+                # Não incluir a referência ou a exceção: configuração inválida
+                # também pode conter credenciais onde se esperava um nome de env.
+                logger.warning(
+                    "Câmera %s ignorada neste boot: referência RTSP não resolvida; "
+                    "corrija a configuração e reinicie a captura",
+                    cam.id,
                 )
+                continue
+            if not rtsp_url:
+                logger.warning(
+                    "Câmera %s ignorada neste boot: URL RTSP ausente; "
+                    "corrija a configuração e reinicie a captura",
+                    cam.id,
+                )
+                continue
             configs.append(
                 _build_rtsp_cfg(
                     camera_id=cam.id,
@@ -311,15 +321,26 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
         post_seg_cfg = None  # type: ignore[assignment]
 
     if cameras_json:
-        parsed = json.loads(cameras_json)
+        try:
+            parsed = json.loads(cameras_json)
+        except json.JSONDecodeError:
+            logger.warning(
+                "GN_CAMERAS_JSON inválido: serviço iniciará sem câmeras; "
+                "corrija o JSON e reinicie a captura"
+            )
+            return []
         if not isinstance(parsed, list):
-            raise ValueError("GN_CAMERAS_JSON deve ser uma lista JSON")
+            logger.warning(
+                "GN_CAMERAS_JSON deve ser uma lista JSON; serviço iniciará sem câmeras"
+            )
+            return []
         enabled_env = [c for c in parsed if isinstance(c, dict) and c.get("enabled", True)]
         configs = []
         use_isolated_dirs = len(enabled_env) > 1
         for idx, camera in enumerate(enabled_env, start=1):
             rtsp_url = str(camera.get("rtsp_url") or "").strip()
             if not rtsp_url:
+                logger.warning("Entrada %s de GN_CAMERAS_JSON ignorada: URL RTSP ausente", idx)
                 continue
             camera_id = str(camera.get("id") or f"cam{idx:02d}").strip() or f"cam{idx:02d}"
             camera_name = camera.get("name")

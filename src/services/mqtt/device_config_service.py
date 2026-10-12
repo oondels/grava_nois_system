@@ -11,12 +11,20 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid5, NAMESPACE_URL
 
-from src.config.config_loader import configuration_transaction, get_config_path, get_effective_config, reset_config_cache
+from src.config.config_loader import (
+    configuration_transaction,
+    get_config_path,
+    get_effective_config,
+    reset_config_cache,
+)
 from src.config.config_schema import validate_config_dict
+from src.config.env_backup_retention import prune_env_backups
 from src.config.operational_env import persist_operational_config, restore_env_content
 from src.security.hmac import hmac_sha256_base64
 from src.services.docker_action_request import DockerActionRequestService
+from src.services.config_restart import ConfigRestart
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
 from src.utils.logger import setup_logger
 
@@ -88,7 +96,7 @@ _ALLOWED_KEYS_BY_PATH: dict[tuple[str, ...], set[str]] = {
         "watermark",
     },
     ("processing", "additionalWindows", "*"): {"weekdays", "start", "end"},
-    ("processing", "watermark"): {"relativeWidth", "opacity", "margin"},
+    ("processing", "watermark"): {"relativeWidth", "opacity", "margin", "layout"},
     ("operationWindow",): {"timeZone", "start", "end"},
     ("mqtt",): {
         "enabled",
@@ -194,22 +202,73 @@ class DeviceConfigService:
         self._connect_listener_registered = False
         self._pending_startup_report: _ReportResult | None = None
         self._apply_lock = threading.RLock()
+        self._restart_stop = threading.Event()
+        self._restart_thread = None
 
     def start(self) -> bool:
+        self._prune_env_backups()
         if not self.mqtt_client.is_enabled:
             return False
         if not self._connect_listener_registered:
             self.mqtt_client.add_on_connect_listener(self._handle_mqtt_connect)
             self._connect_listener_registered = True
-        started = self.mqtt_client.subscribe(self.desired_topic, self._handle_message)
+        started = self.mqtt_client.subscribe(self.desired_topic, self._enqueue_message)
         if self.request_topic:
-            started = self.mqtt_client.subscribe(self.request_topic, self._handle_message) and started
+            started = self.mqtt_client.subscribe(self.request_topic, self._enqueue_message) and started
         if self.mqtt_client.is_connected:
             self._handle_mqtt_connect()
+        if self._restart_thread is None:
+            self._restart_stop.clear()
+            self._restart_thread = threading.Thread(target=self._monitor_restart, daemon=True, name='config-restart')
+            self._restart_thread.start()
         return started
 
     def stop(self) -> None:
-        return None
+        self._restart_stop.set()
+
+    def _restart_coordinator(self):
+        coordinator = ConfigRestart(self.config_path.with_name('config.restart.json'),
+                                    DockerActionRequestService.from_env(logger=mqtt_logger))
+        current = self._load_current_config()
+        coordinator.confirm_applied(current.get('version'), hash_config(current))
+        return coordinator
+
+    def _monitor_restart(self):
+        last_report = None
+        while not self._restart_stop.wait(5):
+            try:
+                with self._apply_lock:
+                    coordinator = self._restart_coordinator()
+                    record = coordinator.load()
+                    if not record:
+                        continue
+                    # Startup promotion confirms application; do not admit an obsolete intent.
+                    if not self.pending_path.exists():
+                        continue
+                    record = coordinator.reconcile(record)
+                    report = _ReportResult(**record['report'])
+                    report.restart = record['restart']
+                    fingerprint = json.dumps(record, sort_keys=True)
+                    if fingerprint != last_report and self.publish_report(report):
+                        last_report = fingerprint
+            except Exception:
+                mqtt_logger.warning('Config restart reconciliation pending')
+
+    def _prune_env_backups(self) -> None:
+        if self.env_path is None:
+            return
+        try:
+            if self.config_path.with_name("config.transaction.json").exists():
+                return
+            removed, bytes_removed = prune_env_backups(self.env_path)
+            if removed:
+                mqtt_logger.info(
+                    "Env backup retention removed %s files (%s bytes)",
+                    removed,
+                    bytes_removed,
+                )
+        except OSError:
+            mqtt_logger.warning("Env backup retention pending")
 
     def queue_startup_report(self, report: "_ReportResult" | None) -> bool:
         if report is None:
@@ -228,6 +287,20 @@ class DeviceConfigService:
         )
         return False
 
+    def _enqueue_message(self, topic, raw_payload):
+        # Bound outstanding work; MQTT network callback must never wait for downloads.
+        if not hasattr(self, '_message_queue'):
+            import queue
+            self._message_queue = queue.Queue(maxsize=16)
+            def consume():
+                while True:
+                    topic, raw = self._message_queue.get()
+                    try: self._handle_message(topic, raw)
+                    finally: self._message_queue.task_done()
+            threading.Thread(target=consume, daemon=True, name='remote-config').start()
+        try: self._message_queue.put_nowait((topic, raw_payload))
+        except Exception: mqtt_logger.warning('Config worker busy; sync required')
+
     def _handle_message(self, topic: str, raw_payload: bytes) -> None:
         payload: dict[str, Any]
         try:
@@ -245,9 +318,19 @@ class DeviceConfigService:
             )
             if topic == self.desired_topic:
                 result = self.process_desired_config(payload)
-                published = self.publish_report(result)
-                if published and result.restart_after_apply:
-                    self._schedule_restart()
+                if result.restart_after_apply:
+                    try:
+                        with self._apply_lock:
+                            record = self._restart_coordinator().request(payload, {
+                                key: value for key, value in vars(result).items() if key != 'restart'
+                            })
+                            result.restart = record['restart']
+                    except Exception:
+                        # Configuration remains valid even when restart admission cannot be proven.
+                        result.restart = dict(request_id=str(uuid5(NAMESPACE_URL, f'{self.device_id}:{result.correlation_id}:{result.config_version}')),
+                                              status='unknown', stage='admission', error_code='restart_admission_uncertain')
+                        mqtt_logger.warning('Config restart admission requires reconciliation')
+                self.publish_report(result)
                 return
             if self.request_topic and topic == self.request_topic:
                 self.process_config_request(payload)
@@ -320,7 +403,8 @@ class DeviceConfigService:
                 config_version=known, correlation_id=correlation_id, requires_restart=pending,
                 reported_hash=desired_hash, reported_config=None if pending else actual,
                 rejection_reason=None, last_applied_version=state.get("lastAppliedVersion"),
-                pending_version=known if pending else None)
+                pending_version=known if pending else None,
+                restart_after_apply=pending and bool(payload.get("restart_after_apply", False)))
         desired_processing = desired_config.get("processing", {})
         if desired_processing.get("deferredEnabled") and self.venue_id is None:
             raise RemoteConfigError("deferred_processing_requires_fixed_device")
@@ -338,6 +422,13 @@ class DeviceConfigService:
         restart_after_apply = bool(payload.get("restart_after_apply", False))
         if restart_after_apply and not requires_restart:
             raise RemoteConfigError("restart_after_apply sem configuração pendente de restart")
+
+        layout = desired_processing.get('watermark', {}).get('layout')
+        if current_processing.get('watermark', {}).get('layout') and not layout:
+            raise RemoteConfigError('watermark_layout_missing_from_desired')
+        if layout:
+            from src.services.watermark_catalog import prepare_assets
+            prepare_assets(layout, Path(__file__).resolve().parents[3] / 'files')
 
         previous_config = self.config_path.read_bytes() if self.config_path.exists() else None
         previous_state = self.state_path.read_bytes() if self.state_path.exists() else None
@@ -377,6 +468,7 @@ class DeviceConfigService:
                     }
                 )
                 journal.unlink(missing_ok=True)
+                self._prune_env_backups()
                 return _ReportResult(
                     status="pending_restart",
                     config_version=config_version,
@@ -419,6 +511,7 @@ class DeviceConfigService:
             journal.unlink(missing_ok=True)
             raise
         journal.unlink(missing_ok=True)
+        self._prune_env_backups()
         _audit_log(
             "config_applied_immediately",
             deviceId=self.device_id,
@@ -438,18 +531,6 @@ class DeviceConfigService:
             last_applied_version=config_version,
         )
 
-    def _schedule_restart(self) -> None:
-        def request_restart() -> None:
-            requested = DockerActionRequestService.from_env(logger=mqtt_logger).request_action(
-                "restart_container",
-                source="remote_config",
-                fallback_on_failure=True,
-            )
-            if not requested:
-                mqtt_logger.warning("Runner Docker indisponível para aplicar configuração")
-
-        threading.Timer(3.0, request_restart).start()
-
     def publish_report(self, result: "_ReportResult") -> bool:
         payload: dict[str, Any] = {
             "type": "config.reported",
@@ -466,6 +547,8 @@ class DeviceConfigService:
             "rejection_reason": _sanitize_reason(result.rejection_reason),
             "agent_version": self.agent_version,
         }
+        if result.restart is not None:
+            payload["restart"] = result.restart
         if result.reported_config is not None:
             payload["reported_config"] = result.reported_config
         if result.last_applied_version is not None:
@@ -515,7 +598,17 @@ class DeviceConfigService:
             topic=self.request_topic,
             requestId=request_id,
         )
-        return self.publish_state_snapshot(request_id=request_id)
+        published = self.publish_state_snapshot(request_id=request_id)
+        try:
+            from src.services.watermark_catalog import sync_inventory
+            from src.config.settings import load_capture_configs
+            root = Path(__file__).resolve().parents[3]
+            cameras = load_capture_configs(root, get_effective_config().capture.segment_seconds)
+            sync_inventory(self._load_current_config(), Path(__file__).resolve().parents[3] / 'files',
+                           {c.camera_id: c.buffer_dir for c in cameras})
+        except Exception:
+            mqtt_logger.warning('Watermark inventory sync unavailable')
+        return published
 
     def publish_state_snapshot(self, *, request_id: str | None = None) -> bool:
         config_snapshot = _build_state_snapshot_config(self.config_path)
@@ -684,24 +777,25 @@ class _ReportResult:
         self.last_applied_version = last_applied_version
         self.pending_version = pending_version
         self.restart_after_apply = restart_after_apply
+        self.restart = None
 
 
 def apply_pending_config_on_startup(config_path: Path | None = None) -> _ReportResult | None:
     effective_config_path = config_path or get_config_path()
-    _recover_config_transaction(effective_config_path)
     pending_path = effective_config_path.with_name("config.pending.json")
     state_path = effective_config_path.with_name("config.state.json")
     backup_path = effective_config_path.with_name("config.backup.json")
 
-    if not pending_path.exists():
-        return None
-
     try:
+        _recover_config_transaction(effective_config_path)
+        if not pending_path.exists():
+            return None
         pending_data = json.loads(pending_path.read_text(encoding="utf-8"))
         if not isinstance(pending_data, dict):
             raise RemoteConfigError("config.pending.json deve conter um objeto JSON")
 
         _validate_remote_config(pending_data)
+        _verify_staged_watermarks(pending_data)
 
         state: dict[str, Any] = {}
         if state_path.exists():
@@ -829,7 +923,7 @@ def _canonical_signature_payload(payload: dict[str, Any], desired_hash: str) -> 
 
 def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:
     config_version = payload.get("config_version")
-    return ":".join(
+    canonical = ":".join(
         [
             "v1",
             "CONFIG_REPORTED",
@@ -841,6 +935,11 @@ def _canonical_report_signature_payload(payload: dict[str, Any]) -> str:
             str(payload.get("reported_hash") or ""),
         ]
     )
+
+    if "restart" in payload:
+        restart = payload["restart"]
+        canonical += ":restart:" + ":".join(str(restart.get(key) or "") for key in ("request_id", "status", "stage", "error_code"))
+    return canonical
 
 
 def _canonical_request_signature_payload(payload: dict[str, Any]) -> str:
@@ -1078,6 +1177,7 @@ def _build_state_snapshot_config(config_path: Path | None = None) -> dict[str, A
             "lmCrf": config.processing.lm_crf,
             "lmPreset": config.processing.lm_preset,
             "watermark": {
+                **({"layout": config.processing.watermark.layout} if config.processing.watermark.layout is not None else {}),
                 "relativeWidth": config.processing.watermark.relative_width,
                 "opacity": config.processing.watermark.opacity,
                 "margin": config.processing.watermark.margin,
@@ -1132,6 +1232,13 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     atomic_json(path, data)
 
 
+def _verify_staged_watermarks(config):
+    layout = config.get('processing', {}).get('watermark', {}).get('layout')
+    if layout:
+        from src.services.watermark_catalog import verify_local_assets
+        verify_local_assets(layout, Path(__file__).resolve().parents[3] / 'files')
+
+
 def _recover_config_transaction(path: Path) -> None:
     journal = path.with_name("config.transaction.json")
     if not journal.exists():
@@ -1149,6 +1256,7 @@ def _recover_config_transaction(path: Path) -> None:
         return
     if data["config_version"] == current.get("version") and hash_config(current) != data["desired_hash"]:
         raise RemoteConfigError("config_transaction_hash_conflict")
+    _verify_staged_watermarks(desired)
     env_path = os.getenv("GN_HOST_ENV_PATH")
     if env_path:
         persist_operational_config(Path(env_path), desired)

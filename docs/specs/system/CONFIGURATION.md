@@ -132,8 +132,20 @@ Duas opções:
 
 O campo `cameras` é autoritativo quando presente. Um array vazio ou composto apenas
 por entradas `enabled=false` desabilita todas as câmeras e nunca aciona fallback.
-Com captura habilitada, uma câmera RTSP com `env:VAR_NAME` ausente causa falha explícita no startup;
-a mensagem contém apenas câmera e nome da variável, nunca seu valor.
+Com captura habilitada, uma câmera RTSP sem URL ou com `env:VAR_NAME` não resolvível
+(inclusive variável ausente/vazia) é ignorada neste boot com aviso sanitizado. Não se
+registra o conteúdo da referência nem a exceção de resolução. As câmeras válidas
+continuam; as ignoradas não recebem worker/supervisor nem aparecem no snapshot de
+câmeras em execução. Mesmo com a lista efetiva vazia, o runtime inicia MQTT e serviços
+administrativos quando configurados. Não há fallback para fontes legadas nesse caso.
+Corrija a configuração e reinicie/recrie a captura para resolver novamente as URLs.
+
+No caminho legado, `GN_CAMERAS_JSON` malformado ou que não seja lista gera aviso e
+retorna nenhuma câmera, sem abortar o startup e sem expor o payload. Entradas sem
+`rtsp_url` são ignoradas; a precedência das demais fontes válidas permanece. Sem
+fontes RTSP, permanece o fallback V4L2 local, supervisionado em background. Isso
+não altera a geração de referências por `env_to_config.sh` nem os requisitos de
+identidade, autenticação e conectividade MQTT para presença online.
 
 ### Execução DEV sem câmera
 
@@ -174,13 +186,17 @@ O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env`
 - `env/desired`: backend envia o novo conteúdo criptografado;
 - `env/reported`: edge responde snapshot, aplicação ou rejeição.
 
-O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<timestamp>` antes de aplicar alterações e publica `rejected` quando o arquivo não existe ou a assinatura falha.
+O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<request_id>` antes de alterar o conteúdo e publica `rejected` quando o arquivo não existe ou a assinatura falha. Uma gravação sem mudança não cria backup.
 
 Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. Antes do recreate, o runner executa o conversor persistente e regenera atomicamente `config.json` a partir do `.env`; falha na conversao interrompe a acao. Identidade e segredos permanecem somente no `.env`.
 
-O `config.desired` operacional aceito é convertido para as variáveis equivalentes e gravado atomicamente no `.env` gerenciado antes do report MQTT. A escrita preserva identidade, segredos e campos não gerenciados, cria backup `0600` e faz rollback se a promoção do JSON falhar. Assim, `.env` e JSON permanecem reconciliados durante `restart_container` e `pull_and_recreate`.
+O `config.desired` operacional aceito é convertido para as variáveis equivalentes e gravado atomicamente no `.env` gerenciado antes do report MQTT. A escrita preserva identidade, segredos e campos não gerenciados, cria backup `0600` (`.env.bak.grn.config.<timestamp>`) somente se o conteúdo mudar e faz rollback se a promoção do JSON falhar. Assim, `.env` e JSON permanecem reconciliados durante `restart_container` e `pull_and_recreate`. As duas famílias de backup compartilham o limite de cinco cópias recentes e 30 dias; o expurgo ignora nomes desconhecidos e symlinks e ocorre após a transação de configuração. Segredos históricos permanecem nas cópias até sua expiração.
 
 Quando `restart_after_apply=true` está presente no envelope HMAC, o edge só agenda `restart_container` depois de persistir o `.env` e publicar o report de sucesso. O campo participa da assinatura; alterá-lo em trânsito invalida o comando.
+
+`applied_requires_restart` confirma a gravação do arquivo, não uma mudança no runtime. O status é conservador: também é emitido se a edição modificar apenas comentários ou outra linha sem efeito operacional. `restartStatus=not_requested|queued|rejected|uncertain` informa somente o encaminhamento do pedido; `queued` não confirma que o runner concluiu o recreate. Um `rejected` ou `uncertain` após a escrita não restaura o `.env` anterior. Reinício manual, pedido admin ou `RESTART_DOCKER` do Pico só ficam comprovados quando o novo processo publica outro `boot_id` em presence/heartbeat MQTT; a aba `.env` não atualiza retroativamente o resultado da escrita.
+
+No notebook executando `main.py` sem runner, pare o processo e inicie-o novamente. Para parâmetros que também existem em `config.json`, regenere antes o JSON no caminho de `GN_CONFIG_PATH` (por exemplo `bash env_to_config.sh .env runtime_config/config.json`); variáveis já exportadas no shell prevalecem sobre `load_dotenv()` sem `override`. No host provisionado, o runner faz a conversão e o recreate automaticamente. Procedimento e verificação: [README de grava_nois_config](https://github.com/oondels/grava_nois_config/blob/main/README.md#aplicar-alteracoes-de-ambiente-e-configuracao-admin).
 
 ---
 
@@ -375,3 +391,17 @@ câmera só funcionam como fallback enquanto o campo `cameras` estiver ausente.
 ## Exemplo completo
 
 Veja `config.example.json` na raiz do projeto para um exemplo completo com todos os domínios funcionais.
+
+## Logos gerenciadas em runtime
+
+`files/client-watermarks.json` permite aplicar revisões imutáveis das logos do cliente sem restart. A seleção legada permanece como fallback e `GN_CLIENT_WATERMARK_ENABLED` permanece exclusivo do `.env`. Contrato: [MAINTENANCE.md](MAINTENANCE.md).
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.
+
+## Reinício durável de configuração (2026-10-07)
+
+Reenvio autenticado da mesma versão/hash pendente com `restart_after_apply=true` solicita reinício sem regravar a configuração. Versão já aplicada não reinicia novamente. `config.restart.json`, privado e persistente junto ao config, vincula UUID do IPC à versão/hash/correlation e conserva a intenção antes da admissão. A recuperação reutiliza esse UUID; resultados desconhecidos nunca repetem o efeito. Nova tentativa após falha conhecida exige envelope explícito com `issued_at` posterior. Confirmar a versão/hash aplicada encerra a intenção anterior.
+
+O monitor reconcilia requests/processing/results e a cópia durável em `device-operations/host-results`. A configuração permanece `pending_restart` quando a admissão ou execução falha. `applied` depende da configuração efetiva no startup, não da admissão no runner. Reports podem incluir `restart` com `request_id`, `status`, `stage`, `error_code`; o HMAC inclui esses quatro campos nessa ordem, após `:restart:`. Estados: prepared, queued, running, failed, unknown, succeeded. A API compatível deve ser implantada antes do edge.

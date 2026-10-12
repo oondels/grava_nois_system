@@ -50,6 +50,7 @@ Bootstrap em [`main.py`](../../../main.py):
 ### Resiliência de startup
 
 - Falha de câmera não aborta o processo; MQTT e Pico/LED iniciam antes das tentativas RTSP/FFmpeg.
+- A resolução ignora câmeras gerenciadas sem URL RTSP disponível; JSON legado de câmeras inválido produz lista vazia. O bootstrap mantém MQTT e administração ativos mesmo sem câmeras; uma nova resolução exige reiniciar/recriar a captura.
 - Supervisor monitora `proc.poll()` e reinicia FFmpeg com backoff (5s..300s).
 - Heartbeat MQTT protegido contra exceções no snapshot provider.
 - Trigger fan-out verifica disponibilidade da câmera antes de disparar.
@@ -60,6 +61,7 @@ Bootstrap em [`main.py`](../../../main.py):
 
 - [`src/config/config_loader.py`](../../../src/config/config_loader.py)
 - [`src/config/settings.py`](../../../src/config/settings.py)
+- `src/config/env_backup_retention.py`: retenção conjunta das cópias privadas do `.env`
 - resolve configuração operacional, single camera, multi-camera via JSON e RTSP legacy
 
 ### Video
@@ -83,6 +85,7 @@ Bootstrap em [`main.py`](../../../main.py):
 - [`src/services/api_client.py`](../../../src/services/api_client.py)
 - [`src/services/api_error_policy.py`](../../../src/services/api_error_policy.py)
 - [`src/services/retry_upload.py`](../../../src/services/retry_upload.py)
+- `src/services/storage_retention.py`: expurgo conservador de falhas legadas e metadados v3 finalizados
 - `src/services/mqtt/mqtt_client.py`
 - `src/services/mqtt/device_presence_service.py`
 - `src/services/mqtt/device_config_service.py`
@@ -185,3 +188,7 @@ Ponto de integração:
 - o edge depende de FFmpeg/ffprobe no ambiente;
 - integrações com backend devem respeitar assinatura HMAC nas rotas protegidas;
 - o pipeline precisa tolerar conectividade intermitente sem corromper a fila local.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

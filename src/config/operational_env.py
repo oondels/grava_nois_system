@@ -59,7 +59,12 @@ def operational_config_to_env(config: dict[str, Any]) -> dict[str, str]:
         for camera in config["cameras"]
     ]
 
+    layout_env = {}
+    if watermark.get('layout') is not None:
+        layout_env = {'GN_WATERMARK_LAYOUT_JSON': json.dumps(watermark['layout'], separators=(',', ':')),
+                      'GN_CLIENT_WATERMARK_ENABLED': _bool(watermark['layout']['clientEnabled'])}
     return {
+        **layout_env,
         "GN_CONFIG_VERSION": str(config.get("version", 1)),
         "GN_CONFIG_UPDATED_AT": str(config.get("updatedAt") or ""),
         "GN_SEG_TIME": str(capture["segmentSeconds"]),
@@ -165,8 +170,10 @@ def persist_operational_config(env_path: Path, config: dict[str, Any]) -> str:
             )
         )
     merged = merge_env_content(original, updates)
+    if merged == original:
+        return original
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = env_path.with_suffix(f".bak.grn.config.{timestamp}")
+    backup_path = env_path.with_name(env_path.name + f".bak.grn.config.{timestamp}")
     shutil.copy2(env_path, backup_path)
     os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR)
 

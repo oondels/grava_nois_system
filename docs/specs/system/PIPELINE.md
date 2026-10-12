@@ -141,7 +141,7 @@ Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status
 
 ## 7. Worker processing path
 
-Nos dois modos e formatos, a logo horizontal do cliente fica no canto inferior esquerdo (`client_logo_wm.png`, alternativa `client_logo.png`) e a logo circular fica no canto superior esquerdo (`client_logo_top_wm.png`, alternativa `client_logo_top.png`). A logo superior é opcional: sua ausência não bloqueia processamento. Ambas usam margem e opacidade de `processing.watermark.*`; sobre a largura relativa base, a superior aplica fator 0.70 e a inferior 1.05, preservando a proporção, e são omitidas com `GN_CLIENT_WATERMARK_ENABLED=0`. A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical, dentro da safe zone. A seleção dos arquivos ocorre na inicialização; clipes já processados não são recompostos durante reenvios.
+Nos dois modos e formatos, a logo horizontal do cliente fica no canto inferior esquerdo (`client_logo_wm.png`, alternativa `client_logo.png`) e a logo circular fica no canto superior esquerdo (`client_logo_top_wm.png`, alternativa `client_logo_top.png`). A logo superior é opcional: sua ausência não bloqueia processamento. Ambas usam margem e opacidade de `processing.watermark.*`; sobre a largura relativa base, a superior aplica fator 0.70 e a inferior 1.05, preservando a proporção, e são omitidas com `GN_CLIENT_WATERMARK_ENABLED=0`. A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical, dentro da safe zone. A seleção legada ocorre na inicialização; o manifesto gerenciado é resolvido a cada processamento/política e usa revisões imutáveis. Snapshots diferidos e clipes já processados não são recompostos durante reenvios. Ver [MAINTENANCE.md](MAINTENANCE.md).
 
 ### Normal mode (light_mode=false)
 
@@ -188,6 +188,8 @@ Se `_process_one()` falhar:
 - respeita idade mínima e backoff;
 - só reprocessa estados elegíveis.
 
+Uma varredura horária remove após 30 dias somente vídeos/sidecars legados com `status=failed` ou retry de upload comprovadamente esgotado. Sidecar ausente/corrompido, `.lock`, marcador `.deferred.json` e estados ainda elegíveis são preservados. O retry manual remove vídeo e sidecar após persistir o recibo de finalização; se o upload já ocorreu mas a finalização está incerta, mantém o item para reconciliação sem repetir o upload.
+
 ## 9. API interaction points
 
 Chamadas principais:
@@ -209,3 +211,7 @@ As rotas protegidas por HMAC são:
 - `build_highlight()` não deve correr em paralelo para a mesma câmera;
 - `build_highlight()` só deve ser chamado para câmera com FFmpeg vivo e `SegmentBuffer` ativo;
 - a fila continua sendo filesystem-based, não DB-based.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

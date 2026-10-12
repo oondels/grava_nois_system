@@ -130,6 +130,31 @@ class WatermarkAlwaysPresentTests(unittest.TestCase):
         (queue / f"{mp4.stem}.json").write_text(json.dumps(meta))
         return mp4
 
+    def test_retry_uses_persisted_layout_and_crop_snapshot(self):
+        from src.config.config_loader import OperationalConfig
+        from tests.test_watermark_layout import fixture
+        config = OperationalConfig()
+        config.processing.watermark.layout = fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker = self._make_worker(base, light_mode=True)
+            mp4 = self._place_mp4_with_sidecar(worker.queue_dir, 'test.mp4')
+            sidecar = mp4.with_suffix('.json')
+            snapshot = {'placements': fixture()['default']}
+            paths = {'institutional': 'original.png', 'clientBottom': 'bottom.png', 'clientTop': 'top.png'}
+            with patch('src.workers.processing_worker.get_effective_config', return_value=config), patch('src.services.watermark_catalog.snapshot_layout', return_value=(snapshot, paths)) as prepare, patch('src.workers.processing_worker.add_image_watermark', side_effect=RuntimeError('encode interrupted')) as encode:
+                with self.assertRaisesRegex(RuntimeError, 'encode interrupted'):
+                    worker._process_one(mp4, sidecar)
+                self.assertIn('watermark_snapshot', json.loads(sidecar.read_text()))
+                config.processing.vertical_format = True
+                config.processing.watermark.layout['default']['institutional']['opacity'] = .2
+                with self.assertRaisesRegex(RuntimeError, 'encode interrupted'):
+                    worker._process_one(mp4, sidecar)
+                prepare.assert_called_once()
+                self.assertFalse(encode.call_args.kwargs['vertical_format'])
+                self.assertEqual(encode.call_args.kwargs['watermark_layout']['placements']['institutional']['opacity'], .6)
+                self.assertEqual(encode.call_args.kwargs['watermark_path'], 'original.png')
+
     @patch("src.workers.processing_worker.GravaNoisAPIClient")
     @patch("src.workers.processing_worker.ffprobe_metadata", return_value={"duration_sec": 10.0})
     @patch("src.workers.processing_worker.add_image_watermark")

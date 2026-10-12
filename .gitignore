@@ -32,3 +32,10 @@ coverage.xml
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Device-specific immutable client watermark revisions
+/files/client-versions/
+/files/client-watermarks.json
+
+# Shared, non-sensitive geometry contract fixture
+!tests/fixtures/watermark-geometry.json

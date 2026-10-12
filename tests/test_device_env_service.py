@@ -118,6 +118,12 @@ class EnvControlTests(unittest.TestCase):
         ledger = (self.service.ledger_dir / f"{payload['request_id']}.json").read_text()
         self.assertNotIn("new-value", ledger)
 
+    def test_identical_content_does_not_create_backup(self):
+        self.send(control(content=SAMPLE_ENV))
+        self.assertEqual(self.path.read_text(), SAMPLE_ENV)
+        self.assertEqual(list(self.path.parent.glob(".env.bak.grn.*")), [])
+        self.assertEqual(self.report()["status"], "applied_requires_restart")
+
     def test_duplicate_after_restart_does_not_reapply_or_restart(self):
         payload = control(restart_after_apply=True)
         self.send(payload)

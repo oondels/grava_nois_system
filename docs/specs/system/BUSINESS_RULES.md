@@ -177,7 +177,7 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - `config_version` menor que aplicada/pendente é rejeitada; versão igual com hash igual responde sem reaplicar; hash diferente na mesma versão é conflito;
 - rejeição nunca sobrescreve `config.json` nem apaga a configuração aplicada atual.
 - `cameras` presente na configuração gerenciada é autoritativo inclusive como array vazio ou com todas as câmeras desabilitadas;
-- referência `env:` ausente em câmera habilitada rejeita o startup sem incluir credenciais no erro.
+- câmera habilitada sem URL RTSP ou com referência `env:` não resolvível é ignorada neste boot com aviso sem credenciais; não aciona fallback legado nem impede MQTT e serviços administrativos. Após corrigir a configuração, reinicie/recrie a captura. `GN_CAMERAS_JSON` malformado ou que não seja lista também permite startup sem câmeras.
 ## Operações administrativas
 
 O edge aceita apenas `restart_container`, `reboot_host`, `pull_and_recreate` e `change_wifi` com feature flag, HMAC válido, device correspondente e validade futura. O ledger persistente por request, gravado com permissão `0600`, impede reexecução por redelivery QoS 1; resultados aguardam ACK aplicativo e não são truncados por quantidade.
@@ -186,3 +186,7 @@ O edge aceita apenas `restart_container`, `reboot_host`, `pull_and_recreate` e `
 - o container não aceita imagem, tag, shell ou path arbitrário e não recebe o socket Docker;
 - a senha Wi-Fi é decifrada somente após validação do envelope e segue ao runner em arquivo transitório `0600`; a intent contém apenas SSID e referência segura;
 - o resultado do runner é observado após restart/reboot e publicado com HMAC, sem campos sensíveis.
+
+## Watermarks v2 (2026-10-06)
+
+O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.

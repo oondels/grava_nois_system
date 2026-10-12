@@ -1,5 +1,13 @@
 # DESIGN_SPEC - Grava Nois System
 
+Status em 2026-10-07: recuperação com captura parada, configuração com reinício, atualização remota de logos/layout por câmera e diagnósticos/logs implementados e validados no dispositivo piloto, conforme confirmação do responsável. Evidência e pré-requisitos: [system/MAINTENANCE.md](system/MAINTENANCE.md).
+
+Reinício durável de configuração, recriação local e estados de falha: [system/CONFIGURATION.md](system/CONFIGURATION.md).
+
+Editor visual e contrato proporcional de logos por câmera: [Watermarks v2](system/WATERMARK_LAYOUT.md).
+
+Manutenção independente da captura, disponibilidade administrativa e logos gerenciadas: [system/MAINTENANCE.md](system/MAINTENANCE.md).
+
 ## Modo rental
 
 O mesmo pipeline edge opera em `fixed` ou `rental`. O modo rental remove a dependência de venue e usa o endpoint de metadata específico; veja `system/CONFIGURATION.md`, `PIPELINE.md` e `BUSINESS_RULES.md`.
@@ -8,8 +16,12 @@ Registro inicial e retry compartilham a mesma normalização do envelope de clip
 A identidade da clean architecture aplica as mesmas invariantes: `fixed` exige venue e `rental` exige venue ausente. Checkpoints de delivery nunca persistem credenciais temporárias da URL assinada.
 O probe `python -m src.cli.rental_compat_probe` confirma, sem iniciar o pipeline, o contrato rental tenantless e a versão declarada em `GN_AGENT_VERSION`.
 Quando `config.json` contém `cameras`, o array gerenciado é autoritativo inclusive vazio; fontes legadas só participam quando o campo está ausente.
+Câmeras gerenciadas sem URL RTSP resolvível são ignoradas com aviso, preservando o startup e os serviços MQTT mesmo sem câmeras; `GN_CAMERAS_JSON` inválido também não aborta o runtime. Recuperação após corrigir a configuração exige reinício/recriação da captura. Contrato em `system/CONFIGURATION.md`.
 Comandos administrativos invasivos permanecem opt-in, validam HMAC, expiração, identidade e idempotência, e só escrevem intents para o runner do host. A allowlist cobre restart/recreate do container, pull da imagem configurada, reboot e troca segura de Wi-Fi.
 O estado operacional aceito por `config.desired` também é persistido no `.env` gerenciado antes do report. A ação opcional `restart_after_apply` participa do HMAC e só solicita recreate após essa persistência.
+
+Aplicação e confirmação de `.env`/configuração admin, inclusive reinício manual e Pico: [system/CONFIGURATION.md](./system/CONFIGURATION.md#gerenciamento-remoto-de-env-via-admin). Arquivo salvo e pedido enfileirado não comprovam novo runtime; a auditoria de conexão compara `boot_id`.
+Retenção local: backups do `.env` têm limite conjunto de cinco cópias/30 dias; falhas terminais do worker legado vencem em 30 dias; somente manifestos v3 finalizados e limpos vencem em 30 dias. Detalhes de recuperação, outbox e inspeção estão em [system/OPERATIONS.md](./system/OPERATIONS.md#retenção-e-inspeção-de-disco) e [system/PIPELINE.md](./system/PIPELINE.md).
 No modo rental, falhas de envio preservam o artefato processado em `rental_clips_generated/{rentalId}`. Reconexão não inicia upload: somente comando MQTT HMAC do backend; expiração ou cancelamento remove o par vídeo/sidecar.
 
 ## Processamento diferido em fixed

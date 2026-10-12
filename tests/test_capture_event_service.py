@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +22,29 @@ class _FakeMQTTClient:
 
 
 class CaptureEventServiceTests(unittest.TestCase):
+    def test_outbox_saturation_is_bounded_and_counted(self) -> None:
+        client = _FakeMQTTClient(publish_result=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            outbox = Path(tmp) / "capture-outbox"
+            service = CaptureEventService(
+                client,
+                topic="capture/events",
+                device_id="edge",
+                client_id=None,
+                venue_id=None,
+                device_secret="secret",
+                agent_version="test",
+                outbox_dir=outbox,
+            )
+            service.OUTBOX_LIMIT = 128
+            service.CRITICAL_RESERVE = 32
+            service._store({"event_id": "event-1", "severity": "warning", "data": "x" * 100})
+
+            self.assertFalse((outbox / "event-1.json").exists())
+            status = json.loads((outbox / "status").read_text())
+            self.assertEqual(status["suppressed"], 1)
+            self.assertTrue(status["saturated"])
+
     def test_camera_reconnecting_event_is_signed_and_published(self) -> None:
         client = _FakeMQTTClient()
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,7 +28,7 @@ services:
       - ./.env:/usr/src/app/.env:ro
       - .:/usr/src/app/host_config:rw  # Expõe diretório do host para leitura/escrita do .env via admin
       - ./runtime_config:/usr/src/app/runtime_config
-      - ./files:/usr/src/app/files:ro
+      - ./files:/usr/src/app/files:rw
       - ./recorded_clips:/usr/src/app/recorded_clips
       - ./queue_raw:/usr/src/app/queue_raw
       - ./highlights_wm:/usr/src/app/highlights_wm

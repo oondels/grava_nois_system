@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config.config_loader import configuration_transaction
+from src.config.env_backup_retention import prune_env_backups
 from src.infrastructure.filesystem.deferred_repository import LockBusy, exclusive_file
 from src.security.durable_state import private_json as _private_json
 from src.security.env_control import request_hash, sign_control, timestamp, validate_control
@@ -79,6 +80,7 @@ class DeviceEnvService:
         self._connect_listener_registered = False
 
     def start(self) -> bool:
+        self._prune_backups()
         if not self.mqtt_client.is_enabled or not self.device_secret:
             return False
         if not self._connect_listener_registered:
@@ -102,6 +104,21 @@ class DeviceEnvService:
     def _retry_reports(self) -> None:
         while not self._stop.wait(30):
             self._handle_mqtt_connect()
+
+    def _prune_backups(self) -> None:
+        try:
+            for path in self.ledger_dir.glob("*.json"):
+                if json.loads(path.read_text()).get("phase") != "done":
+                    return
+            removed, bytes_removed = prune_env_backups(self.env_path)
+            if removed:
+                mqtt_logger.info(
+                    "Env backup retention removed %s files (%s bytes)",
+                    removed,
+                    bytes_removed,
+                )
+        except (OSError, ValueError, AttributeError):
+            mqtt_logger.warning("Env backup retention pending")
 
     def _handle_mqtt_connect(self) -> None:
         # API correlation lasts 15 minutes. Never replay snapshots after their
@@ -211,7 +228,7 @@ class DeviceEnvService:
         content = open_env_envelope(self.device_secret, envelope)
         self._validate_env_content(content)
         # Require an existing managed file: a wrong mount must not create a new identity.
-        self._read_env_file()
+        previous_content = self._read_env_file()
         record = {
             "type": payload["type"],
             "request_id": payload["request_id"],
@@ -223,11 +240,13 @@ class DeviceEnvService:
             "phase": "prepared",
         }
         _private_json(path, record)
-        self._create_backup(payload["request_id"])
-        self._write_env_atomic(content)
+        if content != previous_content:
+            self._create_backup(payload["request_id"])
+            self._write_env_atomic(content)
         record["phase"] = "applied"
         _private_json(path, record)
         self._recover(record, path)
+        self._prune_backups()
         self._publish(record["report"])
 
     def _recover(self, record: dict[str, Any], path: Path) -> None:

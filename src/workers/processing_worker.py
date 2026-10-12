@@ -16,6 +16,7 @@ from src.config.config_loader import get_effective_config
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
 from src.services.backend_response_sanitizer import sanitize_backend_response
+from src.services.storage_retention import prune_legacy_failed
 from src.utils.logger import logger
 from src.video.processor import (
     _sha256_file,
@@ -44,13 +45,17 @@ class ProcessingWorker:
         operational_event_callback: Callable[[str], None] | None = None,
         pending_destination: Callable[[dict], tuple[Path, dict]] | None = None,
         client_top_watermark_path: Path | None = None,
+        camera_id: str | None = None,
     ):
         self.queue_dir = queue_dir
         self.out_wm_dir = out_wm_dir
         self.failed_dir_highlight = failed_dir_highlight
+        self.camera_id = camera_id
         self.watermark_path = watermark_path
         self.client_watermark_path = client_watermark_path
         self.client_top_watermark_path = client_top_watermark_path
+        from src.video.watermark_assets import WatermarkAssets
+        self.watermark_assets = WatermarkAssets(watermark_path.parent, client_watermark_path, client_top_watermark_path)
         self.scan_interval = scan_interval
         self.max_attempts = max_attempts
         self.wm_margin = wm_margin
@@ -63,6 +68,7 @@ class ProcessingWorker:
         self.operational_event_callback = operational_event_callback
         self.pending_destination = pending_destination
         self._last_noapi_log = 0.0
+        self._next_retention_scan = 0.0
 
         self._stop = threading.Event()
         self._t = None
@@ -71,6 +77,17 @@ class ProcessingWorker:
         self.failed_dir_highlight.mkdir(parents=True, exist_ok=True)
 
     def _scan_retry_failed(self):
+        if time.monotonic() >= self._next_retention_scan:
+            self._next_retention_scan = time.monotonic() + 3600
+            removed, bytes_removed = prune_legacy_failed(
+                self.failed_dir_highlight, max_attempts=self.max_attempts
+            )
+            if removed:
+                logger.info(
+                    "Retencao: %s clipes legados expirados removidos (%s bytes)",
+                    removed,
+                    bytes_removed,
+                )
         # diretórios candidatos a retry ( só com upload_failed)
         retry_dirs = [self.failed_dir_highlight / "upload_failed"]
         # futuramente incluir outros diretorios:
@@ -354,18 +371,35 @@ class ProcessingWorker:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
         else:
             tmp_out = self.out_wm_dir / f"{mp4.stem}.wm_tmp.mp4"
+            client_logo, top_logo = self.watermark_assets.resolve()
+            primary_logo = str(self.watermark_path)
+            snapshot = meta.get('watermark_snapshot')
+            if snapshot is None and _proc_cfg.watermark.layout:
+                from src.services.watermark_catalog import snapshot_layout
+                layout, paths = snapshot_layout(_proc_cfg.watermark.layout, self.camera_id, self.watermark_path.parent)
+                snapshot = {'layout': layout, 'paths': paths, 'configVersion': get_effective_config().config_version, 'verticalFormat': vertical_format}
+                meta['watermark_snapshot'] = snapshot
+                from src.infrastructure.filesystem.deferred_repository import atomic_json
+                atomic_json(meta_path, meta)
+            if snapshot:
+                vertical_format = snapshot.get('verticalFormat', vertical_format)
+                primary_logo = snapshot['paths']['institutional']
+                client_logo = snapshot['paths']['clientBottom']
+                top_logo = snapshot['paths']['clientTop']
+
             add_image_watermark(
                 input_path=str(mp4),
-                watermark_path=str(self.watermark_path),
+                watermark_path=primary_logo,
+                watermark_layout=snapshot["layout"] if snapshot else None,
                 top_watermark_path=(
-                    str(self.client_top_watermark_path)
-                    if self.client_top_watermark_path is not None
+                    str(top_logo)
+                    if top_logo is not None
                     else None
                 ),
                 output_path=str(tmp_out),
                 secondary_watermark_path=(
-                    str(self.client_watermark_path)
-                    if self.client_watermark_path is not None
+                    str(client_logo)
+                    if client_logo is not None
                     else None
                 ),
                 margin=self.wm_margin,

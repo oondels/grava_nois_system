@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.filesystem.deferred_repository import atomic_json
 from src.security.hmac import hmac_sha256_base64
 from src.services.mqtt.mqtt_client import MQTTClient, mqtt_logger
 
@@ -18,7 +20,7 @@ _EVENT_TYPE_CAMERA_RESTART_FAILED = "camera.restart_failed"
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _canonical_capture_event_payload(payload: dict[str, Any]) -> str:
@@ -45,6 +47,9 @@ def sign_capture_event_payload(*, payload: dict[str, Any], device_secret: str) -
 class CaptureEventService:
     """Publishes capture operational events and keeps a local outbox for retries."""
 
+    OUTBOX_LIMIT = 64 * 1024 * 1024
+    CRITICAL_RESERVE = 8 * 1024 * 1024
+
     def __init__(
         self,
         mqtt_client: MQTTClient,
@@ -65,6 +70,16 @@ class CaptureEventService:
         self.device_secret = device_secret
         self.agent_version = agent_version
         self.outbox_dir = outbox_dir
+        self.status_path = outbox_dir / "status"
+        self._lock = threading.RLock()
+        try:
+            self._status = json.loads(self.status_path.read_text(encoding="utf-8"))
+            if not isinstance(self._status, dict):
+                raise ValueError("invalid outbox status")
+            if type(self._status.get("suppressed")) is not int or self._status["suppressed"] < 0:
+                raise ValueError("invalid suppression counter")
+        except (OSError, ValueError):
+            self._status = {"suppressed": 0, "saturated": False}
 
     def publish_trigger_rejected(
         self,
@@ -174,15 +189,24 @@ class CaptureEventService:
         )
 
     def flush_outbox(self) -> None:
-        for path in sorted(self.outbox_dir.glob("*.json")):
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                mqtt_logger.warning("Capture event outbox inválido removido: %s", path)
-                path.unlink(missing_ok=True)
-                continue
-            if self._publish(payload):
-                path.unlink(missing_ok=True)
+        with self._lock:
+            for path in sorted(self.outbox_dir.glob("*.json")):
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    mqtt_logger.warning("Capture event outbox inválido removido: %s", path)
+                    path.unlink(missing_ok=True)
+                    continue
+                if self._publish(payload):
+                    path.unlink(missing_ok=True)
+            used = sum(
+                path.stat().st_size
+                for path in self.outbox_dir.glob("*.json")
+                if path.is_file() and not path.is_symlink()
+            )
+            if self._status.get("saturated") and used < self.OUTBOX_LIMIT - self.CRITICAL_RESERVE:
+                self._status["saturated"] = False
+                atomic_json(self.status_path, self._status)
 
     def _publish_or_store(self, payload: dict[str, Any]) -> None:
         self.flush_outbox()
@@ -243,17 +267,34 @@ class CaptureEventService:
 
     def _store(self, payload: dict[str, Any]) -> None:
         try:
-            self.outbox_dir.mkdir(parents=True, exist_ok=True)
-            path = self.outbox_dir / f"{payload['event_id']}.json"
-            path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            mqtt_logger.warning(
-                "Evento de captura armazenado no outbox: %s", path
-            )
+            with self._lock:
+                self.outbox_dir.mkdir(parents=True, exist_ok=True)
+                size = len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")) + 1
+                used = sum(
+                    path.stat().st_size
+                    for path in self.outbox_dir.glob("*.json")
+                    if path.is_file() and not path.is_symlink()
+                )
+                limit = (
+                    self.OUTBOX_LIMIT
+                    if payload.get("severity") == "error"
+                    else self.OUTBOX_LIMIT - self.CRITICAL_RESERVE
+                )
+                if used + size > limit:
+                    self._status["suppressed"] = int(self._status.get("suppressed", 0)) + 1
+                    self._status["saturated"] = True
+                    self._status["last_saturated_at"] = _now_iso()
+                    atomic_json(self.status_path, self._status)
+                    mqtt_logger.error("Capture event outbox saturated; event suppressed")
+                    return
+                atomic_json(self.outbox_dir / f"{payload['event_id']}.json", payload)
+                mqtt_logger.warning(
+                    "Evento de captura armazenado no outbox: %s", payload["event_id"]
+                )
         except Exception as exc:
-            mqtt_logger.warning("Falha ao armazenar evento de captura no outbox: %s", exc)
+            mqtt_logger.warning(
+                "Falha ao armazenar evento de captura no outbox: %s", type(exc).__name__
+            )
 
 
 CaptureEventPublisher = Callable[..., None]

@@ -832,6 +832,7 @@ def main() -> int:
             out_wm_dir=out_wm_dir,
             failed_dir_highlight=cfg.failed_dir_highlight,
             watermark_path=watermark_path,
+            camera_id=cfg.camera_id,
             client_watermark_path=client_watermark_path,
             client_top_watermark_path=client_top_watermark_path,
             scan_interval=1,

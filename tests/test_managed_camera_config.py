@@ -51,25 +51,39 @@ class ManagedCameraConfigTests(unittest.TestCase):
 
         self.assertEqual([], configs)
 
-    def test_missing_env_reference_fails_without_exposing_a_secret(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError,
-            "camera gerenciada 'cam01'.*GN_CAM01_RTSP_URL",
-        ) as raised:
-            self._load(
-                {
-                    "version": 1,
-                    "cameras": [
-                        {
-                            "id": "cam01",
-                            "sourceType": "rtsp",
-                            "rtspUrl": "env:GN_CAM01_RTSP_URL",
-                        }
-                    ],
-                }
-            )
+    def test_missing_url_skips_camera_without_legacy_fallback_or_secret_logging(self) -> None:
+        for reference in (
+            None, "", "env:GN_CAM01_RTSP_URL", "env:GN_RTSP_URL", "env:",
+            "env:rtsp://user:super-secret@camera.example/live",
+        ):
+            for missing_value in ("", "   "):
+                with self.subTest(reference=reference, missing_value=missing_value):
+                    with patch("src.config.settings.logger") as logger:
+                        configs = self._load(
+                            {"cameras": [{"id": "cam01", "rtspUrl": reference}]},
+                            {"GN_CAM01_RTSP_URL": missing_value, "GN_RTSP_URL": missing_value},
+                        )
+                    self.assertEqual([], configs)
+                    logger.warning.assert_called_once()
+                    logged = str(logger.warning.call_args)
+                    self.assertIn("cam01", logged)
+                    self.assertNotIn("super-secret", logged)
 
-        self.assertNotIn("super-secret", str(raised.exception))
+    def test_missing_camera_does_not_stop_healthy_camera_or_change_its_queue(self) -> None:
+        configs = self._load({"cameras": [
+            {"id": "cam01", "rtspUrl": "env:GN_CAM01_RTSP_URL"},
+            {"id": "cam02", "rtspUrl": "rtsp://camera.example/live"},
+        ]})
+
+        self.assertEqual(["cam02"], [cfg.camera_id for cfg in configs])
+        self.assertEqual("cam02", configs[0].queue_dir.name)
+        self.assertEqual("cam02", configs[0].buffer_dir.name)
+
+    def test_camera_is_loaded_after_missing_env_is_supplied(self) -> None:
+        config = {"cameras": [{"id": "cam01", "rtspUrl": "env:GN_CAM01_RTSP_URL"}]}
+        self.assertEqual([], self._load(config))
+        configs = self._load(config, {"GN_CAM01_RTSP_URL": "rtsp://camera.example/live"})
+        self.assertEqual(["cam01"], [cfg.camera_id for cfg in configs])
 
     def test_env_reference_is_resolved_for_managed_camera(self) -> None:
         configs = self._load(

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config.operational_env import persist_operational_config
 from src.services.mqtt.device_config_service import (
     DeviceConfigService,
     RemoteConfigError,
@@ -54,6 +55,17 @@ def _deep_update(target: dict, overrides: dict) -> None:
 
 
 class DeviceConfigServiceTests(unittest.TestCase):
+    def test_unchanged_operational_env_does_not_create_second_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = Path(tmp) / ".env"
+            env_path.write_text("CUSTOM_OPTION=fixture-only\n")
+            config = self._desired_config()
+            persist_operational_config(env_path, config)
+            first = list(env_path.parent.glob(".env.bak.grn.config.*"))
+            persist_operational_config(env_path, config)
+            self.assertEqual(len(first), 1)
+            self.assertEqual(list(env_path.parent.glob(".env.bak.grn.config.*")), first)
+
     def _service(
         self,
         base: Path,
@@ -326,6 +338,70 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(reported_config["processing"]["watermark"]["opacity"], 0.8)
         self.assertIsInstance(reported_config["processing"]["watermark"]["opacity"], float)
 
+    def test_watermark_layout_stages_before_apply_and_preserves_state_on_failure(self):
+        from tests.test_watermark_layout import fixture
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                initial = self._desired_config()
+                (base / 'config.json').write_text(json.dumps(initial))
+                env = base / '.env'
+                env.write_text('GN_CLIENT_WATERMARK_ENABLED=1\n')
+                service = self._service(base, env_path=env)
+                desired = self._desired_config()
+                desired['processing']['watermark']['layout'] = fixture()
+                desired['processing']['watermark']['layout']['clientEnabled'] = False
+                before = (base / 'config.json').read_bytes()
+                with patch('src.services.watermark_catalog.prepare_assets', side_effect=ValueError('watermark_asset_integrity') if failure else None) as prepare:
+                    if failure:
+                        with self.assertRaisesRegex(ValueError, 'watermark_asset_integrity'):
+                            service.process_desired_config(self._payload(desired))
+                    else:
+                        result = service.process_desired_config(self._payload(desired))
+                prepare.assert_called_once()
+                if failure:
+                    self.assertEqual((base / 'config.json').read_bytes(), before)
+                    self.assertEqual(env.read_text(), 'GN_CLIENT_WATERMARK_ENABLED=1\n')
+                    self.assertFalse((base / 'config.pending.json').exists())
+                else:
+                    self.assertEqual(result.status, 'applied')
+                    self.assertFalse(result.requires_restart)
+                    self.assertIn('GN_CLIENT_WATERMARK_ENABLED=0', env.read_text())
+                    self.assertEqual(json.loads((base / 'config.json').read_text())['processing']['watermark']['layout'], desired['processing']['watermark']['layout'])
+
+    def test_journal_watermark_missing_file_preserves_current_config_at_boot(self):
+        from tests.test_watermark_layout import fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            current = base / 'config.json'
+            current.write_text(json.dumps(self._desired_config()))
+            desired = self._desired_config()
+            desired['version'] = 2
+            desired['processing']['watermark']['layout'] = fixture()
+            journal = base / 'config.transaction.json'
+            journal.write_text(json.dumps({'desired': desired, 'desired_hash': hash_config(desired), 'config_version': 2, 'correlation_id': 'interrupted'}))
+            before = current.read_bytes()
+            with patch('src.services.watermark_catalog.verify_local_assets', side_effect=ValueError('watermark_asset_integrity')):
+                self.assertIsNone(apply_pending_config_on_startup(current))
+            self.assertEqual(current.read_bytes(), before)
+            self.assertTrue(journal.exists())
+
+    def test_pending_watermark_missing_file_does_not_promote_at_boot(self):
+        from tests.test_watermark_layout import fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            initial = self._desired_config()
+            (base / 'config.json').write_text(json.dumps(initial))
+            desired = self._desired_config()
+            desired['version'] = 2
+            desired['processing']['watermark']['layout'] = fixture()
+            (base / 'config.pending.json').write_text(json.dumps(desired))
+            before = (base / 'config.json').read_bytes()
+            with patch('src.services.watermark_catalog.verify_local_assets', side_effect=ValueError('watermark_asset_integrity')):
+                self.assertIsNone(apply_pending_config_on_startup(base / 'config.json'))
+            self.assertEqual((base / 'config.json').read_bytes(), before)
+            self.assertTrue((base / 'config.pending.json').exists())
+
     def test_applies_hot_reload_safe_config_and_reports_applied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -421,6 +497,41 @@ class DeviceConfigServiceTests(unittest.TestCase):
         self.assertEqual(pending_data["capture"]["segmentSeconds"], 2)
         self.assertFalse((base / "config.json").exists())
         self.assertEqual(state_data["pendingVersion"], 2)
+
+    def test_republish_pending_version_honors_restart_without_rewriting_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            payload = self._payload(self._desired_config({"capture": {"segmentSeconds": 2}}))
+            service.process_desired_config(payload)
+            before = service.pending_path.read_bytes()
+            payload["restart_after_apply"] = True
+            payload["signature"] = sign_desired_config_payload(payload=payload, device_secret="secret-123")
+            result = service.process_desired_config(payload)
+            self.assertTrue(result.restart_after_apply)
+            self.assertEqual(service.pending_path.read_bytes(), before)
+
+    def test_restart_admission_failure_does_not_reject_saved_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            payload = self._payload(self._desired_config({"capture": {"segmentSeconds": 2}}))
+            payload["restart_after_apply"] = True
+            payload["signature"] = sign_desired_config_payload(payload=payload, device_secret="secret-123")
+            with patch.object(service, '_restart_coordinator', side_effect=OSError('disk full')):
+                service._handle_message(service.desired_topic, json.dumps(payload).encode())
+            self.assertTrue(service.pending_path.exists())
+            report = service.mqtt_client.published[-1][1]
+            self.assertEqual(report['status'], 'pending_restart')
+            self.assertEqual(report['restart']['status'], 'unknown')
+
+    def test_restart_report_signature_binds_optional_metadata(self):
+        payload = dict(device_id='edge-01', config_version=2, correlation_id='abc',
+                       reported_at='2026-10-07T12:00:00Z', status='pending_restart', reported_hash='hash')
+        original = sign_reported_config_payload(payload=payload, device_secret='secret-123')
+        payload['restart'] = dict(request_id='id', status='queued', stage='admission', error_code='')
+        signed = sign_reported_config_payload(payload=payload, device_secret='secret-123')
+        self.assertNotEqual(original, signed)
+        payload['restart']['status'] = 'failed'
+        self.assertNotEqual(signed, sign_reported_config_payload(payload=payload, device_secret='secret-123'))
 
     def test_signed_restart_request_is_bound_to_desired_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
