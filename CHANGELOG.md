@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `fix(mqtt)`: evita rajadas de `capture/events` após reconexão: envio dedicado de até 1 evento/s, um PUBACK pendente, fila antiga em ordem cronológica e retenção até confirmação do broker. Falhas idênticas por câmera/tipo são limitadas a uma ocorrência por 5 minutos, com contador local; recuperações e novos gatilhos são preservados.
+
 - `fix(config)`: câmera gerenciada sem `rtspUrl` ou com referência de ambiente ausente/vazia, como `GN_RTSP_URL` ou `GN_CAM01_RTSP_URL`, passa a ser ignorada neste boot com aviso sem credenciais, em vez de abortar a inicialização. Câmeras válidas continuam funcionando e clipes pendentes são preservados.
 - `fix(config)`: `GN_CAMERAS_JSON` malformado ou que não seja uma lista permite iniciar sem câmeras; entradas sem `rtsp_url` são ignoradas. A lista `cameras` gerenciada continua autoritativa; sem lista gerenciada e sem fontes RTSP, permanece o fallback V4L2 em background.
 - `fix(device)`: ausência de configuração RTSP não impede o início do MQTT e dos serviços administrativos, inclusive com zero câmeras ativas. Presença online continua exigindo identidade, configuração MQTT e conectividade válidas.

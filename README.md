@@ -1,5 +1,7 @@
 # Grava Nóis System — Sistema de Captura de Vídeos
 
+Eventos de captura MQTT: a reconexão envia o histórico gradualmente (até 1 evento/s), sem bloquear presença/heartbeat. Falhas idênticas por câmera e tipo são limitadas a uma ocorrência por 5 minutos; mudanças de motivo e recuperações continuam registradas. Atualize a imagem do edge e recrie o container preservando `runtime_config`; não é necessário apagar o outbox. Consulte [operação da fila](docs/specs/system/OPERATIONS.md#eventos-de-captura-na-reconexão-mqtt).
+
 Reinício/recriação de devices: contrato e atualização em [docs/specs/system/CONFIGURATION.md](docs/specs/system/CONFIGURATION.md). Implantar API compatível antes do novo edge; scripts do host são atualizados separadamente.
 
 

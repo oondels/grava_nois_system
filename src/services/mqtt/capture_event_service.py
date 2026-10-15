@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import heapq
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -49,6 +51,8 @@ class CaptureEventService:
 
     OUTBOX_LIMIT = 64 * 1024 * 1024
     CRITICAL_RESERVE = 8 * 1024 * 1024
+    PUBLISH_INTERVAL_SEC = 1.0
+    REPEAT_INTERVAL_SEC = 300.0
 
     def __init__(
         self,
@@ -61,6 +65,7 @@ class CaptureEventService:
         device_secret: str,
         agent_version: str,
         outbox_dir: Path,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.mqtt_client = mqtt_client
         self.topic = topic
@@ -72,6 +77,16 @@ class CaptureEventService:
         self.outbox_dir = outbox_dir
         self.status_path = outbox_dir / "status"
         self._lock = threading.RLock()
+        self._clock = clock
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._queue: list[tuple[float, str, Path]] = []
+        self._sizes: dict[Path, int] = {}
+        self._used_bytes = 0
+        self._indexed = False
+        self._inflight: tuple[Path, Any] | None = None
+        self._next_publish_at = 0.0
+        self._recent: dict[tuple[str, str], tuple[str, float]] = {}
         try:
             self._status = json.loads(self.status_path.read_text(encoding="utf-8"))
             if not isinstance(self._status, dict):
@@ -80,6 +95,8 @@ class CaptureEventService:
                 raise ValueError("invalid suppression counter")
         except (OSError, ValueError):
             self._status = {"suppressed": 0, "saturated": False}
+        if type(self._status.get("coalesced")) is not int or self._status["coalesced"] < 0:
+            self._status["coalesced"] = 0
 
     def publish_trigger_rejected(
         self,
@@ -188,31 +205,134 @@ class CaptureEventService:
             last_segment_at=last_segment_at,
         )
 
-    def flush_outbox(self) -> None:
+    def start(self) -> None:
         with self._lock:
-            for path in sorted(self.outbox_dir.glob("*.json")):
-                try:
-                    payload = json.loads(path.read_text(encoding="utf-8"))
-                except Exception:
-                    mqtt_logger.warning("Capture event outbox inválido removido: %s", path)
-                    path.unlink(missing_ok=True)
-                    continue
-                if self._publish(payload):
-                    path.unlink(missing_ok=True)
-            used = sum(
-                path.stat().st_size
-                for path in self.outbox_dir.glob("*.json")
-                if path.is_file() and not path.is_symlink()
+            if self._thread and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._sender_loop,
+                daemon=True,
+                name="capture-event-outbox",
             )
-            if self._status.get("saturated") and used < self.OUTBOX_LIMIT - self.CRITICAL_RESERVE:
-                self._status["saturated"] = False
-                atomic_json(self.status_path, self._status)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+
+    def _sender_loop(self) -> None:
+        while not self._stop.wait(0.25):
+            try:
+                self.flush_outbox()
+            except Exception as exc:
+                mqtt_logger.warning("Capture outbox retry deferred: %s", type(exc).__name__)
+
+    @staticmethod
+    def _event_time(payload: dict[str, Any], path: Path) -> float:
+        try:
+            return datetime.fromisoformat(payload["occurred_at"].replace("Z", "+00:00")).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return path.stat().st_mtime
+
+    def _index_outbox(self) -> None:
+        """Read the legacy UUID files once, ordered by occurrence instead of UUID."""
+        if self._indexed:
+            return
+        queue = []
+        sizes = {}
+        for path in self.outbox_dir.glob("*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("invalid event")
+            except (ValueError, UnicodeError):
+                mqtt_logger.warning("Capture event outbox inválido removido: %s", path.name)
+                path.unlink(missing_ok=True)
+                continue
+            sizes[path] = path.stat().st_size
+            queue.append((self._event_time(payload, path), path.name, path))
+        heapq.heapify(queue)
+        self._queue, self._sizes = queue, sizes
+        self._used_bytes = sum(sizes.values())
+        self._indexed = True
+
+    def flush_outbox(self) -> None:
+        """One nonblocking sender tick; at most one QoS 1 message awaits PUBACK."""
+        with self._lock:
+            if self._inflight is not None:
+                path, receipt = self._inflight
+                if not receipt.is_published():
+                    return  # Paho owns reconnection/redelivery of this same message.
+                path.unlink(missing_ok=True)
+                self._used_bytes -= self._sizes.pop(path, 0)
+                self._inflight = None
+                if (
+                    self._status.get("saturated")
+                    and self._used_bytes < self.OUTBOX_LIMIT - self.CRITICAL_RESERVE
+                ):
+                    self._status["saturated"] = False
+                    atomic_json(self.status_path, self._status)
+            if not self.mqtt_client.is_connected or self._clock() < self._next_publish_at:
+                return
+            self._index_outbox()
+            if not self._queue:
+                return
+            entry = self._queue[0]
+            path = entry[2]
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("invalid event")
+            except (ValueError, UnicodeError, FileNotFoundError):
+                path.unlink(missing_ok=True)
+                heapq.heappop(self._queue)
+                self._used_bytes -= self._sizes.pop(path, 0)
+                return
+            self._next_publish_at = self._clock() + self.PUBLISH_INTERVAL_SEC
+            receipt = self.mqtt_client.publish_json_tracked(
+                self.topic, payload, retain=False, qos=1
+            )
+            if receipt is not None:
+                heapq.heappop(self._queue)
+                self._inflight = (path, receipt)
+                mqtt_logger.debug(
+                    "Capture event queued for MQTT acknowledgement: type=%s camera=%s",
+                    payload.get("type"),
+                    payload.get("camera_id"),
+                )
 
     def _publish_or_store(self, payload: dict[str, Any]) -> None:
-        self.flush_outbox()
-        if self._publish(payload):
-            return
-        self._store(payload)
+        # Producers never drain backlog or perform network I/O.
+        with self._lock:
+            event_type = payload.get("type")
+            camera = str(payload.get("camera_id") or "")
+            key = (camera, str(event_type))
+            now = self._clock()
+            if event_type == _EVENT_TYPE_CAMERA_RECONNECTED:
+                self._recent.pop((camera, _EVENT_TYPE_CAMERA_RECONNECTING), None)
+                self._recent.pop((camera, _EVENT_TYPE_CAMERA_RESTART_FAILED), None)
+            if event_type in {_EVENT_TYPE_CAMERA_RECONNECTING, _EVENT_TYPE_CAMERA_RESTART_FAILED}:
+                previous = self._recent.get(key)
+                if (
+                    previous
+                    and previous[0] == payload.get("reason")
+                    and now - previous[1] < self.REPEAT_INTERVAL_SEC
+                ):
+                    self._status["coalesced"] = int(self._status.get("coalesced", 0)) + 1
+                    try:
+                        atomic_json(self.status_path, self._status)
+                    except OSError:
+                        mqtt_logger.warning("Capture outbox suppression counter could not be saved")
+                    return
+            if self._store(payload) and event_type in {
+                _EVENT_TYPE_CAMERA_RECONNECTING,
+                _EVENT_TYPE_CAMERA_RESTART_FAILED,
+            }:
+                self._recent[key] = (str(payload.get("reason") or ""), now)
 
     def _publish_camera_runtime_event(
         self,
@@ -254,47 +374,39 @@ class CaptureEventService:
             )
         self._publish_or_store(payload)
 
-    def _publish(self, payload: dict[str, Any]) -> bool:
-        published = self.mqtt_client.publish_json(self.topic, payload, retain=False)
-        if published:
-            mqtt_logger.info(
-                "Evento de captura publicado: type=%s camera=%s reason=%s",
-                payload.get("type"),
-                payload.get("camera_id"),
-                payload.get("reason"),
-            )
-        return published
-
-    def _store(self, payload: dict[str, Any]) -> None:
+    def _store(self, payload: dict[str, Any]) -> bool:
         try:
             with self._lock:
+                self._index_outbox()
                 self.outbox_dir.mkdir(parents=True, exist_ok=True)
                 size = len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")) + 1
-                used = sum(
-                    path.stat().st_size
-                    for path in self.outbox_dir.glob("*.json")
-                    if path.is_file() and not path.is_symlink()
-                )
                 limit = (
                     self.OUTBOX_LIMIT
                     if payload.get("severity") == "error"
+                    or payload.get("type") == _EVENT_TYPE_CAMERA_RECONNECTED
                     else self.OUTBOX_LIMIT - self.CRITICAL_RESERVE
                 )
-                if used + size > limit:
+                if self._used_bytes + size > limit:
                     self._status["suppressed"] = int(self._status.get("suppressed", 0)) + 1
+                    was_saturated = self._status.get("saturated")
                     self._status["saturated"] = True
                     self._status["last_saturated_at"] = _now_iso()
                     atomic_json(self.status_path, self._status)
-                    mqtt_logger.error("Capture event outbox saturated; event suppressed")
-                    return
-                atomic_json(self.outbox_dir / f"{payload['event_id']}.json", payload)
-                mqtt_logger.warning(
-                    "Evento de captura armazenado no outbox: %s", payload["event_id"]
-                )
+                    if not was_saturated:
+                        mqtt_logger.error("Capture event outbox saturated; event suppressed")
+                    return False
+                path = self.outbox_dir / f"{payload['event_id']}.json"
+                atomic_json(path, payload)
+                actual_size = path.stat().st_size
+                self._sizes[path] = actual_size
+                self._used_bytes += actual_size
+                heapq.heappush(self._queue, (self._event_time(payload, path), path.name, path))
+                return True
         except Exception as exc:
             mqtt_logger.warning(
                 "Falha ao armazenar evento de captura no outbox: %s", type(exc).__name__
             )
+            return False
 
 
 CaptureEventPublisher = Callable[..., None]

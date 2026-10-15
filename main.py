@@ -610,8 +610,6 @@ def main() -> int:
             snapshot["runtime"]["mqtt_reconnect_count"] = mqtt_client.reconnect_count
             snapshot["runtime"]["last_mqtt_disconnect_at"] = mqtt_client.last_disconnect_at
             snapshot["runtime"]["last_mqtt_disconnect_reason"] = mqtt_client.last_disconnect_reason
-            if capture_event_service is not None:
-                capture_event_service.flush_outbox()
             return snapshot
 
         try:
@@ -700,6 +698,7 @@ def main() -> int:
         else:
             diagnostic_event_service.start()
             if mqtt_presence.start():
+                capture_event_service.start()
                 mqtt_dispatcher.start()
                 mqtt_config_service.start()
                 mqtt_env_service.start()
@@ -1212,6 +1211,8 @@ def main() -> int:
                 mqtt_config_service.stop()
             except Exception:
                 pass
+        if capture_event_service is not None:
+            capture_event_service.stop()
         if mqtt_presence is not None:
             try:
                 if diagnostic_event_service is not None:

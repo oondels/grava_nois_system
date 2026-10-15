@@ -30,6 +30,57 @@ class MQTTClientConcurrencyTests(unittest.TestCase):
         with patch.object(MQTTClient, "_build_client", return_value=self.transport):
             self.client = MQTTClient(config)
 
+    def test_tracked_publish_receipt_waits_for_ack(self):
+        from paho.mqtt.client import MQTTMessageInfo
+
+        self.client._started = True
+        self.client._connected.set()
+        info = MQTTMessageInfo(1)
+        self.transport.publish.return_value = info
+        receipt = self.client.publish_json_tracked("test/events", {"id": "test"}, qos=1)
+        self.assertIs(receipt, info)
+        self.assertFalse(receipt.is_published())
+        info._set_as_published()
+        self.assertTrue(receipt.is_published())
+
+    def test_tracked_publish_preserves_paho_packet_on_disconnect_race(self):
+        from paho.mqtt.client import MQTT_ERR_NO_CONN, MQTTMessageInfo
+
+        self.client._started = True
+        self.client._connected.set()
+        info = MQTTMessageInfo(1)
+        info.rc = MQTT_ERR_NO_CONN
+        self.transport.publish.return_value = info
+        receipt = self.client.publish_json_tracked("test/events", {}, qos=1)
+        self.assertIs(receipt, info)
+        self.assertFalse(receipt.is_published())
+        info._set_as_published()
+        self.assertTrue(receipt.is_published())
+        self.transport.publish.assert_called_once()
+
+    def test_boolean_publish_retains_error_semantics(self):
+        from paho.mqtt.client import MQTT_ERR_NO_CONN, MQTTMessageInfo
+
+        self.client._started = True
+        self.client._connected.set()
+        info = MQTTMessageInfo(1)
+        info.rc = MQTT_ERR_NO_CONN
+        self.transport.publish.return_value = info
+        self.assertFalse(self.client.publish_json("test/events", {}))
+        self.assertEqual(info.rc, MQTT_ERR_NO_CONN)
+
+    def test_tracked_publish_rejects_queue_full_and_skips_disconnected(self):
+        from paho.mqtt.client import MQTT_ERR_QUEUE_SIZE, MQTTMessageInfo
+
+        self.assertIsNone(self.client.publish_json_tracked("test/events", {}))
+        self.transport.publish.assert_not_called()
+        self.client._started = True
+        self.client._connected.set()
+        info = MQTTMessageInfo(1)
+        info.rc = MQTT_ERR_QUEUE_SIZE
+        self.transport.publish.return_value = info
+        self.assertIsNone(self.client.publish_json_tracked("test/events", {}, qos=1))
+
     def test_subscribe_during_reconnect_preserves_ack_routes_and_callbacks(self):
         self.client.subscribe("config/desired", Mock())
         self.client.subscribe("config/request", Mock())

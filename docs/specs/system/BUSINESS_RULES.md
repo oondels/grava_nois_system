@@ -150,6 +150,8 @@ Também devem excluir localmente conflitos de negócio não-retriáveis:
 - buffer sem segmentos recentes muda o diagnóstico da câmera para `UNAVAILABLE`, bloqueia clipes fantasmas e, se persistente, faz o supervisor reiniciar apenas o FFmpeg daquela câmera, sem reiniciar o container;
 - quando o supervisor tenta recuperar FFmpeg/câmera, o snapshot pode expor `camera_status=RECONNECTING` e deve publicar `camera.reconnecting`, `camera.reconnected` ou `camera.restart_failed` em `capture/events`;
 - eventos de `capture/events` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET`; se MQTT estiver indisponível, devem ficar em outbox local para reenvio;
+- `capture/events` usa sempre QoS 1 e envio dedicado de até 1 evento/s, sem drenar fila em callback de conexão, heartbeat ou produtor; cada evento permanece em disco até PUBACK. O histórico legado também respeita o limite.
+- a mesma falha de câmera (`camera.reconnecting` ou `camera.restart_failed`, mesma câmera/tipo/motivo) é emitida no máximo uma vez por 300 s no processo; mudança de motivo ou recuperação permite novo registro imediato na fila. Recuperações e rejeições de gatilhos distintos não são consolidadas; a saúde atual continua em `state`/heartbeat.
 - eventos de `diagnostics/events` devem ser assinados com `DEVICE_SECRET`/`GN_DEVICE_SECRET` e publicados em boot, shutdown limpo, conexão e desconexão MQTT;
 - desconexão MQTT deve registrar motivo/timestamp local e não pode reiniciar o pipeline de captura por si só;
 - `mqtt.log` deve ser separado do `app.log`;

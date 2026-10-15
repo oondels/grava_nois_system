@@ -137,6 +137,10 @@ No modo rental, `RentalOfflineService` mantém o manifesto de agenda HMAC, class
 
 ## MQTT presence layer
 
+`CaptureEventService` apenas persiste eventos nos produtores; `start()`/`stop()` controlam uma thread própria, iniciada com MQTT e encerrada antes dele. O snapshot de presença não drena o outbox. A thread consulta a conexão sem I/O de fila offline e usa relógio monotônico para enviar no máximo 1 novo evento/s, com somente um QoS 1 em voo. `MQTTClient.publish_json_tracked` retorna o recibo Paho para conferir PUBACK sem bloquear; o método booleano existente mantém seu comportamento. Corrida de desconexão com pacote QoS 1 já retido pelo Paho não cria outra publicação.
+
+O índice de arquivos é construído uma vez por processo, ordenando `occurred_at` (mtime como fallback legado); tamanho ocupado é atualizado incrementalmente. Eventos novos e antigos compartilham o limite. O arquivo só é removido após PUBACK; queda do processo pode causar redelivery com o mesmo `event_id` e assinatura. PUBACK confirma o broker, não persistência na API. Falhas idênticas por câmera/tipo/motivo são reduzidas por janela monotônica de 300 s no processo; recuperação limpa a janela da câmera. `status.coalesced` conta repetições reduzidas. A fila antiga é preservada e enviada gradualmente, sem compactação retroativa.
+
 Camada opcional e isolada do pipeline principal:
 
 - cliente MQTT com reconexão controlada e `last will`;

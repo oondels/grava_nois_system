@@ -72,7 +72,7 @@ find queue_raw/.deferred -name manifest.json -type f 2>/dev/null | wc -l
 
 Backups de `.env` (edição remota e configuração operacional) usam no máximo cinco cópias e 30 dias. A fila legada expira apenas falhas terminais comprovadas após 30 dias, em varredura horária; o retry manual remove mídia depois de finalização confirmada. O monitor v3 remove após 30 dias somente manifestos `FINALIZED` já limpos e sem arquivos desconhecidos. `FAILED`, `BLOCKED`, `DEV_PRESERVED`, uploads incertos e originais importados permanecem recuperáveis. Inspecione estes itens antes de limpeza manual; não remova marcadores `.deferred.json` para forçar reimportação.
 
-O outbox de captura limita pendências a 64 MiB, reservando 8 MiB para eventos de erro. `runtime_config/capture_event_outbox/status` registra `suppressed` e `saturated`; a saturação emite erro no log e não apaga eventos ainda pendentes. O alerta global de 4 GB livres continua informativo, sem expurgo geral.
+O outbox de captura limita pendências a 64 MiB, reservando 8 MiB para eventos de erro e recuperação. `runtime_config/capture_event_outbox/status` registra `suppressed`, `saturated` e `coalesced` (repetições de falhas reduzidas); a saturação emite erro no log e não apaga eventos ainda pendentes. O alerta global de 4 GB livres continua informativo, sem expurgo geral.
 
 ## Test coverage present
 
@@ -178,3 +178,20 @@ Para interromper novas operações, volte a flag para `0` e recrie o container. 
 ## Watermarks v2 (2026-10-06)
 
 O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.
+
+## Eventos de captura na reconexão MQTT
+
+O histórico em `runtime_config/capture_event_outbox/*.json` é enviado em ordem de ocorrência, com limite de 1 evento por segundo e um único envio aguardando PUBACK. Não há varredura/envio dessa fila no callback MQTT ou no snapshot de presença. A fila antiga é preservada, sem descarte automático por idade; uma fila extensa pode levar minutos para escoar, enquanto a presença e o estado atual continuam independentes. O limite se aplica a `capture/events`, não aos demais tópicos.
+
+Falhas idênticas de câmera/tipo/motivo geram no máximo um evento a cada 5 minutos por processo. O contador `coalesced` registra as repetições reduzidas; ele não representa perda de clipes. Recuperações, mudanças de motivo e novos gatilhos rejeitados são preservados. O reinício do processo reinicia a janela de redução, mas mantém a fila e seus IDs/assinaturas. Publicações aguardam confirmação do broker; não há ACK de persistência da API nesse contrato. O detalhe de envio por evento fica em DEBUG, sem repetir a mensagem RTSP multilinha em INFO.
+
+Atualização: reconstruir/publicar a imagem do `grava_nois_system` pelo fluxo habitual, baixar no host e recriar o container preservando o volume `runtime_config`. Não apagar `capture_event_outbox`, trocar identidade ou reinstalar scripts do host para esta correção. Não há migration nem mudança de payload/backend.
+
+Teste em ambiente de homologação:
+1. Deixar uma câmera indisponível e interromper o acesso MQTT do device.
+2. Aguardar novas tentativas: o número de eventos repetidos na fila deve ser limitado e `status.coalesced` deve crescer quando houver repetição dentro de 5 minutos.
+3. Restabelecer o broker: presença/heartbeat devem voltar sem esperar o escoamento do histórico; observar no consumidor até 1 novo evento de captura/s por device (redelivery MQTT QoS 1 continua possível).
+4. Restabelecer a câmera: verificar estado atual e evento de recuperação na fila, enviado na sua posição cronológica.
+5. Interromper/reiniciar com evento pendente: o mesmo `event_id` deve continuar disponível para reenvio, sem remoção antecipada.
+
+Cobertura automatizada: `scripts/test_isolated.py tests/test_capture_event_service.py tests/test_mqtt_client.py tests/test_device_presence_service.py tests/test_trigger_fanout.py`. Os testes usam transporte simulado, sem conectar à câmera ou ao broker de produção.

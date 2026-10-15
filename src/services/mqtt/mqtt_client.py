@@ -63,9 +63,7 @@ class MQTTClient:
             )
             return None
         if paho_mqtt is None:
-            mqtt_logger.warning(
-                "paho-mqtt não está instalado; o edge seguirá sem MQTT ativo"
-            )
+            mqtt_logger.warning("paho-mqtt não está instalado; o edge seguirá sem MQTT ativo")
             return None
 
         client = paho_mqtt.Client(client_id=self.config.client_id)
@@ -111,7 +109,9 @@ class MQTTClient:
             try:
                 self._handler_stop.clear()
                 self._handler_thread = threading.Thread(
-                    target=self._handler_worker, daemon=True, name="mqtt-handler",
+                    target=self._handler_worker,
+                    daemon=True,
+                    name="mqtt-handler",
                 )
                 self._handler_thread.start()
                 self._client.connect_async(
@@ -162,11 +162,43 @@ class MQTTClient:
         retain: bool = False,
         qos: int | None = None,
     ) -> bool:
+        info = self._publish_json_info(topic, payload, retain=retain, qos=qos)
+        return info is not None and info.rc == paho_mqtt.MQTT_ERR_SUCCESS
+
+    def publish_json_tracked(
+        self,
+        topic: str,
+        payload: dict[str, Any],
+        *,
+        retain: bool = False,
+        qos: int | None = None,
+    ) -> Any | None:
+        """Return the Paho receipt; acceptance is not a broker acknowledgement."""
+        info = self._publish_json_info(topic, payload, retain=retain, qos=qos)
+        if info is None:
+            return None
+        effective_qos = self.config.qos if qos is None else qos
+        if effective_qos > 0 and info.rc == paho_mqtt.MQTT_ERR_NO_CONN:
+            # Paho 2.1 keeps QoS > 0 packets when the socket disappears during
+            # publish, but never resets this receipt's rc on reconnect. Treat it
+            # as queued so is_published() can observe the eventual PUBACK; do not
+            # enqueue another copy. The legacy boolean API keeps its rc behavior.
+            info.rc = paho_mqtt.MQTT_ERR_SUCCESS
+        return info if info.rc == paho_mqtt.MQTT_ERR_SUCCESS else None
+
+    def _publish_json_info(
+        self,
+        topic: str,
+        payload: dict[str, Any],
+        *,
+        retain: bool,
+        qos: int | None,
+    ) -> Any | None:
         if not self._client:
-            return False
+            return None
         if not self._started or not self.is_connected:
             mqtt_logger.debug("Publish ignorado sem conexão ativa: topic=%s", topic)
-            return False
+            return None
         try:
             info = self._client.publish(
                 topic,
@@ -181,10 +213,10 @@ class MQTTClient:
                     topic,
                     info.rc,
                 )
-            return success
+            return info
         except Exception as exc:
             mqtt_logger.exception("Erro ao publicar em %s: %s", topic, exc)
-            return False
+            return None
 
     def subscribe(
         self,
