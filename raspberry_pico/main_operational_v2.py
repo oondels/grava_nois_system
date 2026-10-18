@@ -17,6 +17,15 @@ PULL_HOLD_MIN_MS = 12000
 SHUTDOWN_CONFIRM_MS = 5000
 WATCHDOG_MS = 10000
 DEBOUNCE_MS = 40
+# Default wiring: GPIO -> resistor -> LED -> GND (HIGH turns the LED on).
+# Set either flag to True for a legacy circuit where LOW turns that LED on.
+SYSTEM_LED_ACTIVE_LOW = False
+ACTIVITY_LED_ACTIVE_LOW = False
+
+
+def led_level(on, active_low=False):
+    """Translate logical illumination to the electrical GPIO level."""
+    return int(bool(on) != bool(active_low))
 
 
 def _elapsed(now_ms, then_ms):
@@ -227,8 +236,8 @@ def run():
     import uselect
     from machine import Pin
 
-    led_system = Pin(14, Pin.OUT, value=1)
-    led_activity = Pin(13, Pin.OUT, value=1)
+    led_system = Pin(14, Pin.OUT, value=led_level(False, SYSTEM_LED_ACTIVE_LOW))
+    led_activity = Pin(13, Pin.OUT, value=led_level(False, ACTIVITY_LED_ACTIVE_LOW))
     btn_1 = Pin(2, Pin.IN, Pin.PULL_UP)
     btn_2 = Pin(3, Pin.IN, Pin.PULL_UP)
     btn_admin = Pin(15, Pin.IN, Pin.PULL_UP)
@@ -271,8 +280,8 @@ def run():
                 print(response)
 
         system_on, activity_on = state.leds(now_ms)
-        led_system.value(0 if system_on else 1)
-        led_activity.value(0 if activity_on else 1)
+        led_system.value(led_level(system_on, SYSTEM_LED_ACTIVE_LOW))
+        led_activity.value(led_level(activity_on, ACTIVITY_LED_ACTIVE_LOW))
         time.sleep_ms(10)
 
 

@@ -51,11 +51,21 @@ saude da camera, MQTT, upload ou locacao.
 | Botao dedicado 1 | 2 | Entrada com pull-up; evento no release `0 -> 1`. |
 | Botao dedicado 2 | 3 | Entrada com pull-up; evento no release `0 -> 1`. |
 | Botao administrativo | 15 | Entrada com pull-up; pressionado em nivel baixo, normalmente ligado ao GND. |
-| LED de atividade | 13 | Saida ativa em nivel baixo. |
-| LED de sistema | 14 | Saida ativa em nivel baixo. |
+| LED de atividade | 13 | Saida ativa em nivel alto por padrao; polaridade configuravel. |
+| LED de sistema | 14 | Saida ativa em nivel alto por padrao; polaridade configuravel. |
 
 Os dois LEDs precisam de resistores em serie. O firmware aplica debounce ao botao
 administrativo e limita eventos repetidos dos botoes dedicados.
+
+O padrao V2 usa GPIO -> resistor -> LED -> GND: nivel alto acende o LED.
+Para circuitos existentes que acendem em nivel baixo, ajuste
+`SYSTEM_LED_ACTIVE_LOW = True` e/ou `ACTIVITY_LED_ACTIVE_LOW = True` no firmware,
+conforme a ligacao de cada LED. As constantes nao sao variaveis do `.env` do host.
+Ao atualizar, copie `raspberry_pico/main_operational_v2.py` para o Pico como
+`main.py` e reinicie o microcontrolador; atualizar apenas o container nao troca o
+firmware. Com camera READY, MQTT CONNECTED, upload IDLE e sem manutencao ou
+feedback temporario, ambos os LEDs ficam acesos. Os padroes logicos de pisca
+permanecem iguais para as duas polaridades.
 
 ### Gestos V2
 

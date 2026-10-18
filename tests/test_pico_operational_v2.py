@@ -64,6 +64,30 @@ class AdminGestureTests(unittest.TestCase):
 
 
 class OperationalStateTests(unittest.TestCase):
+    def test_ready_and_connected_drive_both_leds_high(self) -> None:
+        state = firmware.OperationalState()
+        state.apply_command("GRN_STARTED", 0)
+        state.apply_command("STATE:CAMERA:READY", 1)
+        state.apply_command("STATE:MQTT:CONNECTED", 1)
+        system_on, activity_on = state.leds(100)
+        self.assertEqual(firmware.led_level(system_on, firmware.SYSTEM_LED_ACTIVE_LOW), 1)
+        self.assertEqual(firmware.led_level(activity_on, firmware.ACTIVITY_LED_ACTIVE_LOW), 1)
+
+    def test_error_blinks_system_without_inverting_mqtt_activity(self) -> None:
+        state = firmware.OperationalState()
+        state.camera = "ERROR"
+        state.mqtt = "DISCONNECTED"
+        self.assertEqual(tuple(firmware.led_level(on) for on in state.leds(0)), (1, 0))
+        self.assertEqual(tuple(firmware.led_level(on) for on in state.leds(150)), (0, 0))
+        state.mqtt = "CONNECTED"
+        self.assertEqual(tuple(firmware.led_level(on) for on in state.leds(150)), (0, 1))
+
+    def test_legacy_polarity_can_be_set_per_led(self) -> None:
+        self.assertEqual(firmware.led_level(False, active_low=False), 0)
+        self.assertEqual(firmware.led_level(True, active_low=False), 1)
+        self.assertEqual(firmware.led_level(False, active_low=True), 1)
+        self.assertEqual(firmware.led_level(True, active_low=True), 0)
+
     def test_handshake_capabilities_and_heartbeat(self) -> None:
         state = firmware.OperationalState()
         self.assertEqual(

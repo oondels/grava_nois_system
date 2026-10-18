@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `fix(device)`: corrige polaridade dos LEDs do Pico V2 para circuitos ativos em nivel alto; permite configurar cada LED como ativo em nivel baixo pelas constantes do firmware. Testes cobrem camera pronta, conexao MQTT e compatibilidade eletrica legada; validacao fisica permanece pendente.
+- `docs(config)`: documenta incompatibilidade entre pedidos administrativos antigos de `.env` e o controle HMAC v2, com orientacao para atualizar o build da API implantada.
+
 - `fix(mqtt)`: evita rajadas de `capture/events` após reconexão: envio dedicado de até 1 evento/s, um PUBACK pendente, fila antiga em ordem cronológica e retenção até confirmação do broker. Falhas idênticas por câmera/tipo são limitadas a uma ocorrência por 5 minutos, com contador local; recuperações e novos gatilhos são preservados.
 
 - `fix(config)`: câmera gerenciada sem `rtspUrl` ou com referência de ambiente ausente/vazia, como `GN_RTSP_URL` ou `GN_CAM01_RTSP_URL`, passa a ser ignorada neste boot com aviso sem credenciais, em vez de abortar a inicialização. Câmeras válidas continuam funcionando e clipes pendentes são preservados.

@@ -57,6 +57,12 @@ Segredos, identidade de device e flags de desenvolvimento **nunca** participam d
 
 ## O que permanece em env/secret
 
+A polaridade dos LEDs do Pico V2 e definida no firmware, fora do `.env`:
+`SYSTEM_LED_ACTIVE_LOW` e `ACTIVITY_LED_ACTIVE_LOW` usam `False` (ativo em nivel
+alto) por padrao. Configure `True` individualmente para circuitos ativos em nivel
+baixo e reinstale o firmware como `main.py` no Pico. Consulte
+[PICO_MODELS.md](../../PICO_MODELS.md) para pinagem e estados.
+
 | Variável canônica | Alias legado | Motivo |
 |---|---|---|
 | `DEVICE_SECRET` | `GN_DEVICE_SECRET` | Segredo HMAC — crítico |
@@ -186,7 +192,21 @@ O `DeviceEnvService` permite que admins visualizem e editem remotamente o `.env`
 - `env/desired`: backend envia o novo conteúdo criptografado;
 - `env/reported`: edge responde snapshot, aplicação ou rejeição.
 
-O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<request_id>` antes de alterar o conteúdo e publica `rejected` quando o arquivo não existe ou a assinatura falha. Uma gravação sem mudança não cria backup.
+Os controles administrativos exigem `signature_version=hmac-sha256-v2`, identidade,
+`request_id`, `issued_at`, `expires_at` e assinatura do payload canonico completo.
+Pedidos antigos com `requested_at` e sem esse envelope sao ignorados com
+`Invalid administrative env control ignored`, sem resposta para um controle nao autenticado.
+Se a API ainda registra `env_request_publish_attempt`/`env_sync_requested`, verifique
+o build/imagem efetivamente implantado: o fluxo atual registra `control_requested`,
+`control_published` e, ao receber a resposta autenticada, `verified_report`.
+Avisos simultaneos de schema desconhecendo `processing.watermark.layout`,
+`deferredEnabled` e `additionalWindows` tambem indicam API anterior a esses contratos.
+Atualize e reconstrua/recrie a API implantada, incluindo replicas, antes de repetir
+a sincronizacao. Atualizar somente o checkout nao substitui `dist` ou a imagem em execucao.
+Nao desabilite a validacao HMAC. Com versoes alinhadas, investigue identidade/segredo
+e sincronizacao de relogio sem registrar valores sensiveis.
+
+O conteúdo nunca trafega em texto claro no broker. API e edge usam envelope AES-256-GCM com chave derivada de `DEVICE_SECRET`/`GN_DEVICE_SECRET`. O edge lê e escreve somente o arquivo apontado por `GN_HOST_ENV_PATH`, cria backup `.env.bak.grn.<request_id>` antes de alterar o conteúdo e publica `rejected` em falhas de processamento de pedidos autenticados, como arquivo ausente. Controle com assinatura inválida é ignorado sem report. Uma gravação sem mudança não cria backup.
 
 Quando o admin salva `.env` com `restart_after_apply=true`, o edge solicita ao runner Docker do host a ação `restart_container` em vez de executar Docker dentro do container. Antes do recreate, o runner executa o conversor persistente e regenera atomicamente `config.json` a partir do `.env`; falha na conversao interrompe a acao. Identidade e segredos permanecem somente no `.env`.
 

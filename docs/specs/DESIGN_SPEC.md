@@ -40,6 +40,8 @@ A watermark institucional permanece em todos os novos clipes processados. A logo
 
 O Pico possui modelos V1 legado e V2 operacional separados. O contrato de pinagem, gestos, LEDs e protocolo está em [`docs/PICO_MODELS.md`](../PICO_MODELS.md); regras e configuração ficam em `system/BUSINESS_RULES.md` e `system/CONFIGURATION.md`.
 
+No V2, a polaridade eletrica e configuravel por LED no firmware, com padrao ativo em nivel alto; estados logicos e protocolo serial permanecem iguais. Circuitos ativos em nivel baixo exigem ajuste das constantes antes de instalar `main.py` no Pico.
+
 Objetivo desta estrutura:
 
 - localizar rapidamente a área correta do edge;

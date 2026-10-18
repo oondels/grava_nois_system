@@ -593,6 +593,8 @@ Existem dois modelos de firmware, com comportamento visual e gestos diferentes:
 
 Pinagem, gestos, LEDs, protocolo e compatibilidade estao documentados separadamente em [`docs/PICO_MODELS.md`](docs/PICO_MODELS.md). Nao use a leitura de LED do V1 para diagnosticar um Pico V2.
 
+O firmware V2 usa LEDs ativos em nivel alto por padrao. Para circuitos ativos em nivel baixo, ajuste `SYSTEM_LED_ACTIVE_LOW` e/ou `ACTIVITY_LED_ACTIVE_LOW` para `True` no arquivo antes de copia-lo ao Pico como `main.py` e reiniciar o microcontrolador. Atualizar o container nao atualiza o firmware do Pico.
+
 Lógica comum de roteamento ao receber um token pela serial:
 1. `ACK_GRN_STARTED` → log info, ignorado (confirmação do handshake)
 2. Token de manutenção host (`PULL_DOCKER`/`RESTART_DOCKER` e, no V2 autorizado, `SHUTDOWN_HOST`) → grava uma solicitação em `runtime_config` para o host executar via systemd
