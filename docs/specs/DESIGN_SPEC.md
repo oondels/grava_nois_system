@@ -36,7 +36,7 @@ Controle administrativo v2, assinaturas, idempotência, ACK e migração do runn
 
 `grava_nois_system` é o software edge de captura e upload do ecossistema Grava Nóis. Esta spec é a entrada principal para lookup por code agents e auditoria técnica.
 
-A watermark institucional permanece em todos os novos clipes processados. A logo secundária do cliente é controlada exclusivamente pelo `.env` com `GN_CLIENT_WATERMARK_ENABLED`, habilitada por padrão.
+A watermark institucional permanece em todos os novos clipes processados. A logo secundária do cliente é controlada exclusivamente pelo `.env` com `GN_CLIENT_WATERMARK_ENABLED`, habilitada por padrão. No encode, imagens do cliente ausentes são omitidas com aviso, sem bloquear a geração do vídeo; a institucional continua obrigatória. Detalhes em [system/PIPELINE.md](system/PIPELINE.md).
 
 O Pico possui modelos V1 legado e V2 operacional separados. O contrato de pinagem, gestos, LEDs e protocolo está em [`docs/PICO_MODELS.md`](../PICO_MODELS.md); regras e configuração ficam em `system/BUSINESS_RULES.md` e `system/CONFIGURATION.md`.
 
@@ -87,3 +87,5 @@ As specs são lookup e compressão de contexto. A fonte de verdade final continu
 3. estas specs.
 
 Quando houver divergência, a spec deve ser atualizada para refletir o comportamento real do edge.
+
+Câmeras em quadras distintas do mesmo cliente: [contrato e rollout](system/CAMERA_VENUE_ASSIGNMENTS.md).

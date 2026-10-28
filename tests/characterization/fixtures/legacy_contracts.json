@@ -1,6 +1,9 @@
 {
   "enqueue_sidecar": {
     "type": "highlight_raw",
+    "camera_id": "cam-a",
+    "capture_venue_id": null,
+    "camera_assignment_enabled": false,
     "created_at": "<TIMESTAMP>",
     "file_name": "highlight_cam-a_contract.mp4",
     "size_bytes": 0,

@@ -31,6 +31,14 @@ class ManagedCameraConfigTests(unittest.TestCase):
             with patch.dict(os.environ, values, clear=True):
                 return load_capture_configs(base=base, seg_time=1)
 
+    def test_two_cameras_keep_distinct_venues(self):
+        venues = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]
+        configs = self._load({"version": 1, "cameras": [
+            {"id": f"cam{i}", "venueId": venue, "rtspUrl": "rtsp://camera.example/live"}
+            for i, venue in enumerate(venues)
+        ]})
+        self.assertEqual(venues, [cfg.venue_id for cfg in configs])
+
     def test_empty_managed_array_disables_all_sources_without_legacy_fallback(self) -> None:
         self.assertEqual([], self._load({"version": 1, "cameras": []}))
 

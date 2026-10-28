@@ -22,6 +22,7 @@ class CaptureConfig:
     failed_dir_highlight: Path
     source_type: str = "rtsp"
     camera_name: Optional[str] = None
+    venue_id: Optional[str] = None
     rtsp_url: Optional[str] = None
     device: str = "/dev/video0"
     seg_time: int = 1
@@ -224,6 +225,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
         pico_trigger_token: Optional[str] = None,
         pre_seg_override: Optional[int] = None,
         post_seg_override: Optional[int] = None,
+        venue_id: Optional[str] = None,
     ) -> CaptureConfig:
         camera_suffix = Path(camera_id) if use_isolated_dirs else Path()
         _pre_seg = pre_seg_override if pre_seg_override is not None else pre_seg_cfg
@@ -231,6 +233,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
         return CaptureConfig(
             camera_id=camera_id,
             camera_name=camera_name,
+            venue_id=venue_id,
             source_type="rtsp",
             rtsp_url=url,
             buffer_dir=buffer_base / camera_suffix,
@@ -258,6 +261,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                     CaptureConfig(
                         camera_id=cam.id,
                         camera_name=cam.name,
+                        venue_id=cam.venue_id,
                         source_type="v4l2",
                         buffer_dir=buffer_base,
                         clips_dir=base / "recorded_clips",
@@ -302,6 +306,7 @@ def load_capture_configs(base: Path, seg_time: int) -> List[CaptureConfig]:
                     pico_trigger_token=cam.pico_trigger_token,
                     pre_seg_override=cam.pre_segments,
                     post_seg_override=cam.post_segments,
+                    venue_id=cam.venue_id,
                 )
             )
         return configs

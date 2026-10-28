@@ -42,6 +42,7 @@ class HostActionContractTests(unittest.TestCase):
         self.runtime.mkdir(parents=True)
         self.env = self.base / "config/.env"
         self.env.write_text("GN_PICO_DOCKER_ACTIONS_ENABLED=1\n")
+        (self.base / "compose.yml").write_text("services: {}\n")
         self.secret_dir = self.base / "secrets"
         self.service = DockerActionRequestService(
             enabled=True,
@@ -122,7 +123,9 @@ class HostActionContractTests(unittest.TestCase):
         self.assertEqual(intent["source"], "mqtt")
         self.assertEqual(intent["schema_version"], 2)
         commands = self.run_host()
-        self.assertEqual(commands.call_count, 2)
+        stages = [call.args[1] for call in commands.call_args_list]
+        self.assertIn("config_json", stages)
+        self.assertIn("docker_recreate", stages)
         self.dispatcher.poll_once()
         final = self.client.published[-1][1]
         self.assertEqual(final["status"], "succeeded")

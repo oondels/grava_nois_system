@@ -141,7 +141,7 @@ Ao importar sidecar legado, `remote_finalize.status=ok` prevalece sobre o status
 
 ## 7. Worker processing path
 
-Nos dois modos e formatos, a logo horizontal do cliente fica no canto inferior esquerdo (`client_logo_wm.png`, alternativa `client_logo.png`) e a logo circular fica no canto superior esquerdo (`client_logo_top_wm.png`, alternativa `client_logo_top.png`). A logo superior é opcional: sua ausência não bloqueia processamento. Ambas usam margem e opacidade de `processing.watermark.*`; sobre a largura relativa base, a superior aplica fator 0.70 e a inferior 1.05, preservando a proporção, e são omitidas com `GN_CLIENT_WATERMARK_ENABLED=0`. A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical, dentro da safe zone. A seleção legada ocorre na inicialização; o manifesto gerenciado é resolvido a cada processamento/política e usa revisões imutáveis. Snapshots diferidos e clipes já processados não são recompostos durante reenvios. Ver [MAINTENANCE.md](MAINTENANCE.md).
+Nos dois modos e formatos, a logo horizontal do cliente fica no canto inferior esquerdo (`client_logo_wm.png`, alternativa `client_logo.png`) e a logo circular fica no canto superior esquerdo (`client_logo_top_wm.png`, alternativa `client_logo_top.png`). As duas logos do cliente são opcionais: no encode, cada imagem ausente é omitida com warning, preservando as demais e permitindo continuar até upload/finalize sem consumir retries por essa ausência. A imagem institucional continua obrigatória. Ambas usam margem e opacidade de `processing.watermark.*`; sobre a largura relativa base, a superior aplica fator 0.70 e a inferior 1.05, preservando a proporção, e são omitidas com `GN_CLIENT_WATERMARK_ENABLED=0`. A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical, dentro da safe zone. A seleção legada ocorre na inicialização; o manifesto gerenciado é resolvido a cada processamento/política e usa revisões imutáveis. Snapshots diferidos e clipes já processados não são recompostos durante reenvios. Ver [MAINTENANCE.md](MAINTENANCE.md).
 
 ### Normal mode (light_mode=false)
 
@@ -215,3 +215,5 @@ As rotas protegidas por HMAC são:
 ## Watermarks v2 (2026-10-06)
 
 O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.
+
+Vínculos por câmera, ingestão e compatibilidade: [CAMERA_VENUE_ASSIGNMENTS](CAMERA_VENUE_ASSIGNMENTS.md).

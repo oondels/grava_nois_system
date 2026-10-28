@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `fix(video)`: omite com aviso logos do cliente ausentes no encode, em vez de bloquear o processamento e consumir retries; preserva a marca institucional obrigatória e as demais logos. Testes cobrem os filtros horizontal/vertical e layout v2, além de geração real com FFmpeg sem imagens do cliente.
+
 - `fix(device)`: corrige polaridade dos LEDs do Pico V2 para circuitos ativos em nivel alto; permite configurar cada LED como ativo em nivel baixo pelas constantes do firmware. Testes cobrem camera pronta, conexao MQTT e compatibilidade eletrica legada; validacao fisica permanece pendente.
 - `docs(config)`: documenta incompatibilidade entre pedidos administrativos antigos de `.env` e o controle HMAC v2, com orientacao para atualizar o build da API implantada.
 
@@ -266,3 +268,10 @@
 - Posicionamento das 2 logos ajustado para centro (empilhadas).
 - `main.py` passou a priorizar automaticamente arquivos `_wm.png` quando existirem.
 - README atualizado com o comportamento atual do watermark e uso do script de otimizacao.
+
+## Câmeras por quadra — 2026-10-27
+
+- Origem explícita dispositivo/câmera/quadra, vínculos administrativos com histórico e snapshots nas filas. API/migration antes do edge; sem implantação nesta entrega.
+
+
+O adaptador de snapshot legado projeta explicitamente os campos escalares da watermark; layout v2 continua no snapshot do pipeline de processamento. O contrato de sidecar inclui origem de câmera/quadra também no caso legado, com vínculo desabilitado.

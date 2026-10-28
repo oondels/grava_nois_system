@@ -13,6 +13,7 @@ class ConfigurationSnapshotTests(unittest.TestCase):
     def test_snapshot_is_deeply_detached_from_legacy_config(self):
         legacy = OperationalConfig(cameras=[CameraConfig(id="cam-1")])
 
+        legacy.processing.watermark.layout = {"version": 2}
         snapshot = LegacyOperationalConfigAdapter(legacy).load()
         legacy.cameras.append(CameraConfig(id="cam-2"))
 

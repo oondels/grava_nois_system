@@ -228,6 +228,9 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
     meta = ffprobe_metadata(clip_path)
     payload = {
         "type": "highlight_raw",
+        "camera_id": cfg.camera_id,
+        "camera_assignment_enabled": bool(getattr(cfg, "venue_id", None)),
+        "capture_venue_id": getattr(cfg, "venue_id", None) or os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID"),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "file_name": clip_path.name,
         "size_bytes": size_bytes,
@@ -280,6 +283,7 @@ def add_image_watermark(
     - Em `vertical_format`, a marca d'água é posicionada no topo central dentro da safe zone.
     - A logo secundária fica no canto inferior esquerdo e a logo superior opcional
       no canto superior esquerdo, em ambos os formatos, com `margin` da quina.
+      Imagens do cliente ausentes são omitidas com aviso; a principal é obrigatória.
     - No horizontal, a logo principal permanece centralizada no rodapé.
     - Requer ffmpeg no PATH.
     """
@@ -296,11 +300,17 @@ def add_image_watermark(
     if not wm_p.exists():
         raise FileNotFoundError(f"Watermark inexistente: {watermark_path}")
     if secondary_wm_p is not None and not secondary_wm_p.exists():
-        raise FileNotFoundError(
-            f"Watermark secundária inexistente: {secondary_watermark_path}"
+        logger.warning(
+            "Watermark secundária inexistente: %s; continuando sem esta logo.",
+            secondary_watermark_path,
         )
+        secondary_wm_p = None
     if top_wm_p is not None and not top_wm_p.exists():
-        raise FileNotFoundError(f"Watermark superior inexistente: {top_watermark_path}")
+        logger.warning(
+            "Watermark superior inexistente: %s; continuando sem esta logo.",
+            top_watermark_path,
+        )
+        top_wm_p = None
 
     meta = ffprobe_metadata(in_p)
     vw = int(meta.get("width") or 0)

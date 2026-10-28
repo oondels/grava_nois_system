@@ -10,7 +10,7 @@ As imagens ficam em `files/client-versions/<sha256>.png`, no volume corresponden
 
 A fila limitada do serviço de configuração executa transferências fora do callback de rede MQTT. O worker imediato salva atomicamente `watermark_snapshot` no sidecar antes de processar; retries reutilizam esse snapshot. O modo diferido usa a política por câmera e copia assets para o job, preservando trabalhos admitidos antes de uma mudança.
 
-`add_image_watermark` compõe filtros FFmpeg independentes por slot, com escala contain e multiplicação do canal alpha pela opacidade. O crop vertical antecede os overlays e usa dimensões pares explícitas. Sem layout v2, o processamento legado continua com os três PNGs e seus fatores de escala anteriores.
+`add_image_watermark` compõe filtros FFmpeg independentes por slot, com escala contain e multiplicação do canal alpha pela opacidade. O crop vertical antecede os overlays e usa dimensões pares explícitas. Sem layout v2, o processamento legado continua com os três PNGs e seus fatores de escala anteriores. Na etapa de encode, caminhos de imagens do cliente que já não existem são omitidos com aviso, preservando as demais logos e os índices de entrada FFmpeg; a imagem institucional permanece obrigatória. Isso não relaxa a validação de integridade nem a preparação de assets/snapshots v2 anteriores ao encode.
 
 ## Configuração e operação
 

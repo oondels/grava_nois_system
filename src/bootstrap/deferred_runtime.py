@@ -460,6 +460,8 @@ class DeferredRuntime:
                     schema_version=3,
                     details={
                         **self.identity,
+                        "capture_venue_id": meta.get("capture_venue_id") or self.identity.get("venue_id"),
+                        "camera_assignment_enabled": bool(meta.get("camera_assignment_enabled")),
                         "captured_at": captured,
                         "timestamp_source": "legacy_metadata",
                         "requested": {

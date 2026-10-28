@@ -97,7 +97,7 @@ separadamente por `mqtt.broker.tls`.
 
 `GN_CLIENT_WATERMARK_ENABLED` não participa de `config.json` nem da configuração remota MQTT. Com `0`, ambas as logos do cliente são omitidas; a watermark Grava Nóis continua obrigatória. A flag ausente equivale a `1` e a mudança vale após reiniciar o edge, para novos processamentos.
 
-Em ambos os formatos, a logo `files/client_logo_wm.png` (alternativa: `client_logo.png`) fica no canto inferior esquerdo. A logo `files/client_logo_top_wm.png` (alternativa: `client_logo_top.png`) fica no canto superior esquerdo e é omitida quando ambos os arquivos estão ausentes. A largura base vem de `processing.watermark.relativeWidth`: a logo superior usa fator 0.70 e a inferior 1.05, preservando a proporção (base de 20% resulta em 14% e 21% da largura final). Ambas seguem `opacity` e `margin`; não há novas variáveis de configuração. Para afastamento de 5 px das quinas, use `processing.watermark.margin=5` (ou `GN_WM_MARGIN=5` quando o JSON não definir essa margem). A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical dentro da safe zone.
+Em ambos os formatos, a logo `files/client_logo_wm.png` (alternativa: `client_logo.png`) fica no canto inferior esquerdo. A logo `files/client_logo_top_wm.png` (alternativa: `client_logo_top.png`) fica no canto superior esquerdo. No encode, cada logo do cliente é omitida com aviso se sua imagem estiver ausente, sem bloquear o vídeo; a marca institucional continua obrigatória. A largura base vem de `processing.watermark.relativeWidth`: a logo superior usa fator 0.70 e a inferior 1.05, preservando a proporção (base de 20% resulta em 14% e 21% da largura final). Ambas seguem `opacity` e `margin`; não há novas variáveis de configuração. Para afastamento de 5 px das quinas, use `processing.watermark.margin=5` (ou `GN_WM_MARGIN=5` quando o JSON não definir essa margem). A marca Grava Nóis permanece centralizada no rodapé horizontal ou no topo vertical dentro da safe zone.
 
 ---
 
@@ -425,3 +425,8 @@ O editor por câmera, contrato normalizado, catálogo durável, compatibilidade 
 Reenvio autenticado da mesma versão/hash pendente com `restart_after_apply=true` solicita reinício sem regravar a configuração. Versão já aplicada não reinicia novamente. `config.restart.json`, privado e persistente junto ao config, vincula UUID do IPC à versão/hash/correlation e conserva a intenção antes da admissão. A recuperação reutiliza esse UUID; resultados desconhecidos nunca repetem o efeito. Nova tentativa após falha conhecida exige envelope explícito com `issued_at` posterior. Confirmar a versão/hash aplicada encerra a intenção anterior.
 
 O monitor reconcilia requests/processing/results e a cópia durável em `device-operations/host-results`. A configuração permanece `pending_restart` quando a admissão ou execução falha. `applied` depende da configuração efetiva no startup, não da admissão no runner. Reports podem incluir `restart` com `request_id`, `status`, `stage`, `error_code`; o HMAC inclui esses quatro campos nessa ordem, após `:restart:`. Estados: prepared, queued, running, failed, unknown, succeeded. A API compatível deve ser implantada antes do edge.
+
+Vínculos por câmera, ingestão e compatibilidade: [CAMERA_VENUE_ASSIGNMENTS](CAMERA_VENUE_ASSIGNMENTS.md).
+
+
+O adaptador de snapshot legado projeta explicitamente os campos escalares da watermark; layout v2 continua no snapshot do pipeline de processamento. O contrato de sidecar inclui origem de câmera/quadra também no caso legado, com vínculo desabilitado.

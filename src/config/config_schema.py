@@ -161,6 +161,12 @@ def validate_config_dict(data: dict[str, Any]) -> list[str]:
                     continue
                 if not cam.get("id"):
                     errors.append(f"cameras[{i}].id é obrigatório e não pode ser vazio")
+                if "venueId" in cam:
+                    try:
+                        from uuid import UUID
+                        UUID(str(cam["venueId"]))
+                    except (ValueError, TypeError, AttributeError):
+                        errors.append(f"cameras[{i}].venueId deve ser UUID")
                 src_type = cam.get("sourceType", "rtsp")
                 if src_type not in _VALID_SOURCE_TYPES:
                     errors.append(

@@ -92,7 +92,13 @@ def _to_snapshot(
             light_mode=config.processing.light_mode,
             max_attempts=config.processing.max_attempts,
         ),
-        watermark=WatermarkSnapshot(**vars(config.processing.watermark)),
+        # This legacy scalar snapshot is separate from the v2 layout snapshot
+        # captured by the processing pipeline; do not forward mutable layout data.
+        watermark=WatermarkSnapshot(
+            relative_width=config.processing.watermark.relative_width,
+            opacity=config.processing.watermark.opacity,
+            margin=config.processing.watermark.margin,
+        ),
         operation_window=OperationWindowSnapshot(**vars(config.operation_window)),
         mqtt=MqttSnapshot(
             enabled=config.mqtt.enabled,
