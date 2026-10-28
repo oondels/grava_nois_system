@@ -155,6 +155,7 @@ class CameraConfig:
     """
 
     id: str
+    venue_id: Optional[str] = None
     name: Optional[str] = None
     enabled: bool = True
     source_type: str = "rtsp"
@@ -617,6 +618,7 @@ def _apply_json(base: OperationalConfig, data: dict[str, Any]) -> OperationalCon
             cameras.append(
                 CameraConfig(
                     id=cam_id,
+                    venue_id=cam.get("venueId"),
                     name=cam.get("name"),
                     enabled=cam.get("enabled", True),
                     source_type=cam.get("sourceType", "rtsp"),

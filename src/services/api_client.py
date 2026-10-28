@@ -287,7 +287,10 @@ class GravaNoisAPIClient:
             url = f"{self.api_base}/api/videos/rental/metadata"
             metadados = {key: value for key, value in metadados.items() if key != "venue_id"}
         else:
-            url = f"{self.api_base}/api/videos/metadados/client/{self.client_id}/venue/{self.venue_id}"
+            from uuid import UUID
+            target_venue = str(metadados.get("venue_id") or self.venue_id)
+            UUID(target_venue)  # validate before interpolating a locally persisted identifier
+            url = f"{self.api_base}/api/videos/metadados/client/{self.client_id}/venue/{target_venue}"
         headers = {"Content-Type": "application/json"}
 
         if self.api_token:

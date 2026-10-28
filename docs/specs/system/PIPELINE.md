@@ -215,3 +215,5 @@ As rotas protegidas por HMAC são:
 ## Watermarks v2 (2026-10-06)
 
 O editor por câmera, contrato normalizado, catálogo durável, compatibilidade e implantação estão em [WATERMARK_LAYOUT.md](WATERMARK_LAYOUT.md). As regras anteriores de geometria fixa e troca de PNG permanecem apenas para devices sem layout v2.
+
+Vínculos por câmera, ingestão e compatibilidade: [CAMERA_VENUE_ASSIGNMENTS](CAMERA_VENUE_ASSIGNMENTS.md).

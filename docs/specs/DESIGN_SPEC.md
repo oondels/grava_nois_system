@@ -87,3 +87,5 @@ As specs são lookup e compressão de contexto. A fonte de verdade final continu
 3. estas specs.
 
 Quando houver divergência, a spec deve ser atualizada para refletir o comportamento real do edge.
+
+Câmeras em quadras distintas do mesmo cliente: [contrato e rollout](system/CAMERA_VENUE_ASSIGNMENTS.md).

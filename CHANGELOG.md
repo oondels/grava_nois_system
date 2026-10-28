@@ -268,3 +268,7 @@
 - Posicionamento das 2 logos ajustado para centro (empilhadas).
 - `main.py` passou a priorizar automaticamente arquivos `_wm.png` quando existirem.
 - README atualizado com o comportamento atual do watermark e uso do script de otimizacao.
+
+## Câmeras por quadra — 2026-10-27
+
+- Origem explícita dispositivo/câmera/quadra, vínculos administrativos com histórico e snapshots nas filas. API/migration antes do edge; sem implantação nesta entrega.

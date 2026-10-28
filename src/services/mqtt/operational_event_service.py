@@ -127,6 +127,8 @@ class OperationalEventService:
                         captured_at=job.details.get("captured_at"),
                         attempt=job.details.get("attempts_by_stage", {}).get(stage, 0),
                     )
+                if job and job.details.get("camera_assignment_enabled"):
+                    payload["capture_venue_id"] = job.details.get("capture_venue_id")
                 if event_type in {"capture.preserved", "capture.not_preserved"}:
                     log = logger.info if event_type == "capture.preserved" else logger.warning
                     log(

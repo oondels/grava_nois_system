@@ -1849,3 +1849,5 @@ Em caso de problemas:
 
 **Última atualização:** 2026-09-29
 **Versão:** 2.4.0 (multi-botão Pico por câmera + cooldown por câmera)
+
+Câmeras em quadras distintas do mesmo cliente: [contrato e rollout](docs/specs/system/CAMERA_VENUE_ASSIGNMENTS.md).

@@ -150,3 +150,5 @@ PY
 bash -n env_to_config.sh
 git diff --check
 ```
+
+Vínculos por câmera, ingestão e compatibilidade: [CAMERA_VENUE_ASSIGNMENTS](CAMERA_VENUE_ASSIGNMENTS.md).

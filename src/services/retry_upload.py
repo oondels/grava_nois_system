@@ -166,7 +166,8 @@ def retry_failed_uploads(
             meta_up = ffprobe_metadata(video_path)
 
             payload = {
-                "venue_id": api_client.venue_id,
+                "venue_id": meta.get("capture_venue_id") or api_client.venue_id,
+                **({"camera_id": meta["camera_id"]} if meta.get("camera_assignment_enabled") else {}),
                 "duration_sec": float(meta_up.get("duration_sec") or 0.0),
                 "captured_at": meta.get("created_at"),
                 "meta": meta_up,
