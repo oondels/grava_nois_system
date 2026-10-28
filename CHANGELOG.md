@@ -272,3 +272,6 @@
 ## Câmeras por quadra — 2026-10-27
 
 - Origem explícita dispositivo/câmera/quadra, vínculos administrativos com histórico e snapshots nas filas. API/migration antes do edge; sem implantação nesta entrega.
+
+
+O adaptador de snapshot legado projeta explicitamente os campos escalares da watermark; layout v2 continua no snapshot do pipeline de processamento. O contrato de sidecar inclui origem de câmera/quadra também no caso legado, com vínculo desabilitado.

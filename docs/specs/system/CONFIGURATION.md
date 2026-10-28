@@ -427,3 +427,6 @@ Reenvio autenticado da mesma versão/hash pendente com `restart_after_apply=true
 O monitor reconcilia requests/processing/results e a cópia durável em `device-operations/host-results`. A configuração permanece `pending_restart` quando a admissão ou execução falha. `applied` depende da configuração efetiva no startup, não da admissão no runner. Reports podem incluir `restart` com `request_id`, `status`, `stage`, `error_code`; o HMAC inclui esses quatro campos nessa ordem, após `:restart:`. Estados: prepared, queued, running, failed, unknown, succeeded. A API compatível deve ser implantada antes do edge.
 
 Vínculos por câmera, ingestão e compatibilidade: [CAMERA_VENUE_ASSIGNMENTS](CAMERA_VENUE_ASSIGNMENTS.md).
+
+
+O adaptador de snapshot legado projeta explicitamente os campos escalares da watermark; layout v2 continua no snapshot do pipeline de processamento. O contrato de sidecar inclui origem de câmera/quadra também no caso legado, com vínculo desabilitado.
