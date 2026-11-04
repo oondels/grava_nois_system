@@ -229,6 +229,7 @@ def enqueue_clip(cfg: CaptureConfig, clip_path: Path) -> Path:
     payload = {
         "type": "highlight_raw",
         "camera_id": cfg.camera_id,
+        "camera_metadata_enabled": True,
         "camera_assignment_enabled": bool(getattr(cfg, "venue_id", None)),
         "capture_venue_id": getattr(cfg, "venue_id", None) or os.getenv("GN_VENUE_ID") or os.getenv("VENUE_ID"),
         "created_at": datetime.now(timezone.utc).isoformat(),

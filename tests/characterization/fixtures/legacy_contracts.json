@@ -4,6 +4,7 @@
     "camera_id": "cam-a",
     "capture_venue_id": null,
     "camera_assignment_enabled": false,
+    "camera_metadata_enabled": true,
     "created_at": "<TIMESTAMP>",
     "file_name": "highlight_cam-a_contract.mp4",
     "size_bytes": 0,

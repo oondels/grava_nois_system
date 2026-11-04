@@ -1,5 +1,7 @@
 # DESIGN_SPEC - Grava Nois System
 
+Novos clipes fixed/rental enviam e armazenam camera_id; filas anteriores preservam o contrato original. Fixed continua exigindo vínculo câmera–quadra válido. API deve ser atualizada antes do edge.
+
 Controle de rajadas MQTT de captura: fila persistente com envio dedicado limitado, confirmação PUBACK e redução de falhas repetidas. Arquitetura em [system/ARCHITECTURE.md](system/ARCHITECTURE.md) e atualização/teste em [system/OPERATIONS.md](system/OPERATIONS.md#eventos-de-captura-na-reconexão-mqtt).
 
 Status em 2026-10-07: recuperação com captura parada, configuração com reinício, atualização remota de logos/layout por câmera e diagnósticos/logs implementados e validados no dispositivo piloto, conforme confirmação do responsável. Evidência e pré-requisitos: [system/MAINTENANCE.md](system/MAINTENANCE.md).

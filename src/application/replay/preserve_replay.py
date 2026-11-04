@@ -59,6 +59,7 @@ class PreserveReplay:
             details={
                 **identity,
                 "capture_venue_id": getattr(cfg, "venue_id", None) or identity.get("venue_id"),
+                "camera_metadata_enabled": True,
                 "camera_assignment_enabled": bool(getattr(cfg, "venue_id", None)),
                 "trigger_id": trigger_id,
                 "captured_at": captured_at,

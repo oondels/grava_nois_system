@@ -10,6 +10,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
+from src.services.clip_origin import clip_origin
 from src.infrastructure.filesystem.deferred_repository import atomic_json
 from src.services.api_client import GravaNoisAPIClient
 from src.services.api_error_policy import extract_api_error_from_exception
@@ -166,8 +167,7 @@ def retry_failed_uploads(
             meta_up = ffprobe_metadata(video_path)
 
             payload = {
-                "venue_id": meta.get("capture_venue_id") or api_client.venue_id,
-                **({"camera_id": meta["camera_id"]} if meta.get("camera_assignment_enabled") else {}),
+                **clip_origin(meta, api_client.venue_id),
                 "duration_sec": float(meta_up.get("duration_sec") or 0.0),
                 "captured_at": meta.get("created_at"),
                 "meta": meta_up,

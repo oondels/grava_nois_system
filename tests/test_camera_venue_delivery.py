@@ -31,6 +31,7 @@ class CameraVenueDeliveryTests(unittest.TestCase):
             self.assertEqual("cam2", payload["camera_id"])
             self.assertEqual("court-b", payload["capture_venue_id"])
             self.assertTrue(payload["camera_assignment_enabled"])
+            self.assertTrue(payload["camera_metadata_enabled"])
 
     def test_deferred_restart_uses_original_court_after_config_change(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -38,7 +39,8 @@ class CameraVenueDeliveryTests(unittest.TestCase):
             job = ClipJob("job", CameraId("cam2"), "artifacts/raw.mp4", datetime.now(UTC),
                 artifact_location="artifacts/final.mp4", schema_version=3, details={
                     "device_id": "d1", "client_id": "c1", "venue_id": "principal",
-                    "capture_venue_id": "original-court", "camera_assignment_enabled": True,
+                    "capture_venue_id": "original-court", "camera_assignment_enabled": False,
+                    "camera_metadata_enabled": True,
                     "captured_at": "2026-01-01T12:00:00Z", "policy": {},
                 })
             jobs.save(job)
@@ -51,3 +53,14 @@ class CameraVenueDeliveryTests(unittest.TestCase):
             payload = client.register_clip_metadados.call_args.args[0]
             self.assertEqual("original-court", payload["venue_id"])
             self.assertEqual("cam2", payload["camera_id"])
+
+    def test_origin_new_unmapped_and_legacy_compatibility(self):
+        from src.services.clip_origin import clip_origin
+        for camera in ("cam01", "cam02"):
+            meta = {"camera_id": camera, "camera_metadata_enabled": True}
+            self.assertEqual(clip_origin(meta, "principal"), {"camera_id": camera, "venue_id": "principal"})
+            self.assertEqual(clip_origin(meta, None), {"camera_id": camera, "venue_id": None})
+        self.assertEqual(clip_origin({"camera_id": "old"}, "principal"), {"venue_id": "principal"})
+        self.assertEqual(clip_origin({"camera_assignment_enabled": True, "camera_id": "mapped", "capture_venue_id": "old-court"}, "new-court"), {"camera_id": "mapped", "venue_id": "old-court"})
+        with self.assertRaises(ValueError):
+            clip_origin({"camera_metadata_enabled": True}, "principal")
