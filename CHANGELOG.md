@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `fix(video)`: envia camera_id em novos clipes independentemente de venueId explícito, preserva origem nos reenvios e mantém compatibilidade das filas antigas. API rental aceita e persiste câmera/dispositivo e rejeita conflito de origem. Sem nova migration; publicar API antes do edge.
+
 - `fix(video)`: omite com aviso logos do cliente ausentes no encode, em vez de bloquear o processamento e consumir retries; preserva a marca institucional obrigatória e as demais logos. Testes cobrem os filtros horizontal/vertical e layout v2, além de geração real com FFmpeg sem imagens do cliente.
 
 - `fix(device)`: corrige polaridade dos LEDs do Pico V2 para circuitos ativos em nivel alto; permite configurar cada LED como ativo em nivel baixo pelas constantes do firmware. Testes cobrem camera pronta, conexao MQTT e compatibilidade eletrica legada; validacao fisica permanece pendente.

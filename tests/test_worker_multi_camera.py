@@ -62,6 +62,25 @@ class WorkerMultiCameraTests(unittest.TestCase):
         self._tmp.cleanup()
         reset_config_cache()
 
+    def test_worker_sends_unmapped_camera_snapshot(self, mock_api_cls, _ffprobe, _wm):
+        client = mock_api_cls.return_value
+        client.is_configured.return_value = True
+        client.venue_id = "current-court"
+        client.extract_clip_registration.return_value = {"clip_id": "clip", "upload_url": "https://example.test/upload"}
+        client.upload_file_to_signed_url.return_value = (200, "ok", {})
+        queue = self.base / "queue"
+        clip = _place_mp4(queue, "highlight.mp4")
+        clip.with_suffix(".json").write_text(json.dumps({
+            "camera_id": "cam01", "camera_metadata_enabled": True,
+            "camera_assignment_enabled": False, "capture_venue_id": "captured-court",
+            "created_at": "2026-01-01T12:00:00Z", "status": "queued",
+        }))
+        with patch.dict(os.environ, {"DEV": ""}):
+            _make_worker(queue, self.base / "failed")._scan_once()
+        payload = client.register_clip_metadados.call_args.args[0]
+        self.assertEqual(payload["camera_id"], "cam01")
+        self.assertEqual(payload["venue_id"], "captured-court")
+
     def test_worker_processes_file_in_own_queue(self, mock_api_cls, _ffprobe, _wm):
         """Worker scans its own queue_dir and processes the mp4 it finds."""
         mock_api_cls.return_value.is_configured.return_value = False

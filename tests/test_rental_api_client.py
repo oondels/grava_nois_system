@@ -60,3 +60,12 @@ class RentalApiClientTests(TestCase):
     def test_rejects_registration_without_clip(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "sem objeto clip"):
             GravaNoisAPIClient.extract_clip_registration({"data": {}})
+
+    def test_rental_registration_preserves_camera_and_omits_venue(self):
+        with patch.dict("os.environ", {"GN_DEVICE_MODE": "rental", "GN_DEVICE_ID": "rental-test", "GN_DEVICE_SECRET": "test-secret"}, clear=True):
+            client = GravaNoisAPIClient(api_base="https://api.example.test")
+        with patch.object(client, "_http_post_json", return_value={}) as post:
+            client.register_clip_metadados({"camera_id": "cam01", "venue_id": None, "sha256": "a" * 64, "meta": {}})
+        self.assertEqual(post.call_args.args[0], "https://api.example.test/api/videos/rental/metadata")
+        self.assertEqual(post.call_args.args[1]["camera_id"], "cam01")
+        self.assertNotIn("venue_id", post.call_args.args[1])

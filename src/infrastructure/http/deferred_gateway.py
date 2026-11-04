@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from src.services.clip_origin import clip_origin
 from src.application.dto import RemoteClipRegistration, UploadReceipt
 from src.application.exceptions import DeliveryStepError
 from src.services.api_client import GravaNoisAPIClient
@@ -76,8 +77,7 @@ class DeferredVideoGateway:
             digest = _sha256_file(artifact)
             response = self.client.register_clip_metadados(
                 {
-                    "venue_id": job.details.get("capture_venue_id") or job.details["venue_id"],
-                    **({"camera_id": job.camera_id.value} if job.details.get("camera_assignment_enabled") else {}),
+                    **clip_origin(job.details, job.details["venue_id"], job.camera_id.value),
                     "captured_at": job.details["captured_at"],
                     "duration_sec": metadata["duration_sec"],
                     "sha256": digest,

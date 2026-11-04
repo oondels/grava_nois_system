@@ -81,7 +81,7 @@ class RetryUploadTests(unittest.TestCase):
             root = Path(tmp)
             video = root / "clip.mp4"
             video.write_bytes(b"video")
-            (root / "clip.json").write_text(json.dumps({"status": "upload_pending", "attempts": 0}))
+            (root / "clip.json").write_text(json.dumps({"status": "upload_pending", "attempts": 0, "camera_id": "cam01", "camera_metadata_enabled": True, "capture_venue_id": "original"}))
             client = Mock(venue_id="venue")
             client.is_configured.return_value = True
             client.register_clip_metadados.return_value = {"success": True}
@@ -106,6 +106,9 @@ class RetryUploadTests(unittest.TestCase):
             self.assertFalse(video.exists())
             self.assertFalse((root / "clip.json").exists())
             client.finalize_clip_uploaded.assert_called_once()
+
+            self.assertEqual(client.register_clip_metadados.call_args.args[0]["camera_id"], "cam01")
+            self.assertEqual(client.register_clip_metadados.call_args.args[0]["venue_id"], "original")
 
     def test_dry_run_finalize_preserves_uploaded_video(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
