@@ -90,4 +90,4 @@ As specs são lookup e compressão de contexto. A fonte de verdade final continu
 
 Quando houver divergência, a spec deve ser atualizada para refletir o comportamento real do edge.
 
-Câmeras em quadras distintas do mesmo cliente: [contrato e rollout](system/CAMERA_VENUE_ASSIGNMENTS.md).
+Novas capturas fixed exigem vínculo câmera–quadra, inclusive na quadra principal; cadastrar antes de iniciar a captura. Câmeras em quadras distintas do mesmo cliente: [contrato e rollout](system/CAMERA_VENUE_ASSIGNMENTS.md).

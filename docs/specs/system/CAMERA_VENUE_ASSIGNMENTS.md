@@ -47,3 +47,21 @@ capturas. Colunas existentes são reutilizadas; nenhuma migration foi executada.
 Validação isolada com doubles não comprova persistência em produção ou hardware.
 
 Validação em 2026-11-04: 102 testes direcionados aprovados: worker, retry, gateway diferido, recuperação, rental, persistência e caracterização. Testes isolados, sem serviços reais.
+
+## Diagnóstico operacional de camera_venue_mismatch
+
+Um 403 com essa mensagem exige comparar o snapshot original (`camera_id`,
+`capture_venue_id` e instante enviado como `captured_at`) com o histórico da API.
+O worker imediato/retry usa `created_at` do sidecar como `captured_at`; não use a
+hora do retry para reconstruir a origem. Confira também o relógio do equipamento.
+Novos clipes incluem câmera mesmo sem `cameras[].venueId`: nesse caso, o vínculo
+com a quadra principal também precisa existir antes da captura.
+
+O cadastro é administrativo na API, por GET/PUT de
+`/admin/devices/:deviceId/cameras` (PUT acrescenta `/:cameraId`), usando a identidade
+técnica do equipamento e o ID exato da câmera. Configurar RTSP não cria esse vínculo.
+O procedimento e os limites temporais estão no contrato cruzado indicado no início.
+Pause capturas para alterar vínculos, confirme configuração e cadastro e só então
+retome e teste um clipe novo. Cadastro atual não corrige automaticamente capturas
+anteriores; preserve pendências e seus timestamps para reconciliação separada.
+Não desabilite o envio de `camera_id` nem edite o snapshot para contornar o 403.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Documentação operacional — 2026-11-05
+
+- `docs(device)`: destaca vínculo obrigatório inclusive na quadra principal e orienta diagnóstico do 403 sem alterar snapshots ou política de filas.
+
+
 ## Unreleased
 
 - `fix(video)`: envia camera_id em novos clipes independentemente de venueId explícito, preserva origem nos reenvios e mantém compatibilidade das filas antigas. API rental aceita e persiste câmera/dispositivo e rejeita conflito de origem. Sem nova migration; publicar API antes do edge.
